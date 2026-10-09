@@ -1,10 +1,11 @@
-//! EEWView（地震视监器）桌面客户端入口（P3：三源网络骨架）。
+//! EEWView（地震视监器）桌面客户端入口（P4：音效 + P3 三源网络）。
 
 use anyhow::Result;
 use eframe::egui;
+use jian_audio::AudioEngine;
 use jian_config::AppConfig;
-use jian_core::AppSnapshot;
-use jian_net::{apply_event, spawn_hub, NetRx};
+use jian_core::{AppSnapshot, IntensityKind};
+use jian_net::{apply_event, spawn_hub, NetEvent, NetRx};
 use jian_travel::TravelEngine;
 use jian_ui::MainShell;
 use std::path::PathBuf;
@@ -16,6 +17,16 @@ fn assets_root() -> PathBuf {
     dir.pop(); // crates
     dir.pop(); // repo root
     dir.join("assets")
+}
+
+/// JMA intensity_level 0–9 → catalog shindo_0…7
+fn shindo_file_level(level: u8) -> u8 {
+    match level {
+        0..=4 => level,
+        5 | 6 => 5,
+        7 | 8 => 6,
+        _ => 7,
+    }
 }
 
 fn main() -> Result<()> {
@@ -52,6 +63,22 @@ fn main() -> Result<()> {
         }
     };
 
+    let audio = match AudioEngine::from_catalog(
+        root.join("sound/catalog.json"),
+        root.join("sound"),
+        &cfg.audio.event_pack,
+        &cfg.audio.countdown_pack,
+        cfg.audio.master_volume,
+        cfg.audio.countdown_volume,
+        cfg.audio.mute,
+    ) {
+        Ok(a) => Some(a),
+        Err(e) => {
+            tracing::warn!("音效引擎未启动: {e:#}");
+            None
+        }
+    };
+
     let live = cfg.any_source_enabled();
     let mut snap = if live {
         tracing::info!("P3 live：空快照，等待 Wolfx / P2P / Jian 事件");
@@ -68,8 +95,13 @@ fn main() -> Result<()> {
         None
     };
 
-    // 有本机位置 + 走时表 + 活动事件时刷新倒计时
-    refresh_countdown(&mut snap, travel.as_ref(), cfg.local.latitude, cfg.local.longitude, None);
+    refresh_countdown(
+        &mut snap,
+        travel.as_ref(),
+        cfg.local.latitude,
+        cfg.local.longitude,
+        None,
+    );
 
     let mut shell = MainShell::default();
     shell.configure_map(
@@ -92,6 +124,7 @@ fn main() -> Result<()> {
     };
 
     let started = Instant::now();
+    let has_local = cfg.local.latitude.is_some() && cfg.local.longitude.is_some();
     eframe::run_native(
         "EEWView",
         options,
@@ -103,8 +136,10 @@ fn main() -> Result<()> {
                 started,
                 local_lat: cfg.local.latitude,
                 local_lon: cfg.local.longitude,
+                has_local,
                 _rt: rt,
                 net_rx,
+                audio,
                 auto_center_pending: live,
             }))
         }),
@@ -123,16 +158,17 @@ fn refresh_countdown(
     let (Some(eng), Some(lat), Some(lon), Some(ev)) =
         (travel, local_lat, local_lon, snap.active.as_ref())
     else {
-        if snap.countdown_s.is_some() && local_lat.is_none() {
-            // demo 占位可保留；live 无位置则清空
-            if snap.eew_list.is_empty() && snap.records.is_empty() {
-                // empty live
+        if local_lat.is_none() || local_lon.is_none() {
+            // 无本机位置：不驱动正式倒计时播报
+            if snap.eew_list.is_empty() && !snap.records.is_empty() {
+                // 仍可显示 demo 数字，但不强行清空
+            } else if snap.active.is_none() {
+                snap.countdown_s = None;
             }
         }
         return;
     };
     if ev.origin_ms <= 0 && elapsed.is_none() {
-        // 无发震时刻时不假装倒计时
         snap.countdown_s = None;
         return;
     }
@@ -152,9 +188,10 @@ struct JianApp {
     started: Instant,
     local_lat: Option<f64>,
     local_lon: Option<f64>,
+    has_local: bool,
     _rt: Runtime,
     net_rx: Option<NetRx>,
-    /// 收到首条带坐标的活动事件后居中一次
+    audio: Option<AudioEngine>,
     auto_center_pending: bool,
 }
 
@@ -162,6 +199,25 @@ impl eframe::App for JianApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(rx) = self.net_rx.as_mut() {
             while let Ok(ev) = rx.try_recv() {
+                if let NetEvent::Eew(ref report) = ev {
+                    if let Some(audio) = self.audio.as_mut() {
+                        let shindo = if report.intensity_kind == IntensityKind::JmaShindo
+                            && report.intensity_level > 0
+                        {
+                            Some(shindo_file_level(report.intensity_level))
+                        } else {
+                            None
+                        };
+                        audio.on_eew(
+                            &report.agency.0,
+                            &report.event_id,
+                            report.serial,
+                            false,
+                            false,
+                            shindo,
+                        );
+                    }
+                }
                 apply_event(&mut self.snap, ev);
             }
         }
@@ -175,7 +231,6 @@ impl eframe::App for JianApp {
             }
         }
 
-        // 真实 origin_ms：用墙钟差；否则（demo）用启动经过时间
         if let Some(ev) = self.snap.active.as_ref() {
             let elapsed = if ev.origin_ms > 0 {
                 let now = chrono::Utc::now().timestamp_millis();
@@ -190,6 +245,16 @@ impl eframe::App for JianApp {
                 self.local_lon,
                 Some(elapsed),
             );
+        }
+
+        // 倒计时播报：仅本机位置有效时（禁止无位置假播）
+        if let Some(audio) = self.audio.as_mut() {
+            let remain = if self.has_local {
+                self.snap.countdown_s
+            } else {
+                None
+            };
+            audio.tick_countdown(remain);
         }
 
         self.shell

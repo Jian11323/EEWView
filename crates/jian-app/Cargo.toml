@@ -13,6 +13,7 @@ jian-core = { workspace = true }
 jian-config = { workspace = true }
 jian-travel = { workspace = true }
 jian-net = { workspace = true }
+jian-audio = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
 tracing = { workspace = true }
