@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/jian-util",
+    "crates/jian-core",
+    "crates/jian-travel",
+    "crates/jian-config",
+    "crates/jian-net",
+    "crates/jian-audio",
+    "crates/jian-map",
+    "crates/jian-ui",
+    "crates/jian-app",
+    "tools/convert_travel_tables",
+]
+default-members = ["crates/jian-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Jian11323"]
+repository = "https://github.com/Jian11323/EEWView"
+
+[workspace.dependencies]
+jian-util = { path = "crates/jian-util" }
+jian-core = { path = "crates/jian-core" }
+jian-travel = { path = "crates/jian-travel" }
+jian-config = { path = "crates/jian-config" }
+jian-net = { path = "crates/jian-net" }
+jian-audio = { path = "crates/jian-audio" }
+jian-map = { path = "crates/jian-map" }
+jian-ui = { path = "crates/jian-ui" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+eframe = { version = "0.31", default-features = true }
+egui = "0.31"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+directories = "6"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+rodio = { version = "0.20", default-features = false, features = ["playback", "wav", "mp3"] }

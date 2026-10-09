@@ -1,0 +1,13 @@
+[package]
+name = "jian-map"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+egui = { workspace = true }
+jian-core = { workspace = true }
+jian-travel = { workspace = true }
+jian-util = { workspace = true }
+reqwest = { workspace = true }
+image = { workspace = true }
+tracing = { workspace = true }

@@ -1,0 +1,37 @@
+[ui]
+theme = "dark"
+show_nied_clock = false
+sidebar_default_tab = "eew"
+intensity_scale = "auto"
+
+[map]
+tile_base = "https://tilemap.sismotide.top"
+tile_source = "arcwob"
+default_lon = 135.0
+default_lat = 35.0
+default_zoom = 5.0
+
+[audio]
+event_pack = "srev"
+countdown_pack = "countdown"
+master_volume = 0.8
+countdown_volume = 1.0
+mute = false
+
+[travel]
+primary = "jma2001"
+fallback = "ak135"
+linear_last_resort = true
+
+[local]
+# latitude = 35.68
+# longitude = 139.76
+
+[sources.jian]
+enabled = true
+
+[sources.wolfx]
+enabled = true
+
+[sources.p2pquake]
+enabled = true

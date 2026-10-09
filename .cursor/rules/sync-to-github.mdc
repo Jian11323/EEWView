@@ -1,0 +1,31 @@
+---
+description: 每次修改必须同步文档并推送到 GitHub EEWView，防止丢代码
+alwaysApply: true
+---
+
+# 改完必推 GitHub（EEWView）
+
+远程仓库：https://github.com/Jian11323/EEWView  
+本地根目录：本 workspace（`jian-project` / EEWView）。
+
+## 硬性约定
+
+凡本轮对话中改动了代码、配置、资源或文档，在**向用户收尾回复之前**必须：
+
+1. **更新文档**：受影响的 `README.md`、`docs/**`（含未完成状态、进度表）写清楚，禁止只改代码不改文档。  
+2. **`git status` / `git diff` / 近期 log**：确认要提交的内容；**勿提交**密钥、`config/local.toml`、`.env`、`target/`、大体积原始走时包等（见 `.gitignore`）。  
+3. **`git add` + `git commit`**：说明写清「为什么」；用户未禁止提交时，按本规则主动提交。  
+4. **`git push origin`** 到 `main`（或当前跟踪分支）：本地改完却不推送视为未完成。  
+5. push 失败（鉴权/网络）时：在回复里写明失败原因与补救命令，**不得假装已同步**。
+
+## 禁止
+
+- 改完只说「已改好」却不 commit / 不 push  
+- 用 force push 覆盖 `main` 历史（除非用户明确要求）  
+- 把 Token、密码、地牛未授权素材当默认可再分发内容强行推送而不在 README 标明风险  
+
+## 正例
+
+```text
+改 UI / net → 更新 README 进度与 WIP 说明 → commit → push origin main → 再回复用户
+```

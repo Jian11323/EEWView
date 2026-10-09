@@ -1,0 +1,10 @@
+[package]
+name = "jian-ui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+egui = { workspace = true }
+jian-core = { workspace = true }
+jian-map = { workspace = true }
+jian-travel = { workspace = true }

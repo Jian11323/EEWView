@@ -1,0 +1,10 @@
+[package]
+name = "jian-travel"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+jian-util = { workspace = true }

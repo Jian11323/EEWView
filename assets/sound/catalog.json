@@ -1,0 +1,110 @@
+{
+  "version": 2,
+  "routing": {
+    "jma_eew": "srev",
+    "countdown": "countdown",
+    "default_eew": "srev",
+    "station": "station",
+    "ui": "ui"
+  },
+  "packs": {
+    "srev": {
+      "license": "CC-BY-SA-2.0",
+      "source": "SREV",
+      "use_for": ["jma_eew", "jma_tsunami", "jma_intensity"],
+      "format": "mp3",
+      "dir": "srev/",
+      "events": {
+        "issue": "srev/issue.mp3",
+        "caution": "srev/caution.mp3",
+        "warn": "srev/warn.mp3",
+        "update": "srev/update.mp3",
+        "final": "srev/final.mp3",
+        "cancel": "srev/cancel.mp3",
+        "prompt": "srev/prompt.mp3",
+        "hypocenter": "srev/hypocenter.mp3",
+        "detail": "srev/detail.mp3",
+        "shindo_0": "srev/shindo0.mp3",
+        "shindo_1": "srev/shindo1.mp3",
+        "shindo_2": "srev/shindo2.mp3",
+        "shindo_3": "srev/shindo3.mp3",
+        "shindo_4": "srev/shindo4.mp3",
+        "shindo_5": "srev/shindo5.mp3",
+        "shindo_6": "srev/shindo6.mp3",
+        "shindo_7": "srev/shindo7.mp3",
+        "tsunami1_issue": "srev/tsunami1issue.mp3",
+        "tsunami1_update": "srev/tsunami1update.mp3",
+        "tsunami1_switch": "srev/tsunami1switch.mp3",
+        "tsunami1_cancel": "srev/tsunami1cancel.mp3",
+        "tsunami2_issue": "srev/tsunami2issue.mp3",
+        "tsunami2_update": "srev/tsunami2update.mp3",
+        "tsunami2_switch": "srev/tsunami2switch.mp3",
+        "tsunami2_cancel": "srev/tsunami2cancel.mp3",
+        "tsunami3_issue": "srev/tsunami3issue.mp3",
+        "tsunami3_update": "srev/tsunami3update.mp3",
+        "tsunami3_cancel": "srev/tsunami3cancel.mp3"
+      }
+    },
+    "countdown": {
+      "license": "see ATTRIBUTION.md",
+      "source": "地牛Wake Up!",
+      "use_for": ["local_s_countdown"],
+      "format": "mp3/wav",
+      "dir": "countdown/",
+      "events": {
+        "countdown_loop": "countdown/countdown.wav",
+        "0s": "countdown/0s.mp3",
+        "1s": "countdown/1s.mp3",
+        "2s": "countdown/2s.mp3",
+        "3s": "countdown/3s.mp3",
+        "4s": "countdown/4s.mp3",
+        "5s": "countdown/5s.mp3",
+        "6s": "countdown/6s.mp3",
+        "7s": "countdown/7s.mp3",
+        "8s": "countdown/8s.mp3",
+        "9s": "countdown/9s.mp3",
+        "10s": "countdown/10s.mp3",
+        "20s": "countdown/20s.mp3",
+        "30s": "countdown/30s.mp3",
+        "40s": "countdown/40s.mp3",
+        "50s": "countdown/50s.mp3",
+        "60s": "countdown/60s.mp3"
+      }
+    },
+    "eew": {
+      "license": "CC0-1.0",
+      "source": "jian-synth",
+      "use_for": ["cea", "cenc", "cwa", "other_non_jma"],
+      "format": "wav",
+      "events": {
+        "issue": "eew/issue.wav",
+        "update": "eew/update.wav",
+        "final": "eew/final.wav",
+        "cancel": "eew/cancel.wav",
+        "prompt": "eew/prompt.wav",
+        "arrive_p": "eew/arrive_p.wav",
+        "arrive_s": "eew/arrive_s.wav"
+      }
+    },
+    "station": {
+      "license": "CC0-1.0",
+      "source": "jian-synth",
+      "format": "wav",
+      "events": {
+        "weak": "station/weak.wav",
+        "mid": "station/mid.wav",
+        "strong": "station/strong.wav"
+      }
+    },
+    "ui": {
+      "license": "CC0-1.0",
+      "source": "jian-synth",
+      "format": "wav",
+      "events": {
+        "connect_ok": "ui/connect_ok.wav",
+        "connect_fail": "ui/connect_fail.wav",
+        "notify": "ui/notify.wav"
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+[package]
+name = "jian-app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "jian"
+path = "src/main.rs"
+
+[dependencies]
+jian-ui = { workspace = true }
+jian-core = { workspace = true }
+jian-config = { workspace = true }
+jian-travel = { workspace = true }
+jian-net = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
