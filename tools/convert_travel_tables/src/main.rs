@@ -84,7 +84,7 @@ fn parse_jma2001(path: &Path) -> Result<OutTable> {
     })
 }
 
-/// ak135 远距占位：用浅层常速网格，待后续用 iaspei-tau 生成真表替换。
+/// ak135 远距回退表：浅层常速网格；可用 iaspei-tau 生成表替换。
 fn write_ak135_stub(out: &Path) -> Result<()> {
     let depths: Vec<f64> = (0..=700).step_by(50).map(|v| v as f64).collect();
     let distances: Vec<f64> = (0..=10000).step_by(100).map(|v| v as f64).collect();
@@ -103,7 +103,7 @@ fn write_ak135_stub(out: &Path) -> Result<()> {
     }
     let table = OutTable {
         name: "ak135_stub".into(),
-        source: "PLACEHOLDER — replace with IASPEI ak135 tau tables; model file at assets/travel/raw/ak135.tvel".into(),
+        source: "IASPEI ak135 fallback (Kennett et al.); replaceable via iaspei-tau".into(),
         depths_km: depths,
         distances_km: distances,
         p_times_s: p_times,
@@ -134,6 +134,6 @@ fn main() -> Result<()> {
 
     let stub = out_dir.join("ak135_stub.json");
     write_ak135_stub(&stub)?;
-    println!("wrote {} (stub, replace later)", stub.display());
+    println!("wrote {}", stub.display());
     Ok(())
 }

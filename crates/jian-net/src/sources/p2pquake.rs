@@ -1,4 +1,4 @@
-//! P2PQuake JSON API v2（HTTP 轮询骨架；WS 可选后续加强）。
+//! P2PQuake JSON API v2（HTTP 轮询）。
 
 use jian_config::P2pSourceConfig;
 use jian_core::HealthStatus;

@@ -101,7 +101,7 @@ pub fn cn_intensity_text(level: u8) -> &'static str {
     }
 }
 
-/// 按机构粗分色标（骨架：含 jma → JMA；cea/cenc 等 → CN）
+/// 按机构选择震度/烈度色标
 pub fn intensity_kind_for_agency(agency: &str) -> IntensityKind {
     let a = agency.to_ascii_lowercase();
     if a.contains("jma") || a.contains("wolfx") || a.contains("p2p") {

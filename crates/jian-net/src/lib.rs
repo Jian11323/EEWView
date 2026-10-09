@@ -49,7 +49,6 @@ pub fn apply_event(snap: &mut jian_core::AppSnapshot, ev: NetEvent) {
         NetEvent::Eew(e) => snap.upsert_eew(e),
         NetEvent::Record(r) => snap.upsert_record(r),
         NetEvent::Station(s) => {
-            // P5：测站；骨架仅追加不去重
             if !snap.stations.iter().any(|x| x.id == s.id) {
                 snap.stations.push(s);
             }

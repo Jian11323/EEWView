@@ -214,7 +214,7 @@ impl TileCache {
 fn fetch_tile(url: &str) -> Option<ColorImage> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(12))
-        .user_agent("jian-project/0.1 (P1 map)")
+        .user_agent("EEWView/0.1")
         .build()
         .ok()?;
     let resp = match client.get(url).send() {

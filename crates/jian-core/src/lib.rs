@@ -147,7 +147,7 @@ pub enum OverlayMode {
     MarkerOnly,
 }
 
-/// UI 用快照（假数据 / 真数据共用）
+/// UI 用快照
 #[derive(Debug, Clone)]
 pub struct AppSnapshot {
     pub active: Option<EewReport>,
@@ -164,11 +164,11 @@ pub struct AppSnapshot {
 }
 
 impl AppSnapshot {
-    /// 假数据，多条目便于 P2 列表点击联调
-    pub fn demo() -> Self {
+    /// 无上游时的离线示例数据
+    pub fn offline_sample() -> Self {
         let eew_a = EewReport {
             agency: AgencyId("jma-eew".into()),
-            event_id: "demo-001".into(),
+            event_id: "sample-001".into(),
             serial: 3,
             place: "千叶县西北部".into(),
             magnitude: 5.4,
@@ -182,7 +182,7 @@ impl AppSnapshot {
         };
         let eew_b = EewReport {
             agency: AgencyId("cea".into()),
-            event_id: "demo-002".into(),
+            event_id: "sample-002".into(),
             serial: 2,
             place: "四川阿坝州汶川县".into(),
             magnitude: 4.8,
@@ -196,7 +196,7 @@ impl AppSnapshot {
         };
         let eew_c = EewReport {
             agency: AgencyId("jma-eew".into()),
-            event_id: "demo-003".into(),
+            event_id: "sample-003".into(),
             serial: 1,
             place: "宫城县冲".into(),
             magnitude: 6.1,

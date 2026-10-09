@@ -1,4 +1,4 @@
-//! 音效引擎：catalog 路由 + rodio 播放 + 倒计时状态机（P4）。
+//! 音效引擎：catalog 路由 + rodio 播放 + 倒计时状态机。
 
 mod catalog;
 mod countdown;

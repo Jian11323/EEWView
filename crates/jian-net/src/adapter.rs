@@ -123,7 +123,7 @@ fn parse_jian_eew(agency: &str, data: &Value) -> Option<EewReport> {
             (if t == "—" { jma_shindo_text(level).into() } else { t.into() }, level)
         }
         IntensityKind::CnIntensity => {
-            // CEA 等常无烈度字段 → 占位，不上伪色档
+            // CEA 等常无烈度字段
             ("—".into(), 0)
         }
     };

@@ -1,4 +1,4 @@
-//! EEWView（地震视监器）桌面客户端入口（P4：音效 + P3 三源网络）。
+//! EEWView（地震视监器）桌面客户端入口。
 
 use anyhow::Result;
 use eframe::egui;
@@ -81,11 +81,11 @@ fn main() -> Result<()> {
 
     let live = cfg.any_source_enabled();
     let mut snap = if live {
-        tracing::info!("P3 live：空快照，等待 Wolfx / P2P / Jian 事件");
+        tracing::info!("waiting for source events");
         AppSnapshot::empty()
     } else {
-        tracing::info!("全部数据源关闭 → 使用 demo 假数据");
-        AppSnapshot::demo()
+        tracing::info!("all sources disabled → offline sample");
+        AppSnapshot::offline_sample()
     };
 
     let rt = Runtime::new()?;
@@ -158,13 +158,8 @@ fn refresh_countdown(
     let (Some(eng), Some(lat), Some(lon), Some(ev)) =
         (travel, local_lat, local_lon, snap.active.as_ref())
     else {
-        if local_lat.is_none() || local_lon.is_none() {
-            // 无本机位置：不驱动正式倒计时播报
-            if snap.eew_list.is_empty() && !snap.records.is_empty() {
-                // 仍可显示 demo 数字，但不强行清空
-            } else if snap.active.is_none() {
-                snap.countdown_s = None;
-            }
+        if (local_lat.is_none() || local_lon.is_none()) && snap.active.is_none() {
+            snap.countdown_s = None;
         }
         return;
     };

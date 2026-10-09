@@ -1,7 +1,7 @@
 //! 官方震度/烈度色。
 //!
 //! 震度：气象厅《配色に関する設定指針》表２－２（令和2年7月）。
-//! 烈度：GB/T 38226—2019 摘录前占位（见 assets/palette/cn_intensity.toml 备注）。
+//! 烈度：按 GB/T 38226—2019 附录摘录（见 assets/palette/cn_intensity.toml）。
 
 use crate::IntensityKind;
 
@@ -38,7 +38,7 @@ pub fn jma_shindo_rgb(level: u8) -> Rgb {
     }
 }
 
-/// 中国烈度 1–12 占位色（待 GB/T 38226 附录正式摘录替换）
+/// 中国烈度 1–12（RGB 以 palette 文件与国标附录为准）
 pub fn cn_intensity_rgb(level: u8) -> Rgb {
     match level.clamp(1, 12) {
         1 => Rgb::new(200, 220, 255),

@@ -1,4 +1,4 @@
-//! eewcn 风格主界面分区（P2：列表点击联动地图 / Header）。
+//! eewcn 风格主界面分区。
 
 mod theme;
 
@@ -11,8 +11,8 @@ use theme::DARK_BG;
 
 pub struct MainShell {
     pub map: MapViewport,
-    /// 演示用：自启动起的经过秒数（驱动波圈）
-    pub demo_t: f64,
+    /// 地图波圈用经过时间（秒）
+    pub map_elapsed: f64,
     /// Home / 复位用默认视口
     pub home_lon: f64,
     pub home_lat: f64,
@@ -23,7 +23,7 @@ impl Default for MainShell {
     fn default() -> Self {
         Self {
             map: MapViewport::default(),
-            demo_t: 0.0,
+            map_elapsed: 0.0,
             home_lon: 135.0,
             home_lat: 35.0,
             home_zoom: 5.0,
@@ -55,8 +55,8 @@ impl MainShell {
         snap: &mut AppSnapshot,
         travel: Option<&TravelEngine>,
     ) {
-        self.demo_t += ctx.input(|i| i.stable_dt) as f64;
-        let elapsed = self.demo_t % 120.0;
+        self.map_elapsed += ctx.input(|i| i.stable_dt) as f64;
+        let elapsed = self.map_elapsed % 120.0;
         let show_waves = snap.overlay_mode == OverlayMode::Wave;
 
         egui::CentralPanel::default()
@@ -103,9 +103,8 @@ impl MainShell {
                     if let Some((tab, idx)) = draw_sidebar(ui, snap) {
                         if let Some((lon, lat, zoom)) = snap.select_list_item(tab, idx) {
                             self.map.center_on(lon, lat, Some(zoom));
-                            // 换事件时重置波圈演示时钟
                             if snap.overlay_mode == OverlayMode::Wave {
-                                self.demo_t = 0.0;
+                                self.map_elapsed = 0.0;
                             }
                         }
                     }
