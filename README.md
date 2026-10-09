@@ -19,9 +19,6 @@
 
 完成后会在本 README 与 Release 中明确标注「可用」；在此之前请以 **未完成** 为准。
 
----
-
-> **协作纪律**：每次本地改代码、配置或资源后，必须①同步更新本 README / `docs/`，②`git commit` 并 **push 到本仓库**，防止丢代码或本地乱改无法溯源。详见 `.cursor/rules/sync-to-github.mdc`。
 
 ## 界面（地震情报实况栏）
 

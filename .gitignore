@@ -13,9 +13,10 @@
 # MSVC Windows builds of unix style name
 *.pdb
 
-# ===== IDE / OS =====
+# ===== IDE / OS / 编辑器本地 =====
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 *~
