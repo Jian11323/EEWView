@@ -47,3 +47,8 @@ config/local.toml
 
 # ===== 地牛倒计时：非自由许可，默认不进公开仓库 =====
 assets/sound/countdown/
+
+# Python
+**/__pycache__/
+*.py[cod]
+
