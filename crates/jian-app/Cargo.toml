@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 jian-ui = { workspace = true }
+jian-map = { workspace = true }
 jian-core = { workspace = true }
 jian-config = { workspace = true }
 jian-travel = { workspace = true }

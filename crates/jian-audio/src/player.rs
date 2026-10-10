@@ -42,6 +42,12 @@ impl Player {
         self.apply_volumes();
     }
 
+    pub fn set_volumes(&mut self, master: f32, countdown_vol: f32) {
+        self.master = master.clamp(0.0, 1.0);
+        self.countdown_vol = countdown_vol.clamp(0.0, 1.0);
+        self.apply_volumes();
+    }
+
     fn apply_volumes(&self) {
         if self.mute {
             self.event_sink.set_volume(0.0);

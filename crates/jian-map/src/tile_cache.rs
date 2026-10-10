@@ -156,12 +156,12 @@ impl TileCache {
 
         let (cz, x0, y0, x1, y1) =
             projection::visible_tiles(center_lon, center_lat, zoom, rect, 1);
-        let _ = cz; // visible_tiles 已按 floor(zoom) 算 z
+        let _ = cz;
         for y in y0..=y1 {
             for x in x0..=x1 {
                 self.enqueue(TileId {
                     z,
-                    x: x as u32,
+                    x: projection::wrap_tile_x(x, z),
                     y: y as u32,
                 });
             }
@@ -176,9 +176,10 @@ impl TileCache {
             for x in x0..=x1 {
                 let id = TileId {
                     z,
-                    x: x as u32,
+                    x: projection::wrap_tile_x(x, z),
                     y: y as u32,
                 };
+                // 屏幕位置用未折绕的列号，实现横向循环铺贴
                 let (twx, twy) = projection::tile_world_origin(x, y, z);
                 let screen_min = egui::pos2(
                     origin.x + ((twx - cx) as f32) * scale,

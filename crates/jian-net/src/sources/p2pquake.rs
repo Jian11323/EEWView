@@ -3,25 +3,26 @@
 use jian_config::P2pSourceConfig;
 use jian_core::HealthStatus;
 use std::time::Duration;
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
 use crate::adapter::ingest_p2p_items;
 use crate::bus::{emit_health, NetTx};
 
-pub fn spawn(tx: NetTx, cfg: P2pSourceConfig) {
+pub fn spawn(tx: NetTx, cfg: P2pSourceConfig) -> Vec<JoinHandle<()>> {
     if !cfg.enabled {
         emit_health(&tx, "p2pquake", HealthStatus::Abnormal);
-        return;
+        return Vec::new();
     }
 
     let poll = cfg.poll_secs.max(10);
     let base = cfg.http_history.clone();
     info!(%base, poll_secs = poll, "p2pquake: spawn http poll");
 
-    tokio::spawn(async move {
+    vec![tokio::spawn(async move {
         let client = match reqwest::Client::builder()
-            .user_agent("jian-project/0.1 (research client)")
+            .user_agent("EEWView/0.0.1 (+https://github.com/Jian11323/EEWView)")
             .timeout(Duration::from_secs(25))
             .build()
         {
@@ -58,5 +59,5 @@ pub fn spawn(tx: NetTx, cfg: P2pSourceConfig) {
             }
             sleep(Duration::from_secs(poll)).await;
         }
-    });
+    })]
 }

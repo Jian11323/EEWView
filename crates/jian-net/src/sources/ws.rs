@@ -17,7 +17,7 @@ pub struct WsLoopOpts {
     pub backoff_max_secs: u64,
 }
 
-/// 收到文本帧时调用；返回 true 表示该帧为业务相关（可把健康态标为正常）
+/// 收到文本帧时调用
 pub async fn run_ws_loop<F>(tx: NetTx, opts: WsLoopOpts, mut on_text: F)
 where
     F: FnMut(&NetTx, &str) + Send + 'static,
@@ -37,10 +37,26 @@ where
                         warn!(source = opts.source, "on_open send failed: {e}");
                     }
                 }
+                let mut rate_limited = false;
                 while let Some(msg) = read.next().await {
                     match msg {
                         Ok(Message::Text(t)) => {
-                            on_text(&tx, t.as_str());
+                            let text = t.as_str();
+                            if is_conn_limit_error(text) {
+                                warn!(
+                                    source = opts.source,
+                                    "服务器连接数超限，请关闭其它占用同令牌或同 IP 的客户端后重试"
+                                );
+                                emit_health(&tx, opts.source, HealthStatus::Abnormal);
+                                rate_limited = true;
+                                break;
+                            }
+                            if is_error_frame(text) {
+                                let msg = error_message(text).unwrap_or("error");
+                                warn!(source = opts.source, message = %msg, "上游 error 帧");
+                                emit_health(&tx, opts.source, HealthStatus::Abnormal);
+                            }
+                            on_text(&tx, text);
                         }
                         Ok(Message::Ping(p)) => {
                             let _ = write.send(Message::Pong(p)).await;
@@ -56,6 +72,9 @@ where
                         _ => {}
                     }
                 }
+                if rate_limited {
+                    backoff = backoff.max(45);
+                }
                 emit_health(&tx, opts.source, HealthStatus::Fluctuating);
             }
             Err(e) => {
@@ -65,6 +84,30 @@ where
         }
 
         sleep(Duration::from_secs(backoff)).await;
-        backoff = (backoff * 2).min(opts.backoff_max_secs);
+        backoff = (backoff * 2).min(opts.backoff_max_secs.max(60));
     }
+}
+
+fn is_error_frame(text: &str) -> bool {
+    text.contains("\"type\":\"error\"") || text.contains("\"type\": \"error\"")
+}
+
+fn is_conn_limit_error(text: &str) -> bool {
+    if !is_error_frame(text) {
+        return false;
+    }
+    text.contains("连接限制")
+        || text.contains("conn_limit")
+        || text.contains("超过服务器连接")
+        || text.contains("max_connections")
+}
+
+fn error_message(text: &str) -> Option<&str> {
+    let key = "\"message\"";
+    let i = text.find(key)?;
+    let rest = &text[i + key.len()..];
+    let start = rest.find('"')? + 1;
+    let rest = &rest[start..];
+    let end = rest.find('"')?;
+    Some(&rest[..end])
 }

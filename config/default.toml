@@ -5,7 +5,11 @@ sidebar_default_tab = "eew"
 intensity_scale = "auto"
 
 [map]
+# auto = 暗色要石矢量 / 亮色地形瓦片；也可强制 vector | tiles | both
+basemap = "auto"
+geodata_dir = "geodata"
 tile_base = "https://tilemap.sismotide.top"
+# 自有海洋地形底图（亮色模式）
 tile_source = "arcwob"
 default_lon = 135.0
 default_lat = 35.0
@@ -29,9 +33,36 @@ linear_last_resort = true
 
 [sources.jian]
 enabled = true
+station_enabled = true
+# station_ws_url = "wss://api.sismotide.top/kmoni"
 
 [sources.wolfx]
 enabled = true
+eew_enabled = true
+eqlist_enabled = true
 
 [sources.p2pquake]
 enabled = true
+
+[filters]
+place_whitelist = ""
+
+[filters.eew_agency]
+jma = true
+cenc = true
+cwa = true
+kma = true
+early_est = true
+sa = true
+
+[filters.record_mag]
+cenc = 0.0
+usgs = 0.0
+cwa = 0.0
+jma = 0.0
+hko = 0.0
+emsc = 0.0
+ningxia = 0.0
+yunnan = 0.0
+beijing = 0.0
+other = -1.0

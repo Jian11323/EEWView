@@ -58,6 +58,34 @@ pub fn jma_shindo_text(level: u8) -> &'static str {
     }
 }
 
+/// 計測震度（仪器震度）→ JMA 震度阶级档位 0–9 与展示文案。
+///
+/// 分界按气象厅震度階級の解説（0.5 / 1.5 / … / 6.5）。
+pub fn jma_from_instrumental(v: f64) -> (u8, &'static str) {
+    let level = if v < 0.5 {
+        0
+    } else if v < 1.5 {
+        1
+    } else if v < 2.5 {
+        2
+    } else if v < 3.5 {
+        3
+    } else if v < 4.5 {
+        4
+    } else if v < 5.0 {
+        5
+    } else if v < 5.5 {
+        6
+    } else if v < 6.0 {
+        7
+    } else if v < 6.5 {
+        8
+    } else {
+        9
+    };
+    (level, jma_shindo_text(level))
+}
+
 /// 中国烈度罗马数字或阿拉伯数字 → 1–12
 pub fn cn_intensity_level(text: &str) -> u8 {
     let t = text.trim();
@@ -101,19 +129,88 @@ pub fn cn_intensity_text(level: u8) -> &'static str {
     }
 }
 
+/// 按界面「烈度标度」偏好重映射展示（`auto` 保持原文；`jma` / `cn` 强制标度）。
+pub fn prefer_intensity_scale(
+    kind: IntensityKind,
+    level: u8,
+    text: &str,
+    scale: &str,
+) -> (IntensityKind, u8, String) {
+    match scale.trim().to_ascii_lowercase().as_str() {
+        "jma" => {
+            let lv = match kind {
+                IntensityKind::JmaShindo => level.min(9),
+                IntensityKind::CnIntensity => cn_to_jma_level(level),
+            };
+            (IntensityKind::JmaShindo, lv, jma_shindo_text(lv).into())
+        }
+        "cn" => {
+            let lv = match kind {
+                IntensityKind::CnIntensity => level.clamp(1, 12),
+                IntensityKind::JmaShindo => jma_to_cn_level(level),
+            };
+            (IntensityKind::CnIntensity, lv, cn_intensity_text(lv).into())
+        }
+        _ => {
+            let label = if text.trim().is_empty() {
+                match kind {
+                    IntensityKind::JmaShindo => jma_shindo_text(level).into(),
+                    IntensityKind::CnIntensity => cn_intensity_text(level).into(),
+                }
+            } else {
+                text.to_string()
+            };
+            (kind, level, label)
+        }
+    }
+}
+
+fn jma_to_cn_level(jma: u8) -> u8 {
+    // 粗映射：震度 0–7 阶级 → 烈度约 1–10
+    match jma.min(9) {
+        0 => 1,
+        1 => 2,
+        2 => 3,
+        3 => 4,
+        4 => 5,
+        5 => 6,
+        6 => 7,
+        7 => 8,
+        8 => 9,
+        _ => 10,
+    }
+}
+
+fn cn_to_jma_level(cn: u8) -> u8 {
+    match cn.clamp(1, 12) {
+        1 => 0,
+        2 => 1,
+        3 => 2,
+        4 => 3,
+        5 => 4,
+        6 => 5,
+        7 => 6,
+        8 => 7,
+        9 => 8,
+        _ => 9,
+    }
+}
+
 /// 按机构选择震度/烈度色标
 pub fn intensity_kind_for_agency(agency: &str) -> IntensityKind {
-    let a = agency.to_ascii_lowercase();
-    if a.contains("jma") || a.contains("wolfx") || a.contains("p2p") {
-        IntensityKind::JmaShindo
-    } else if a.contains("cea")
-        || a.contains("cenc")
-        || a.contains("cwa")
-        || a.contains("ningxia")
-        || a.contains("yunnan")
-    {
-        IntensityKind::CnIntensity
-    } else {
-        IntensityKind::JmaShindo
+    use crate::agency::{agency_family, AgencyFamily};
+    match agency_family(agency) {
+        AgencyFamily::Jma | AgencyFamily::Cwa => IntensityKind::JmaShindo,
+        AgencyFamily::Kma => IntensityKind::JmaShindo,
+        AgencyFamily::Cn
+        | AgencyFamily::Ningxia
+        | AgencyFamily::Yunnan
+        | AgencyFamily::Beijing
+        | AgencyFamily::Usgs
+        | AgencyFamily::Hko
+        | AgencyFamily::Emsc
+        | AgencyFamily::EarlyEst
+        | AgencyFamily::Sa
+        | AgencyFamily::Other => IntensityKind::CnIntensity,
     }
 }

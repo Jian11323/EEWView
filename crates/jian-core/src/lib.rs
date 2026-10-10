@@ -1,13 +1,23 @@
 //! 领域模型与官方色标。
 
+pub mod agency;
+pub mod estimate;
 pub mod intensity;
 pub mod palette;
 
 use serde::{Deserialize, Serialize};
 
+pub use agency::{
+    agency_bracket, agency_family, cea_pr_agency_id, place_with_agency, AgencyFamily,
+    EEW_FILTER_FAMILIES, RECORD_FILTER_FAMILIES,
+};
+pub use estimate::{
+    calc_csis, calc_jma_instrumental, estimate_at_site, estimate_epicentral, fill_intensity,
+    hypocentral_km,
+};
 pub use intensity::{
-    cn_intensity_level, cn_intensity_text, intensity_kind_for_agency, jma_shindo_level,
-    jma_shindo_text,
+    cn_intensity_level, cn_intensity_text, intensity_kind_for_agency, jma_from_instrumental,
+    jma_shindo_level, jma_shindo_text, prefer_intensity_scale,
 };
 
 /// 机构 / 源 ID（与 WS type 对齐）
@@ -38,6 +48,10 @@ pub struct EewReport {
     pub intensity_kind: IntensityKind,
     /// 用于上色的档位索引（JMA: 0–9 对应 0～7；CN: 1–12）
     pub intensity_level: u8,
+    #[serde(default)]
+    pub is_final: bool,
+    #[serde(default)]
+    pub is_cancel: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +66,9 @@ pub struct EqRecord {
     pub latitude: f64,
     pub longitude: f64,
     pub depth_km: f64,
+    /// 发震时刻 unix ms（0 表示未知）
+    #[serde(default)]
+    pub origin_ms: i64,
 }
 
 impl EqRecord {
@@ -66,10 +83,12 @@ impl EqRecord {
             depth_km: self.depth_km,
             latitude: self.latitude,
             longitude: self.longitude,
-            origin_ms: 0,
+            origin_ms: self.origin_ms,
             max_intensity_text: self.intensity_text.clone(),
             intensity_kind: self.intensity_kind,
             intensity_level: self.intensity_level,
+            is_final: false,
+            is_cancel: false,
         }
     }
 }
@@ -101,6 +120,8 @@ impl StationSample {
             max_intensity_text: self.intensity_text.clone(),
             intensity_kind: self.intensity_kind,
             intensity_level: self.intensity_level,
+            is_final: false,
+            is_cancel: false,
         }
     }
 }
@@ -161,6 +182,8 @@ pub struct AppSnapshot {
     pub health_p2p: HealthStatus,
     pub tab: SidebarTab,
     pub selection: Option<ListSelection>,
+    /// 图例 P-S：是否绘制走时波圈
+    pub show_wave_rings: bool,
 }
 
 impl AppSnapshot {
@@ -179,20 +202,40 @@ impl AppSnapshot {
             max_intensity_text: "5弱".into(),
             intensity_kind: IntensityKind::JmaShindo,
             intensity_level: 5,
+            is_final: false,
+            is_cancel: false,
         };
         let eew_b = EewReport {
             agency: AgencyId("cea".into()),
             event_id: "sample-002".into(),
             serial: 2,
-            place: "四川阿坝州汶川县".into(),
-            magnitude: 4.8,
+            place: "缅甸".into(),
+            magnitude: 4.1,
             depth_km: 12.0,
-            latitude: 31.5,
-            longitude: 103.6,
+            latitude: 22.0,
+            longitude: 98.5,
             origin_ms: 0,
             max_intensity_text: "Ⅵ".into(),
             intensity_kind: IntensityKind::CnIntensity,
             intensity_level: 6,
+            is_final: false,
+            is_cancel: false,
+        };
+        let eew_pr = EewReport {
+            agency: AgencyId("cea-pr:四川".into()),
+            event_id: "sample-002b".into(),
+            serial: 1,
+            place: "四川阿坝州红原县".into(),
+            magnitude: 4.4,
+            depth_km: 5.0,
+            latitude: 33.0,
+            longitude: 102.9,
+            origin_ms: 0,
+            max_intensity_text: "Ⅵ".into(),
+            intensity_kind: IntensityKind::CnIntensity,
+            intensity_level: 6,
+            is_final: false,
+            is_cancel: false,
         };
         let eew_c = EewReport {
             agency: AgencyId("jma-eew".into()),
@@ -207,6 +250,8 @@ impl AppSnapshot {
             max_intensity_text: "5强".into(),
             intensity_kind: IntensityKind::JmaShindo,
             intensity_level: 6,
+            is_final: false,
+            is_cancel: false,
         };
 
         Self {
@@ -224,6 +269,7 @@ impl AppSnapshot {
                     latitude: 31.5,
                     longitude: 103.6,
                     depth_km: 12.0,
+                    origin_ms: 0,
                 },
                 EqRecord {
                     agency: AgencyId("jma".into()),
@@ -236,6 +282,7 @@ impl AppSnapshot {
                     latitude: 35.7,
                     longitude: 140.1,
                     depth_km: 40.0,
+                    origin_ms: 0,
                 },
                 EqRecord {
                     agency: AgencyId("jma".into()),
@@ -248,9 +295,10 @@ impl AppSnapshot {
                     latitude: 37.4,
                     longitude: 140.4,
                     depth_km: 10.0,
+                    origin_ms: 0,
                 },
             ],
-            eew_list: vec![eew_a, eew_b, eew_c],
+            eew_list: vec![eew_a, eew_b, eew_pr, eew_c],
             stations: vec![
                 StationSample {
                     id: "TOKYO".into(),
@@ -289,6 +337,7 @@ impl AppSnapshot {
                 tab: SidebarTab::Eew,
                 index: 0,
             }),
+            show_wave_rings: true,
         }
     }
 
@@ -338,19 +387,28 @@ impl AppSnapshot {
             health_p2p: HealthStatus::Abnormal,
             tab: SidebarTab::Eew,
             selection: None,
+            show_wave_rings: true,
         }
     }
 
     pub fn set_health(&mut self, source: &str, status: HealthStatus) {
         match source {
             "jian" => self.health_jian = status,
+            // 测站 /kmoni 计入 Jian：无 /all 令牌时仍可显示「正常」
+            "kmoni" => {
+                if status == HealthStatus::Normal {
+                    self.health_jian = HealthStatus::Normal;
+                } else if self.health_jian != HealthStatus::Normal {
+                    self.health_jian = status;
+                }
+            }
             "wolfx" => self.health_wolfx = status,
             "p2pquake" | "p2p" => self.health_p2p = status,
             _ => {}
         }
     }
 
-    /// 插入/更新 EEW；同 agency+event_id 保留更高 serial
+    /// 插入/更新 EEW；同 agency+event_id 保留更高 serial；列表按发震时刻新→旧
     pub fn upsert_eew(&mut self, report: EewReport) {
         let key = (report.agency.0.clone(), report.event_id.clone());
         if let Some(pos) = self
@@ -364,11 +422,13 @@ impl AppSnapshot {
                 return;
             }
         } else {
-            self.eew_list.insert(0, report.clone());
-            if self.eew_list.len() > 50 {
-                self.eew_list.truncate(50);
-            }
+            self.eew_list.push(report.clone());
         }
+        sort_eew_newest_first(&mut self.eew_list);
+        if self.eew_list.len() > 50 {
+            self.eew_list.truncate(50);
+        }
+        self.rebind_eew_selection(&key);
 
         // 无选中，或选中正是该 EEW → 刷新 Header；用户点了 Records/Station 则不抢焦点
         let refresh_active = match &self.selection {
@@ -399,7 +459,24 @@ impl AppSnapshot {
         }
     }
 
-    /// 插入速报；按 agency+place+time 粗去重
+    fn rebind_eew_selection(&mut self, key: &(String, String)) {
+        if let Some(sel) = self.selection {
+            if sel.tab == SidebarTab::Eew {
+                if let Some(i) = self
+                    .eew_list
+                    .iter()
+                    .position(|e| e.agency.0 == key.0 && e.event_id == key.1)
+                {
+                    self.selection = Some(ListSelection {
+                        tab: SidebarTab::Eew,
+                        index: i,
+                    });
+                }
+            }
+        }
+    }
+
+    /// 插入速报；按 agency+place+time 粗去重；列表按发震时刻新→旧
     pub fn upsert_record(&mut self, record: EqRecord) {
         let dup = self.records.iter().any(|r| {
             r.agency == record.agency
@@ -410,9 +487,80 @@ impl AppSnapshot {
         if dup {
             return;
         }
-        self.records.insert(0, record);
+        self.records.push(record);
+        sort_records_newest_first(&mut self.records);
         if self.records.len() > 80 {
             self.records.truncate(80);
         }
+        if let Some(sel) = self.selection {
+            if sel.tab == SidebarTab::Records {
+                // 新项插入后下标可能变化；保持选中项身份
+                if let Some(cur) = self.active.as_ref() {
+                    if let Some(i) = self.records.iter().position(|r| {
+                        r.agency.0 == cur.agency.0 && r.place == cur.place && r.origin_ms == cur.origin_ms
+                    }) {
+                        self.selection = Some(ListSelection {
+                            tab: SidebarTab::Records,
+                            index: i,
+                        });
+                    }
+                }
+            }
+        }
     }
+
+    /// 用一帧有感测站快照替换列表（按震度降序，上限 120）
+    pub fn replace_stations(&mut self, mut stations: Vec<StationSample>) {
+        let keep_id = self
+            .active
+            .as_ref()
+            .and_then(|e| e.event_id.strip_prefix("station:"))
+            .map(|s| s.to_string());
+
+        stations.sort_by(|a, b| {
+            b.intensity_level
+                .cmp(&a.intensity_level)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        if stations.len() > 120 {
+            stations.truncate(120);
+        }
+        self.stations = stations;
+
+        if let Some(id) = keep_id {
+            if let Some((i, s)) = self
+                .stations
+                .iter()
+                .enumerate()
+                .find(|(_, s)| s.id == id)
+            {
+                self.active = Some(s.as_header_report());
+                self.overlay_mode = OverlayMode::MarkerOnly;
+                self.selection = Some(ListSelection {
+                    tab: SidebarTab::Station,
+                    index: i,
+                });
+            }
+        }
+    }
+}
+
+fn recency_ms(origin_ms: i64) -> i64 {
+    if origin_ms <= 0 {
+        i64::MIN / 4
+    } else {
+        origin_ms
+    }
+}
+
+fn sort_eew_newest_first(list: &mut [EewReport]) {
+    list.sort_by(|a, b| {
+        recency_ms(b.origin_ms)
+            .cmp(&recency_ms(a.origin_ms))
+            .then(b.serial.cmp(&a.serial))
+    });
+}
+
+fn sort_records_newest_first(list: &mut [EqRecord]) {
+    list.sort_by(|a, b| recency_ms(b.origin_ms).cmp(&recency_ms(a.origin_ms)));
 }

@@ -24,6 +24,9 @@
 Thumbs.db
 Desktop.ini
 
+# ===== 发行打包输出 =====
+/dist/
+
 # ===== 本地临时 =====
 *.tmp
 *.bak

@@ -1,0 +1,5642 @@
+{
+  "description": "由 fe_fix.txt 的 feNumbers 与 feNames 反推的经纬度外包矩形（与 korea_region_data.json 同结构）；坐标为 4 位小数。含 feNumbers 未引用条目的手工 bbox、显式父级并集、按前缀/方位自动补全的统称（与 fe_fix 中文地名风格一致）。日本：自 data/maps/global.geo.json 中 JPN 国界补「日本全境」，并与「日本」「日本列岛」bbox 并集。",
+  "source_file": "fe_fix.txt",
+  "coordinate_decimals": 4,
+  "japan_land_bbox_source": "data/maps/global.geo.json (Feature.id=JPN)",
+  "regions": [
+    {
+      "name": "阿拉斯加州中部",
+      "lat_min": 63.0,
+      "lat_max": 66.5,
+      "lon_min": -154.0,
+      "lon_max": -141.0
+    },
+    {
+      "name": "阿拉斯加州南部",
+      "lat_min": 62.0,
+      "lat_max": 65.0,
+      "lon_min": -161.0,
+      "lon_max": -141.0
+    },
+    {
+      "name": "白令海",
+      "lat_min": 59.0,
+      "lat_max": 62.0,
+      "lon_min": -168.0,
+      "lon_max": -141.0
+    },
+    {
+      "name": "科曼多尔群岛地区",
+      "lat_min": 54.0,
+      "lat_max": 64.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "尼尔群岛",
+      "lat_min": 53.0,
+      "lat_max": 57.0,
+      "lon_min": 164.0,
+      "lon_max": 170.0
+    },
+    {
+      "name": "拉特群岛",
+      "lat_min": 51.0,
+      "lat_max": 55.0,
+      "lon_min": 170.0,
+      "lon_max": 175.0
+    },
+    {
+      "name": "安德烈亚诺夫群岛",
+      "lat_min": 50.0,
+      "lat_max": 54.0,
+      "lon_min": 175.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "普里比洛夫群岛地区",
+      "lat_min": 50.0,
+      "lat_max": 54.0,
+      "lon_min": -180.0,
+      "lon_max": -172.0
+    },
+    {
+      "name": "福克斯群岛",
+      "lat_min": 56.0,
+      "lat_max": 58.0,
+      "lon_min": -172.0,
+      "lon_max": -167.0
+    },
+    {
+      "name": "乌尼马克岛地区",
+      "lat_min": 51.0,
+      "lat_max": 56.0,
+      "lon_min": -172.0,
+      "lon_max": -165.0
+    },
+    {
+      "name": "布里斯托湾",
+      "lat_min": 53.0,
+      "lat_max": 56.0,
+      "lon_min": -165.0,
+      "lon_max": -163.0
+    },
+    {
+      "name": "阿拉斯加半岛",
+      "lat_min": 56.0,
+      "lat_max": 59.0,
+      "lon_min": -163.0,
+      "lon_max": -158.0
+    },
+    {
+      "name": "科迪亚克岛地区",
+      "lat_min": 54.0,
+      "lat_max": 59.0,
+      "lon_min": -163.0,
+      "lon_max": -154.0
+    },
+    {
+      "name": "基奈半岛",
+      "lat_min": 56.0,
+      "lat_max": 59.0,
+      "lon_min": -155.0,
+      "lon_max": -151.0
+    },
+    {
+      "name": "阿拉斯加湾",
+      "lat_min": 59.0,
+      "lat_max": 61.0,
+      "lon_min": -152.0,
+      "lon_max": -148.0
+    },
+    {
+      "name": "阿留申群岛以南",
+      "lat_min": 55.0,
+      "lat_max": 60.0,
+      "lon_min": -151.0,
+      "lon_max": -142.0
+    },
+    {
+      "name": "阿拉斯加州以南",
+      "lat_min": 45.0,
+      "lat_max": 53.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "加拿大育空地区南部",
+      "lat_min": 45.0,
+      "lat_max": 56.0,
+      "lon_min": -165.0,
+      "lon_max": -142.0
+    },
+    {
+      "name": "阿拉斯加州东南部",
+      "lat_min": 60.0,
+      "lat_max": 65.0,
+      "lon_min": -141.0,
+      "lon_max": -124.0
+    },
+    {
+      "name": "阿拉斯加州东南部沿岸远海",
+      "lat_min": 54.0,
+      "lat_max": 61.0,
+      "lon_min": -142.0,
+      "lon_max": -130.0
+    },
+    {
+      "name": "温哥华岛以西",
+      "lat_min": 55.0,
+      "lat_max": 59.0,
+      "lon_min": -142.0,
+      "lon_max": -135.0
+    },
+    {
+      "name": "夏洛特皇后群岛地区",
+      "lat_min": 45.0,
+      "lat_max": 55.0,
+      "lon_min": -142.0,
+      "lon_max": -132.0
+    },
+    {
+      "name": "加拿大不列颠哥伦比亚省",
+      "lat_min": 51.0,
+      "lat_max": 55.0,
+      "lon_min": -135.0,
+      "lon_max": -129.0
+    },
+    {
+      "name": "加拿大阿尔伯塔省",
+      "lat_min": 49.0,
+      "lat_max": 60.0,
+      "lon_min": -134.0,
+      "lon_max": -114.0
+    },
+    {
+      "name": "加拿大温哥华岛地区",
+      "lat_min": 49.0,
+      "lat_max": 60.0,
+      "lon_min": -120.0,
+      "lon_max": -110.0
+    },
+    {
+      "name": "华盛顿州沿岸远海",
+      "lat_min": 48.0,
+      "lat_max": 52.0,
+      "lon_min": -132.0,
+      "lon_max": -123.0
+    },
+    {
+      "name": "华盛顿州沿岸近海",
+      "lat_min": 46.0,
+      "lat_max": 48.0,
+      "lon_min": -132.0,
+      "lon_max": -125.0
+    },
+    {
+      "name": "华盛顿州、俄勒冈州边境地区",
+      "lat_min": 46.0,
+      "lat_max": 48.0,
+      "lon_min": -125.0,
+      "lon_max": -124.0
+    },
+    {
+      "name": "华盛顿州",
+      "lat_min": 45.0,
+      "lat_max": 47.0,
+      "lon_min": -124.0,
+      "lon_max": -119.0
+    },
+    {
+      "name": "俄勒冈州沿岸远海",
+      "lat_min": 46.0,
+      "lat_max": 49.0,
+      "lon_min": -124.0,
+      "lon_max": -117.0
+    },
+    {
+      "name": "俄勒冈州沿岸近海",
+      "lat_min": 42.0,
+      "lat_max": 46.0,
+      "lon_min": -132.0,
+      "lon_max": -125.0
+    },
+    {
+      "name": "俄勒冈州",
+      "lat_min": 42.0,
+      "lat_max": 46.0,
+      "lon_min": -125.0,
+      "lon_max": -124.0
+    },
+    {
+      "name": "爱达荷州西部",
+      "lat_min": 42.0,
+      "lat_max": 46.0,
+      "lon_min": -124.0,
+      "lon_max": -117.0
+    },
+    {
+      "name": "加利福尼亚州北部沿岸远海",
+      "lat_min": 42.0,
+      "lat_max": 49.0,
+      "lon_min": -117.0,
+      "lon_max": -114.0
+    },
+    {
+      "name": "加利福尼亚州北部沿岸近海",
+      "lat_min": 38.0,
+      "lat_max": 42.0,
+      "lon_min": -132.0,
+      "lon_max": -124.0
+    },
+    {
+      "name": "加利福尼亚州北部",
+      "lat_min": 38.0,
+      "lat_max": 42.0,
+      "lon_min": -125.0,
+      "lon_max": -123.0
+    },
+    {
+      "name": "内华达州",
+      "lat_min": 38.0,
+      "lat_max": 42.0,
+      "lon_min": -124.0,
+      "lon_max": -120.0
+    },
+    {
+      "name": "加利福尼亚州沿岸远海",
+      "lat_min": 38.0,
+      "lat_max": 42.0,
+      "lon_min": -120.0,
+      "lon_max": -114.0
+    },
+    {
+      "name": "加利福尼亚州中部",
+      "lat_min": 32.0,
+      "lat_max": 38.0,
+      "lon_min": -132.0,
+      "lon_max": -118.0
+    },
+    {
+      "name": "加利福尼亚州、内华达州边境地区",
+      "lat_min": 35.0,
+      "lat_max": 38.0,
+      "lon_min": -123.0,
+      "lon_max": -116.0
+    },
+    {
+      "name": "内华达州南部",
+      "lat_min": 35.0,
+      "lat_max": 39.0,
+      "lon_min": -120.0,
+      "lon_max": -114.0
+    },
+    {
+      "name": "亚利桑那州西部",
+      "lat_min": 36.0,
+      "lat_max": 38.0,
+      "lon_min": -117.0,
+      "lon_max": -114.0
+    },
+    {
+      "name": "加利福尼亚州南部",
+      "lat_min": 33.0,
+      "lat_max": 37.0,
+      "lon_min": -114.0,
+      "lon_max": -112.0
+    },
+    {
+      "name": "加利福尼亚州、亚利桑那州边境地区",
+      "lat_min": 33.0,
+      "lat_max": 35.0,
+      "lon_min": -121.0,
+      "lon_max": -115.0
+    },
+    {
+      "name": "加利福尼亚州、下加利福尼亚州边境地区",
+      "lat_min": 33.0,
+      "lat_max": 35.0,
+      "lon_min": -115.0,
+      "lon_max": -114.0
+    },
+    {
+      "name": "亚利桑那州西部、索诺拉州边境地区",
+      "lat_min": 32.0,
+      "lat_max": 33.0,
+      "lon_min": -118.0,
+      "lon_max": -115.0
+    },
+    {
+      "name": "下加利福尼亚州西岸远海",
+      "lat_min": 31.0,
+      "lat_max": 33.0,
+      "lon_min": -115.0,
+      "lon_max": -112.0
+    },
+    {
+      "name": "墨西哥下加利福尼亚州",
+      "lat_min": 22.0,
+      "lat_max": 32.0,
+      "lon_min": -122.0,
+      "lon_max": -109.0
+    },
+    {
+      "name": "加利福尼亚湾",
+      "lat_min": 23.0,
+      "lat_max": 32.0,
+      "lon_min": -117.0,
+      "lon_max": -109.0
+    },
+    {
+      "name": "墨西哥索诺拉州",
+      "lat_min": 23.0,
+      "lat_max": 32.0,
+      "lon_min": -115.0,
+      "lon_max": -107.0
+    },
+    {
+      "name": "墨西哥中部沿岸远海",
+      "lat_min": 27.0,
+      "lat_max": 31.0,
+      "lon_min": -113.0,
+      "lon_max": -108.0
+    },
+    {
+      "name": "墨西哥中部沿岸近海",
+      "lat_min": 21.0,
+      "lat_max": 23.0,
+      "lon_min": -109.0,
+      "lon_max": -106.0
+    },
+    {
+      "name": "雷维利亚希赫多群岛地区",
+      "lat_min": 21.0,
+      "lat_max": 24.0,
+      "lon_min": -107.0,
+      "lon_max": -105.0
+    },
+    {
+      "name": "墨西哥哈利斯科州沿岸远海",
+      "lat_min": 17.0,
+      "lat_max": 22.0,
+      "lon_min": -115.0,
+      "lon_max": -108.0
+    },
+    {
+      "name": "墨西哥哈利斯科州沿岸近海",
+      "lat_min": 17.0,
+      "lat_max": 21.0,
+      "lon_min": -108.0,
+      "lon_max": -105.0
+    },
+    {
+      "name": "墨西哥米却肯州沿岸近海",
+      "lat_min": 18.0,
+      "lat_max": 21.0,
+      "lon_min": -106.0,
+      "lon_max": -104.0
+    },
+    {
+      "name": "墨西哥米却肯州",
+      "lat_min": 17.0,
+      "lat_max": 19.0,
+      "lon_min": -104.0,
+      "lon_max": -102.0
+    },
+    {
+      "name": "墨西哥格雷罗州沿岸近海",
+      "lat_min": 18.0,
+      "lat_max": 20.0,
+      "lon_min": -103.0,
+      "lon_max": -100.0
+    },
+    {
+      "name": "墨西哥格雷罗州",
+      "lat_min": 16.0,
+      "lat_max": 18.0,
+      "lon_min": -102.0,
+      "lon_max": -98.0
+    },
+    {
+      "name": "墨西哥瓦哈卡州",
+      "lat_min": 17.0,
+      "lat_max": 19.0,
+      "lon_min": -102.0,
+      "lon_max": -98.0
+    },
+    {
+      "name": "墨西哥恰帕斯州",
+      "lat_min": 16.0,
+      "lat_max": 18.0,
+      "lon_min": -98.0,
+      "lon_max": -94.0
+    },
+    {
+      "name": "墨西哥、危地马拉边境地区",
+      "lat_min": 16.0,
+      "lat_max": 18.0,
+      "lon_min": -95.0,
+      "lon_max": -92.0
+    },
+    {
+      "name": "墨西哥沿岸远海",
+      "lat_min": 15.0,
+      "lat_max": 18.0,
+      "lon_min": -93.0,
+      "lon_max": -89.0
+    },
+    {
+      "name": "墨西哥米却肯州沿岸远海",
+      "lat_min": 7.0,
+      "lat_max": 17.0,
+      "lon_min": -115.0,
+      "lon_max": -93.0
+    },
+    {
+      "name": "墨西哥格雷罗州沿岸远海",
+      "lat_min": 15.0,
+      "lat_max": 18.0,
+      "lon_min": -106.0,
+      "lon_max": -103.0
+    },
+    {
+      "name": "墨西哥瓦哈卡州沿岸近海",
+      "lat_min": 13.0,
+      "lat_max": 17.0,
+      "lon_min": -104.0,
+      "lon_max": -98.0
+    },
+    {
+      "name": "墨西哥瓦哈卡州沿岸远海",
+      "lat_min": 15.0,
+      "lat_max": 16.0,
+      "lon_min": -98.0,
+      "lon_max": -94.0
+    },
+    {
+      "name": "墨西哥恰帕斯州沿岸远海",
+      "lat_min": 13.0,
+      "lat_max": 15.0,
+      "lon_min": -98.0,
+      "lon_max": -95.0
+    },
+    {
+      "name": "墨西哥恰帕斯州沿岸近海",
+      "lat_min": 12.0,
+      "lat_max": 15.0,
+      "lon_min": -96.0,
+      "lon_max": -92.0
+    },
+    {
+      "name": "危地马拉",
+      "lat_min": 14.0,
+      "lat_max": 16.0,
+      "lon_min": -94.0,
+      "lon_max": -92.0
+    },
+    {
+      "name": "危地马拉沿岸近海",
+      "lat_min": 14.0,
+      "lat_max": 17.0,
+      "lon_min": -92.0,
+      "lon_max": -89.0
+    },
+    {
+      "name": "洪都拉斯",
+      "lat_min": 13.0,
+      "lat_max": 14.0,
+      "lon_min": -92.0,
+      "lon_max": -90.0
+    },
+    {
+      "name": "萨尔瓦多",
+      "lat_min": 13.0,
+      "lat_max": 16.0,
+      "lon_min": -89.0,
+      "lon_max": -83.0
+    },
+    {
+      "name": "尼加拉瓜沿岸近海",
+      "lat_min": 13.0,
+      "lat_max": 14.0,
+      "lon_min": -90.0,
+      "lon_max": -88.0
+    },
+    {
+      "name": "尼加拉瓜",
+      "lat_min": 11.0,
+      "lat_max": 13.0,
+      "lon_min": -88.0,
+      "lon_max": -86.0
+    },
+    {
+      "name": "中美洲沿岸远海",
+      "lat_min": 11.0,
+      "lat_max": 15.0,
+      "lon_min": -87.0,
+      "lon_max": -83.0
+    },
+    {
+      "name": "哥斯达黎加沿岸远海",
+      "lat_min": 2.0,
+      "lat_max": 13.0,
+      "lon_min": -93.0,
+      "lon_max": -83.0
+    },
+    {
+      "name": "哥斯达黎加",
+      "lat_min": 7.0,
+      "lat_max": 11.0,
+      "lon_min": -88.0,
+      "lon_max": -83.0
+    },
+    {
+      "name": "巴拿马以北",
+      "lat_min": 8.0,
+      "lat_max": 11.0,
+      "lon_min": -86.0,
+      "lon_max": -83.0
+    },
+    {
+      "name": "巴拿马、哥斯达黎加边境地区",
+      "lat_min": 10.0,
+      "lat_max": 12.0,
+      "lon_min": -83.0,
+      "lon_max": -76.0
+    },
+    {
+      "name": "巴拿马",
+      "lat_min": 8.0,
+      "lat_max": 10.0,
+      "lon_min": -83.0,
+      "lon_max": -82.0
+    },
+    {
+      "name": "巴拿马、哥伦比亚边境地区",
+      "lat_min": 7.0,
+      "lat_max": 10.0,
+      "lon_min": -82.0,
+      "lon_max": -78.0
+    },
+    {
+      "name": "巴拿马以南",
+      "lat_min": 7.0,
+      "lat_max": 9.0,
+      "lon_min": -78.0,
+      "lon_max": -77.0
+    },
+    {
+      "name": "墨西哥尤卡坦半岛",
+      "lat_min": 2.0,
+      "lat_max": 8.0,
+      "lon_min": -83.0,
+      "lon_max": -78.0
+    },
+    {
+      "name": "古巴地区",
+      "lat_min": 18.0,
+      "lat_max": 22.0,
+      "lon_min": -91.0,
+      "lon_max": -86.0
+    },
+    {
+      "name": "牙买加地区",
+      "lat_min": 19.0,
+      "lat_max": 24.0,
+      "lon_min": -86.0,
+      "lon_max": -74.0
+    },
+    {
+      "name": "海地地区",
+      "lat_min": 17.0,
+      "lat_max": 19.0,
+      "lon_min": -79.0,
+      "lon_max": -75.0
+    },
+    {
+      "name": "多米尼加共和国地区",
+      "lat_min": 17.0,
+      "lat_max": 21.0,
+      "lon_min": -75.0,
+      "lon_max": -72.0
+    },
+    {
+      "name": "莫纳海峡",
+      "lat_min": 17.0,
+      "lat_max": 21.0,
+      "lon_min": -72.0,
+      "lon_max": -69.0
+    },
+    {
+      "name": "波多黎各地区",
+      "lat_min": 17.0,
+      "lat_max": 20.0,
+      "lon_min": -69.0,
+      "lon_max": -67.0
+    },
+    {
+      "name": "维尔京群岛",
+      "lat_min": 17.0,
+      "lat_max": 20.0,
+      "lon_min": -67.0,
+      "lon_max": -65.0
+    },
+    {
+      "name": "背风群岛",
+      "lat_min": 17.0,
+      "lat_max": 20.0,
+      "lon_min": -65.0,
+      "lon_max": -64.0
+    },
+    {
+      "name": "伯利兹",
+      "lat_min": 15.0,
+      "lat_max": 20.0,
+      "lon_min": -64.0,
+      "lon_max": -59.0
+    },
+    {
+      "name": "加勒比海",
+      "lat_min": 16.0,
+      "lat_max": 18.0,
+      "lon_min": -89.0,
+      "lon_max": -88.0
+    },
+    {
+      "name": "向风群岛",
+      "lat_min": 11.0,
+      "lat_max": 17.0,
+      "lon_min": -83.0,
+      "lon_max": -63.0
+    },
+    {
+      "name": "哥伦比亚北岸近海",
+      "lat_min": 11.0,
+      "lat_max": 15.0,
+      "lon_min": -63.0,
+      "lon_max": -59.0
+    },
+    {
+      "name": "委内瑞拉沿岸近海",
+      "lat_min": 8.0,
+      "lat_max": 13.0,
+      "lon_min": -78.0,
+      "lon_max": -71.0
+    },
+    {
+      "name": "特立尼达",
+      "lat_min": 8.0,
+      "lat_max": 13.0,
+      "lon_min": -72.0,
+      "lon_max": -60.0
+    },
+    {
+      "name": "哥伦比亚北部",
+      "lat_min": 10.0,
+      "lat_max": 11.0,
+      "lon_min": -62.0,
+      "lon_max": -60.0
+    },
+    {
+      "name": "委内瑞拉马拉开波湖",
+      "lat_min": 6.0,
+      "lat_max": 11.0,
+      "lon_min": -77.0,
+      "lon_max": -70.0
+    },
+    {
+      "name": "委内瑞拉",
+      "lat_min": 9.0,
+      "lat_max": 11.0,
+      "lon_min": -72.0,
+      "lon_max": -71.0
+    },
+    {
+      "name": "哥伦比亚西岸近海",
+      "lat_min": 1.0,
+      "lat_max": 11.0,
+      "lon_min": -73.0,
+      "lon_max": -61.0
+    },
+    {
+      "name": "哥伦比亚",
+      "lat_min": 2.0,
+      "lat_max": 7.0,
+      "lon_min": -79.0,
+      "lon_max": -77.0
+    },
+    {
+      "name": "厄瓜多尔沿岸远海",
+      "lat_min": -3.0,
+      "lat_max": 6.0,
+      "lon_min": -78.0,
+      "lon_max": -67.0
+    },
+    {
+      "name": "厄瓜多尔沿岸近海",
+      "lat_min": -3.0,
+      "lat_max": 2.0,
+      "lon_min": -86.0,
+      "lon_max": -80.0
+    },
+    {
+      "name": "哥伦比亚、厄瓜多尔边境地区",
+      "lat_min": -4.0,
+      "lat_max": 2.0,
+      "lon_min": -82.0,
+      "lon_max": -79.0
+    },
+    {
+      "name": "厄瓜多尔",
+      "lat_min": 0.0,
+      "lat_max": 2.0,
+      "lon_min": -79.0,
+      "lon_max": -75.0
+    },
+    {
+      "name": "秘鲁北部沿岸远海",
+      "lat_min": -3.0,
+      "lat_max": 0.0,
+      "lon_min": -80.0,
+      "lon_max": -76.0
+    },
+    {
+      "name": "秘鲁北部沿岸近海",
+      "lat_min": -10.0,
+      "lat_max": -3.0,
+      "lon_min": -86.0,
+      "lon_max": -79.0
+    },
+    {
+      "name": "秘鲁、厄瓜多尔边境地区",
+      "lat_min": -10.0,
+      "lat_max": -3.0,
+      "lon_min": -82.0,
+      "lon_max": -78.0
+    },
+    {
+      "name": "秘鲁北部",
+      "lat_min": -5.0,
+      "lat_max": 0.0,
+      "lon_min": -81.0,
+      "lon_max": -75.0
+    },
+    {
+      "name": "秘鲁、巴西边境地区",
+      "lat_min": -8.0,
+      "lat_max": -1.0,
+      "lon_min": -80.0,
+      "lon_max": -70.0
+    },
+    {
+      "name": "巴西西部",
+      "lat_min": -12.0,
+      "lat_max": -4.0,
+      "lon_min": -75.0,
+      "lon_max": -70.0
+    },
+    {
+      "name": "秘鲁沿岸远海",
+      "lat_min": -13.0,
+      "lat_max": 4.0,
+      "lon_min": -73.0,
+      "lon_max": -62.0
+    },
+    {
+      "name": "秘鲁沿岸近海",
+      "lat_min": -18.0,
+      "lat_max": -10.0,
+      "lon_min": -83.0,
+      "lon_max": -73.0
+    },
+    {
+      "name": "秘鲁中部",
+      "lat_min": -18.0,
+      "lat_max": -10.0,
+      "lon_min": -79.0,
+      "lon_max": -70.0
+    },
+    {
+      "name": "秘鲁南部",
+      "lat_min": -15.0,
+      "lat_max": -8.0,
+      "lon_min": -78.0,
+      "lon_max": -69.0
+    },
+    {
+      "name": "秘鲁、玻利维亚边境地区",
+      "lat_min": -17.0,
+      "lat_max": -15.0,
+      "lon_min": -74.0,
+      "lon_max": -70.0
+    },
+    {
+      "name": "玻利维亚北部",
+      "lat_min": -18.0,
+      "lat_max": -11.0,
+      "lon_min": -70.0,
+      "lon_max": -68.0
+    },
+    {
+      "name": "玻利维亚中部",
+      "lat_min": -14.0,
+      "lat_max": -10.0,
+      "lon_min": -68.0,
+      "lon_max": -61.0
+    },
+    {
+      "name": "智利北部沿岸远海",
+      "lat_min": -20.0,
+      "lat_max": -14.0,
+      "lon_min": -69.0,
+      "lon_max": -58.0
+    },
+    {
+      "name": "智利北部沿岸近海",
+      "lat_min": -28.0,
+      "lat_max": -18.0,
+      "lon_min": -77.0,
+      "lon_max": -71.0
+    },
+    {
+      "name": "智利北部",
+      "lat_min": -28.0,
+      "lat_max": -18.0,
+      "lon_min": -72.0,
+      "lon_max": -70.0
+    },
+    {
+      "name": "智利、玻利维亚边境地区",
+      "lat_min": -28.0,
+      "lat_max": -18.0,
+      "lon_min": -70.0,
+      "lon_max": -68.0
+    },
+    {
+      "name": "玻利维亚南部",
+      "lat_min": -23.0,
+      "lat_max": -18.0,
+      "lon_min": -69.0,
+      "lon_max": -67.0
+    },
+    {
+      "name": "巴拉圭",
+      "lat_min": -22.0,
+      "lat_max": -19.0,
+      "lon_min": -68.0,
+      "lon_max": -60.0
+    },
+    {
+      "name": "智利、阿根廷边境地区",
+      "lat_min": -28.0,
+      "lat_max": -19.0,
+      "lon_min": -62.0,
+      "lon_max": -54.0
+    },
+    {
+      "name": "阿根廷胡胡伊省",
+      "lat_min": -37.0,
+      "lat_max": -23.0,
+      "lon_min": -71.0,
+      "lon_max": -67.0
+    },
+    {
+      "name": "阿根廷萨尔塔省",
+      "lat_min": -24.0,
+      "lat_max": -22.0,
+      "lon_min": -67.0,
+      "lon_max": -64.0
+    },
+    {
+      "name": "阿根廷卡塔马卡省",
+      "lat_min": -26.0,
+      "lat_max": -22.0,
+      "lon_min": -67.0,
+      "lon_max": -62.0
+    },
+    {
+      "name": "阿根廷图库曼省",
+      "lat_min": -29.0,
+      "lat_max": -25.0,
+      "lon_min": -68.0,
+      "lon_max": -66.0
+    },
+    {
+      "name": "阿根廷圣地亚哥-德尔埃斯特罗省",
+      "lat_min": -28.0,
+      "lat_max": -26.0,
+      "lon_min": -66.0,
+      "lon_max": -64.0
+    },
+    {
+      "name": "阿根廷东北部",
+      "lat_min": -30.0,
+      "lat_max": -25.0,
+      "lon_min": -66.0,
+      "lon_max": -62.0
+    },
+    {
+      "name": "智利中部沿岸远海",
+      "lat_min": -40.0,
+      "lat_max": -24.0,
+      "lon_min": -62.0,
+      "lon_max": -56.0
+    },
+    {
+      "name": "智利中部沿岸近海",
+      "lat_min": -40.0,
+      "lat_max": -28.0,
+      "lon_min": -80.0,
+      "lon_max": -72.0
+    },
+    {
+      "name": "智利中部",
+      "lat_min": -41.0,
+      "lat_max": -28.0,
+      "lon_min": -74.0,
+      "lon_max": -71.0
+    },
+    {
+      "name": "阿根廷圣胡安省",
+      "lat_min": -41.0,
+      "lat_max": -28.0,
+      "lon_min": -73.0,
+      "lon_max": -70.0
+    },
+    {
+      "name": "阿根廷拉里奥哈省",
+      "lat_min": -32.0,
+      "lat_max": -29.0,
+      "lon_min": -70.0,
+      "lon_max": -67.0
+    },
+    {
+      "name": "阿根廷门多萨省",
+      "lat_min": -32.0,
+      "lat_max": -28.0,
+      "lon_min": -69.0,
+      "lon_max": -66.0
+    },
+    {
+      "name": "阿根廷圣路易斯省",
+      "lat_min": -37.0,
+      "lat_max": -32.0,
+      "lon_min": -70.0,
+      "lon_max": -66.0
+    },
+    {
+      "name": "阿根廷科尔多瓦省",
+      "lat_min": -36.0,
+      "lat_max": -32.0,
+      "lon_min": -67.0,
+      "lon_max": -65.0
+    },
+    {
+      "name": "乌拉圭",
+      "lat_min": -35.0,
+      "lat_max": -30.0,
+      "lon_min": -66.0,
+      "lon_max": -62.0
+    },
+    {
+      "name": "智利南部沿岸远海",
+      "lat_min": -35.0,
+      "lat_max": -30.0,
+      "lon_min": -58.0,
+      "lon_max": -53.0
+    },
+    {
+      "name": "智利南部",
+      "lat_min": -56.0,
+      "lat_max": -40.0,
+      "lon_min": -83.0,
+      "lon_max": -72.0
+    },
+    {
+      "name": "智利南部、阿根廷边境地区",
+      "lat_min": -55.0,
+      "lat_max": -41.0,
+      "lon_min": -76.0,
+      "lon_max": -71.0
+    },
+    {
+      "name": "阿根廷南部",
+      "lat_min": -52.0,
+      "lat_max": -37.0,
+      "lon_min": -73.0,
+      "lon_max": -71.0
+    },
+    {
+      "name": "火地岛",
+      "lat_min": -52.0,
+      "lat_max": -34.0,
+      "lon_min": -71.0,
+      "lon_max": -62.0
+    },
+    {
+      "name": "福克兰群岛地区",
+      "lat_min": -56.0,
+      "lat_max": -52.0,
+      "lon_min": -72.0,
+      "lon_max": -65.0
+    },
+    {
+      "name": "德雷克海峡",
+      "lat_min": -55.0,
+      "lat_max": -49.0,
+      "lon_min": -65.0,
+      "lon_max": -55.0
+    },
+    {
+      "name": "斯科舍海",
+      "lat_min": -62.0,
+      "lat_max": -55.0,
+      "lon_min": -73.0,
+      "lon_max": -59.0
+    },
+    {
+      "name": "南乔治亚岛地区",
+      "lat_min": -62.0,
+      "lat_max": -55.0,
+      "lon_min": -59.0,
+      "lon_max": -31.0
+    },
+    {
+      "name": "南乔治亚海隆",
+      "lat_min": -57.0,
+      "lat_max": -52.0,
+      "lon_min": -40.0,
+      "lon_max": -31.0
+    },
+    {
+      "name": "南桑威奇群岛地区",
+      "lat_min": -54.0,
+      "lat_max": -46.0,
+      "lon_min": -34.0,
+      "lon_max": -22.0
+    },
+    {
+      "name": "南设得兰群岛",
+      "lat_min": -62.0,
+      "lat_max": -54.0,
+      "lon_min": -31.0,
+      "lon_max": -22.0
+    },
+    {
+      "name": "南极半岛",
+      "lat_min": -64.0,
+      "lat_max": -60.0,
+      "lon_min": -65.0,
+      "lon_max": -52.0
+    },
+    {
+      "name": "大西洋西南部",
+      "lat_min": -75.0,
+      "lat_max": -63.0,
+      "lon_min": -76.0,
+      "lon_max": -54.0
+    },
+    {
+      "name": "威德尔海",
+      "lat_min": -71.0,
+      "lat_max": -49.0,
+      "lon_min": -60.0,
+      "lon_max": -5.0
+    },
+    {
+      "name": "新西兰北岛西岸远海",
+      "lat_min": -77.0,
+      "lat_max": -71.0,
+      "lon_min": -60.0,
+      "lon_max": -14.0
+    },
+    {
+      "name": "新西兰北岛",
+      "lat_min": -40.0,
+      "lat_max": -35.0,
+      "lon_min": 172.0,
+      "lon_max": 174.0
+    },
+    {
+      "name": "新西兰北岛东岸远海",
+      "lat_min": -42.0,
+      "lat_max": -35.0,
+      "lon_min": 173.0,
+      "lon_max": 178.0
+    },
+    {
+      "name": "新西兰南岛西岸远海",
+      "lat_min": -42.0,
+      "lat_max": -34.0,
+      "lon_min": 173.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "新西兰南岛",
+      "lat_min": -49.0,
+      "lat_max": -40.0,
+      "lon_min": 160.0,
+      "lon_max": 173.0
+    },
+    {
+      "name": "新西兰库克海峡",
+      "lat_min": -47.0,
+      "lat_max": -41.0,
+      "lon_min": 167.0,
+      "lon_max": 174.0
+    },
+    {
+      "name": "新西兰南岛东岸远海",
+      "lat_min": -42.0,
+      "lat_max": -40.0,
+      "lon_min": 173.0,
+      "lon_max": 175.0
+    },
+    {
+      "name": "麦夸里岛以北",
+      "lat_min": -49.0,
+      "lat_max": -42.0,
+      "lon_min": 169.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "奥克兰群岛",
+      "lat_min": -52.0,
+      "lat_max": -46.0,
+      "lon_min": 150.0,
+      "lon_max": 162.0
+    },
+    {
+      "name": "麦夸里岛地区",
+      "lat_min": -52.0,
+      "lat_max": -49.0,
+      "lon_min": 162.0,
+      "lon_max": 170.0
+    },
+    {
+      "name": "新西兰以南",
+      "lat_min": -61.0,
+      "lat_max": -52.0,
+      "lon_min": 155.0,
+      "lon_max": 164.0
+    },
+    {
+      "name": "萨摩亚群岛地区",
+      "lat_min": -61.0,
+      "lat_max": -45.0,
+      "lon_min": 164.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "萨摩亚群岛",
+      "lat_min": -17.0,
+      "lat_max": -10.0,
+      "lon_min": -176.0,
+      "lon_max": -165.0
+    },
+    {
+      "name": "斐济群岛以南",
+      "lat_min": -15.0,
+      "lat_max": -13.0,
+      "lon_min": -173.0,
+      "lon_max": -168.0
+    },
+    {
+      "name": "汤加群岛以西",
+      "lat_min": -27.0,
+      "lat_max": -19.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "汤加群岛",
+      "lat_min": -22.5,
+      "lat_max": -17.5,
+      "lon_min": -179.0,
+      "lon_max": -173.5
+    },
+    {
+      "name": "汤加群岛地区",
+      "lat_min": -22.0,
+      "lat_max": -15.0,
+      "lon_min": -176.0,
+      "lon_max": -173.0
+    },
+    {
+      "name": "汤加群岛以南",
+      "lat_min": -24.0,
+      "lat_max": -17.0,
+      "lon_min": -176.0,
+      "lon_max": -166.0
+    },
+    {
+      "name": "新西兰以北",
+      "lat_min": -27.0,
+      "lat_max": -24.0,
+      "lon_min": -176.0,
+      "lon_max": -170.0
+    },
+    {
+      "name": "克马德克群岛地区",
+      "lat_min": -35.0,
+      "lat_max": -27.0,
+      "lon_min": 173.0,
+      "lon_max": 178.0
+    },
+    {
+      "name": "克马德克群岛",
+      "lat_min": -32.0,
+      "lat_max": -27.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "克马德克群岛以南",
+      "lat_min": -31.0,
+      "lat_max": -29.0,
+      "lon_min": -179.0,
+      "lon_max": -177.0
+    },
+    {
+      "name": "斐济群岛以北",
+      "lat_min": -35.0,
+      "lat_max": -32.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "斐济群岛地区",
+      "lat_min": -13.0,
+      "lat_max": -10.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "斐济群岛",
+      "lat_min": -22.0,
+      "lat_max": -13.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "圣克鲁斯群岛地区",
+      "lat_min": -19.0,
+      "lat_max": -15.0,
+      "lon_min": 177.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "圣克鲁斯群岛",
+      "lat_min": -13.0,
+      "lat_max": -7.0,
+      "lon_min": 164.0,
+      "lon_max": 173.0
+    },
+    {
+      "name": "瓦努阿图群岛地区",
+      "lat_min": -13.0,
+      "lat_max": -9.0,
+      "lon_min": 165.0,
+      "lon_max": 168.0
+    },
+    {
+      "name": "瓦努阿图群岛",
+      "lat_min": -22.0,
+      "lat_max": -13.0,
+      "lon_min": 162.0,
+      "lon_max": 175.0
+    },
+    {
+      "name": "新喀里多尼亚",
+      "lat_min": -21.0,
+      "lat_max": -13.0,
+      "lon_min": 165.0,
+      "lon_max": 171.0
+    },
+    {
+      "name": "洛亚蒂群岛",
+      "lat_min": -24.0,
+      "lat_max": -17.0,
+      "lon_min": 162.0,
+      "lon_max": 169.0
+    },
+    {
+      "name": "洛亚蒂群岛东南",
+      "lat_min": -22.0,
+      "lat_max": -20.0,
+      "lon_min": 166.0,
+      "lon_max": 169.0
+    },
+    {
+      "name": "巴布亚新几内亚新爱尔兰地区",
+      "lat_min": -27.0,
+      "lat_max": -21.0,
+      "lon_min": 169.0,
+      "lon_max": 175.0
+    },
+    {
+      "name": "所罗门群岛以北",
+      "lat_min": -6.0,
+      "lat_max": 0.0,
+      "lon_min": 149.0,
+      "lon_max": 154.0
+    },
+    {
+      "name": "巴布亚新几内亚新不列颠岛地区",
+      "lat_min": -7.0,
+      "lat_max": 0.0,
+      "lon_min": 154.0,
+      "lon_max": 164.0
+    },
+    {
+      "name": "所罗门群岛",
+      "lat_min": -8.0,
+      "lat_max": -4.0,
+      "lon_min": 148.0,
+      "lon_max": 154.0
+    },
+    {
+      "name": "当特尔卡斯托群岛地区",
+      "lat_min": -13.0,
+      "lat_max": -4.0,
+      "lon_min": 154.0,
+      "lon_max": 164.0
+    },
+    {
+      "name": "所罗门群岛以南",
+      "lat_min": -14.0,
+      "lat_max": -8.0,
+      "lon_min": 151.0,
+      "lon_max": 156.0
+    },
+    {
+      "name": "印尼西巴布亚省地区",
+      "lat_min": -15.0,
+      "lat_max": -10.0,
+      "lon_min": 156.0,
+      "lon_max": 162.0
+    },
+    {
+      "name": "西巴布亚省北岸近海",
+      "lat_min": -7.0,
+      "lat_max": 3.0,
+      "lon_min": 130.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "巴布亚新几内亚尼尼戈群岛地区",
+      "lat_min": -3.0,
+      "lat_max": -1.0,
+      "lon_min": 137.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "巴布亚新几内亚阿德默勒尔蒂群岛地区",
+      "lat_min": -3.0,
+      "lat_max": 3.0,
+      "lon_min": 141.0,
+      "lon_max": 145.0
+    },
+    {
+      "name": "新几内亚北岸近海",
+      "lat_min": -3.0,
+      "lat_max": 0.0,
+      "lon_min": 145.0,
+      "lon_max": 149.0
+    },
+    {
+      "name": "印尼西巴布亚省",
+      "lat_min": -5.0,
+      "lat_max": -2.0,
+      "lon_min": 141.0,
+      "lon_max": 146.0
+    },
+    {
+      "name": "巴布亚新几内亚新几内亚",
+      "lat_min": -8.0,
+      "lat_max": -2.0,
+      "lon_min": 136.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "俾斯麦海",
+      "lat_min": -8.0,
+      "lat_max": -3.0,
+      "lon_min": 141.0,
+      "lon_max": 146.0
+    },
+    {
+      "name": "印尼阿鲁群岛地区",
+      "lat_min": -5.0,
+      "lat_max": -3.0,
+      "lon_min": 146.0,
+      "lon_max": 150.0
+    },
+    {
+      "name": "西巴布亚省南岸近海",
+      "lat_min": -8.0,
+      "lat_max": -5.0,
+      "lon_min": 132.0,
+      "lon_max": 136.0
+    },
+    {
+      "name": "新几内亚南岸近海",
+      "lat_min": -10.0,
+      "lat_max": -5.0,
+      "lon_min": 137.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "巴布亚新几内亚新几内亚东部地区",
+      "lat_min": -10.0,
+      "lat_max": -7.0,
+      "lon_min": 141.0,
+      "lon_max": 146.0
+    },
+    {
+      "name": "阿拉弗拉海",
+      "lat_min": -11.0,
+      "lat_max": -4.0,
+      "lon_min": 145.0,
+      "lon_max": 151.0
+    },
+    {
+      "name": "加罗林群岛西部",
+      "lat_min": -12.0,
+      "lat_max": -7.0,
+      "lon_min": 132.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "马里亚纳群岛以南",
+      "lat_min": 3.0,
+      "lat_max": 13.0,
+      "lon_min": 131.0,
+      "lon_max": 142.0
+    },
+    {
+      "name": "日本本州东南",
+      "lat_min": 10.0,
+      "lat_max": 14.0,
+      "lon_min": 141.0,
+      "lon_max": 148.0
+    },
+    {
+      "name": "日本小笠原群岛地区",
+      "lat_min": 29.0,
+      "lat_max": 34.0,
+      "lon_min": 137.0,
+      "lon_max": 144.0
+    },
+    {
+      "name": "日本火山列岛地区",
+      "lat_min": 26.0,
+      "lat_max": 29.0,
+      "lon_min": 137.0,
+      "lon_max": 145.0
+    },
+    {
+      "name": "马里亚纳群岛以西",
+      "lat_min": 22.0,
+      "lat_max": 26.0,
+      "lon_min": 137.0,
+      "lon_max": 145.0
+    },
+    {
+      "name": "马里亚纳群岛地区",
+      "lat_min": 13.0,
+      "lat_max": 22.0,
+      "lon_min": 137.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "马里亚纳群岛",
+      "lat_min": 12.0,
+      "lat_max": 22.0,
+      "lon_min": 141.0,
+      "lon_max": 150.0
+    },
+    {
+      "name": "俄罗斯堪察加半岛",
+      "lat_min": 13.0,
+      "lat_max": 21.0,
+      "lon_min": 144.0,
+      "lon_max": 147.0
+    },
+    {
+      "name": "堪察加东岸近海",
+      "lat_min": 51.0,
+      "lat_max": 60.0,
+      "lon_min": 155.0,
+      "lon_max": 165.0
+    },
+    {
+      "name": "堪察加东岸远海",
+      "lat_min": 51.0,
+      "lat_max": 58.0,
+      "lon_min": 157.0,
+      "lon_max": 164.0
+    },
+    {
+      "name": "千岛群岛西北",
+      "lat_min": 51.0,
+      "lat_max": 56.0,
+      "lon_min": 159.0,
+      "lon_max": 164.0
+    },
+    {
+      "name": "千岛群岛",
+      "lat_min": 46.0,
+      "lat_max": 53.0,
+      "lon_min": 146.0,
+      "lon_max": 156.0
+    },
+    {
+      "name": "千岛群岛以东",
+      "lat_min": 43.0,
+      "lat_max": 51.0,
+      "lon_min": 146.0,
+      "lon_max": 158.0
+    },
+    {
+      "name": "日本海东部",
+      "lat_min": 43.0,
+      "lat_max": 51.0,
+      "lon_min": 148.0,
+      "lon_max": 164.0
+    },
+    {
+      "name": "日本北海道地区",
+      "lat_min": 38.0,
+      "lat_max": 46.0,
+      "lon_min": 136.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "日本北海道沿岸远海",
+      "lat_min": 41.0,
+      "lat_max": 46.0,
+      "lon_min": 139.0,
+      "lon_max": 146.0
+    },
+    {
+      "name": "日本本州西岸近海",
+      "lat_min": 41.0,
+      "lat_max": 43.0,
+      "lon_min": 146.0,
+      "lon_max": 150.0
+    },
+    {
+      "name": "日本本州东部",
+      "lat_min": 36.0,
+      "lat_max": 41.0,
+      "lon_min": 136.0,
+      "lon_max": 140.0
+    },
+    {
+      "name": "日本本州东岸近海",
+      "lat_min": 35.0,
+      "lat_max": 41.0,
+      "lon_min": 137.0,
+      "lon_max": 142.0
+    },
+    {
+      "name": "日本本州东岸远海",
+      "lat_min": 34.0,
+      "lat_max": 41.0,
+      "lon_min": 140.0,
+      "lon_max": 143.0
+    },
+    {
+      "name": "日本本州南岸近海",
+      "lat_min": 33.0,
+      "lat_max": 41.0,
+      "lon_min": 141.0,
+      "lon_max": 148.0
+    },
+    {
+      "name": "韩国",
+      "lat_min": 33.0,
+      "lat_max": 36.0,
+      "lon_min": 137.0,
+      "lon_max": 140.0
+    },
+    {
+      "name": "日本本州西部",
+      "lat_min": 33.0,
+      "lat_max": 38.0,
+      "lon_min": 124.0,
+      "lon_max": 130.0
+    },
+    {
+      "name": "日本本州西南部南岸近海",
+      "lat_min": 34.0,
+      "lat_max": 36.0,
+      "lon_min": 130.0,
+      "lon_max": 137.0
+    },
+    {
+      "name": "琉球群岛西北",
+      "lat_min": 33.0,
+      "lat_max": 35.0,
+      "lon_min": 133.0,
+      "lon_max": 137.0
+    },
+    {
+      "name": "日本九州岛",
+      "lat_min": 27.0,
+      "lat_max": 33.0,
+      "lon_min": 126.0,
+      "lon_max": 129.0
+    },
+    {
+      "name": "日本四国岛",
+      "lat_min": 30.0,
+      "lat_max": 34.0,
+      "lon_min": 128.0,
+      "lon_max": 132.0
+    },
+    {
+      "name": "日本四国岛东南",
+      "lat_min": 32.0,
+      "lat_max": 34.0,
+      "lon_min": 132.0,
+      "lon_max": 135.0
+    },
+    {
+      "name": "琉球群岛",
+      "lat_min": 29.0,
+      "lat_max": 33.0,
+      "lon_min": 132.0,
+      "lon_max": 137.0
+    },
+    {
+      "name": "琉球群岛东南",
+      "lat_min": 24.0,
+      "lat_max": 30.0,
+      "lon_min": 126.0,
+      "lon_max": 131.0
+    },
+    {
+      "name": "小笠原群岛以西",
+      "lat_min": 23.0,
+      "lat_max": 30.0,
+      "lon_min": 126.0,
+      "lon_max": 132.0
+    },
+    {
+      "name": "菲律宾海",
+      "lat_min": 25.0,
+      "lat_max": 29.0,
+      "lon_min": 132.0,
+      "lon_max": 137.0
+    },
+    {
+      "name": "中国东南部沿岸近海",
+      "lat_min": 13.0,
+      "lat_max": 25.0,
+      "lon_min": 126.0,
+      "lon_max": 137.0
+    },
+    {
+      "name": "中国台湾地区",
+      "lat_min": 21.0,
+      "lat_max": 28.0,
+      "lon_min": 112.0,
+      "lon_max": 122.0
+    },
+    {
+      "name": "中国台湾",
+      "lat_min": 21.0,
+      "lat_max": 28.0,
+      "lon_min": 117.0,
+      "lon_max": 123.0
+    },
+    {
+      "name": "中国台湾东北",
+      "lat_min": 22.0,
+      "lat_max": 26.0,
+      "lon_min": 120.0,
+      "lon_max": 122.0
+    },
+    {
+      "name": "琉球群岛西南部",
+      "lat_min": 25.0,
+      "lat_max": 28.0,
+      "lon_min": 123.0,
+      "lon_max": 126.0
+    },
+    {
+      "name": "中国台湾东南",
+      "lat_min": 23.0,
+      "lat_max": 26.0,
+      "lon_min": 123.0,
+      "lon_max": 126.0
+    },
+    {
+      "name": "菲律宾群岛地区",
+      "lat_min": 21.0,
+      "lat_max": 23.0,
+      "lon_min": 123.0,
+      "lon_max": 126.0
+    },
+    {
+      "name": "菲律宾吕宋岛",
+      "lat_min": 5.0,
+      "lat_max": 21.0,
+      "lon_min": 121.0,
+      "lon_max": 128.0
+    },
+    {
+      "name": "菲律宾民都洛岛",
+      "lat_min": 12.0,
+      "lat_max": 19.0,
+      "lon_min": 120.0,
+      "lon_max": 125.0
+    },
+    {
+      "name": "菲律宾萨马岛",
+      "lat_min": 12.0,
+      "lat_max": 14.0,
+      "lon_min": 120.0,
+      "lon_max": 122.0
+    },
+    {
+      "name": "菲律宾巴拉望岛",
+      "lat_min": 11.0,
+      "lat_max": 13.0,
+      "lon_min": 124.0,
+      "lon_max": 126.0
+    },
+    {
+      "name": "苏禄海",
+      "lat_min": 8.0,
+      "lat_max": 12.0,
+      "lon_min": 117.0,
+      "lon_max": 121.0
+    },
+    {
+      "name": "菲律宾班乃岛",
+      "lat_min": 6.0,
+      "lat_max": 11.0,
+      "lon_min": 118.0,
+      "lon_max": 122.0
+    },
+    {
+      "name": "菲律宾宿雾岛",
+      "lat_min": 10.0,
+      "lat_max": 12.0,
+      "lon_min": 121.0,
+      "lon_max": 123.0
+    },
+    {
+      "name": "菲律宾莱特岛",
+      "lat_min": 10.0,
+      "lat_max": 12.0,
+      "lon_min": 123.0,
+      "lon_max": 124.0
+    },
+    {
+      "name": "菲律宾内格罗斯岛",
+      "lat_min": 10.0,
+      "lat_max": 12.0,
+      "lon_min": 124.0,
+      "lon_max": 126.0
+    },
+    {
+      "name": "菲律宾苏禄群岛",
+      "lat_min": 9.0,
+      "lat_max": 10.0,
+      "lon_min": 122.0,
+      "lon_max": 124.0
+    },
+    {
+      "name": "菲律宾棉兰老岛",
+      "lat_min": 4.0,
+      "lat_max": 7.0,
+      "lon_min": 119.0,
+      "lon_max": 121.0
+    },
+    {
+      "name": "菲律宾群岛以东",
+      "lat_min": 5.0,
+      "lat_max": 10.0,
+      "lon_min": 121.0,
+      "lon_max": 127.0
+    },
+    {
+      "name": "加里曼丹岛",
+      "lat_min": 5.0,
+      "lat_max": 21.0,
+      "lon_min": 126.0,
+      "lon_max": 131.0
+    },
+    {
+      "name": "西里伯斯海",
+      "lat_min": -4.0,
+      "lat_max": 8.0,
+      "lon_min": 108.0,
+      "lon_max": 119.0
+    },
+    {
+      "name": "印尼塔劳群岛",
+      "lat_min": 1.0,
+      "lat_max": 6.0,
+      "lon_min": 118.0,
+      "lon_max": 125.0
+    },
+    {
+      "name": "印尼哈马黑拉岛以北",
+      "lat_min": 2.0,
+      "lat_max": 5.0,
+      "lon_min": 125.0,
+      "lon_max": 128.0
+    },
+    {
+      "name": "印尼米纳哈沙半岛",
+      "lat_min": 3.0,
+      "lat_max": 5.0,
+      "lon_min": 128.0,
+      "lon_max": 131.0
+    },
+    {
+      "name": "马鲁古海北部",
+      "lat_min": -1.0,
+      "lat_max": 2.0,
+      "lon_min": 118.0,
+      "lon_max": 125.0
+    },
+    {
+      "name": "印尼哈马黑拉岛",
+      "lat_min": 0.0,
+      "lat_max": 3.0,
+      "lon_min": 125.0,
+      "lon_max": 128.0
+    },
+    {
+      "name": "印尼苏拉威西岛",
+      "lat_min": -2.0,
+      "lat_max": 3.0,
+      "lon_min": 127.0,
+      "lon_max": 130.0
+    },
+    {
+      "name": "马鲁古海南部",
+      "lat_min": -6.0,
+      "lat_max": -1.0,
+      "lon_min": 118.0,
+      "lon_max": 124.0
+    },
+    {
+      "name": "塞兰海",
+      "lat_min": -2.0,
+      "lat_max": 0.0,
+      "lon_min": 124.0,
+      "lon_max": 127.0
+    },
+    {
+      "name": "印尼布鲁岛",
+      "lat_min": -4.0,
+      "lat_max": -2.0,
+      "lon_min": 124.0,
+      "lon_max": 129.0
+    },
+    {
+      "name": "印尼塞兰岛",
+      "lat_min": -4.0,
+      "lat_max": -3.0,
+      "lon_min": 126.0,
+      "lon_max": 127.0
+    },
+    {
+      "name": "印尼苏门答腊岛西南",
+      "lat_min": -4.0,
+      "lat_max": -2.0,
+      "lon_min": 127.0,
+      "lon_max": 131.0
+    },
+    {
+      "name": "印尼苏门答腊岛南部",
+      "lat_min": -12.0,
+      "lat_max": 0.0,
+      "lon_min": 92.0,
+      "lon_max": 105.0
+    },
+    {
+      "name": "爪哇海",
+      "lat_min": -6.0,
+      "lat_max": 0.0,
+      "lon_min": 98.0,
+      "lon_max": 107.0
+    },
+    {
+      "name": "印尼巽他海峡",
+      "lat_min": -6.0,
+      "lat_max": 0.0,
+      "lon_min": 105.0,
+      "lon_max": 118.0
+    },
+    {
+      "name": "印尼爪哇岛",
+      "lat_min": -7.0,
+      "lat_max": -5.0,
+      "lon_min": 104.0,
+      "lon_max": 106.0
+    },
+    {
+      "name": "巴厘海",
+      "lat_min": -9.0,
+      "lat_max": -5.0,
+      "lon_min": 105.0,
+      "lon_max": 114.0
+    },
+    {
+      "name": "弗洛勒斯海",
+      "lat_min": -8.0,
+      "lat_max": -6.0,
+      "lon_min": 114.0,
+      "lon_max": 118.0
+    },
+    {
+      "name": "班达海",
+      "lat_min": -8.0,
+      "lat_max": -6.0,
+      "lon_min": 118.0,
+      "lon_max": 123.0
+    },
+    {
+      "name": "印尼塔宁巴尔群岛地区",
+      "lat_min": -8.0,
+      "lat_max": -4.0,
+      "lon_min": 123.0,
+      "lon_max": 132.0
+    },
+    {
+      "name": "印尼爪哇岛以南",
+      "lat_min": -9.0,
+      "lat_max": -6.0,
+      "lon_min": 130.0,
+      "lon_max": 133.0
+    },
+    {
+      "name": "印尼巴厘岛地区",
+      "lat_min": -12.0,
+      "lat_max": -8.0,
+      "lon_min": 105.0,
+      "lon_max": 114.0
+    },
+    {
+      "name": "印尼巴厘岛以南",
+      "lat_min": -9.0,
+      "lat_max": -8.0,
+      "lon_min": 114.0,
+      "lon_max": 116.0
+    },
+    {
+      "name": "印尼松巴哇岛地区",
+      "lat_min": -12.0,
+      "lat_max": -9.0,
+      "lon_min": 114.0,
+      "lon_max": 116.0
+    },
+    {
+      "name": "印尼弗洛勒斯岛地区",
+      "lat_min": -10.0,
+      "lat_max": -8.0,
+      "lon_min": 116.0,
+      "lon_max": 119.0
+    },
+    {
+      "name": "印尼松巴岛地区",
+      "lat_min": -9.0,
+      "lat_max": -8.0,
+      "lon_min": 119.0,
+      "lon_max": 124.0
+    },
+    {
+      "name": "萨武海",
+      "lat_min": -11.0,
+      "lat_max": -9.0,
+      "lon_min": 119.0,
+      "lon_max": 121.0
+    },
+    {
+      "name": "帝汶岛地区",
+      "lat_min": -11.0,
+      "lat_max": -9.0,
+      "lon_min": 121.0,
+      "lon_max": 123.0
+    },
+    {
+      "name": "帝汶海",
+      "lat_min": -11.0,
+      "lat_max": -8.0,
+      "lon_min": 123.0,
+      "lon_max": 128.0
+    },
+    {
+      "name": "印尼松巴哇岛以南",
+      "lat_min": -12.0,
+      "lat_max": -8.0,
+      "lon_min": 125.0,
+      "lon_max": 132.0
+    },
+    {
+      "name": "印尼松巴岛以南",
+      "lat_min": -13.0,
+      "lat_max": -10.0,
+      "lon_min": 116.0,
+      "lon_max": 119.0
+    },
+    {
+      "name": "印尼帝汶岛以南",
+      "lat_min": -13.0,
+      "lat_max": -11.0,
+      "lon_min": 119.0,
+      "lon_max": 121.0
+    },
+    {
+      "name": "缅甸、印度边境地区",
+      "lat_min": -13.0,
+      "lat_max": -11.0,
+      "lon_min": 121.0,
+      "lon_max": 129.0
+    },
+    {
+      "name": "缅甸、孟加拉国边境地区",
+      "lat_min": 22.0,
+      "lat_max": 28.0,
+      "lon_min": 93.0,
+      "lon_max": 98.0
+    },
+    {
+      "name": "缅甸",
+      "lat_min": 21.0,
+      "lat_max": 22.0,
+      "lon_min": 92.0,
+      "lon_max": 93.0
+    },
+    {
+      "name": "缅甸、中国边境地区",
+      "lat_min": 17.0,
+      "lat_max": 27.0,
+      "lon_min": 92.0,
+      "lon_max": 100.0
+    },
+    {
+      "name": "缅甸南岸近海",
+      "lat_min": 21.0,
+      "lat_max": 29.0,
+      "lon_min": 97.0,
+      "lon_max": 102.0
+    },
+    {
+      "name": "东南亚",
+      "lat_min": 13.0,
+      "lat_max": 17.0,
+      "lon_min": 94.0,
+      "lon_max": 99.0
+    },
+    {
+      "name": "中国海南岛",
+      "lat_min": 18.0,
+      "lat_max": 20.3,
+      "lon_min": 108.55,
+      "lon_max": 111.25
+    },
+    {
+      "name": "南海海域",
+      "lat_min": 18.0,
+      "lat_max": 20.0,
+      "lon_min": 108.0,
+      "lon_max": 112.0
+    },
+    {
+      "name": "克什米尔东部",
+      "lat_min": 0.0,
+      "lat_max": 21.0,
+      "lon_min": 104.0,
+      "lon_max": 121.0
+    },
+    {
+      "name": "克什米尔、印度边境地区",
+      "lat_min": 33.0,
+      "lat_max": 36.0,
+      "lon_min": 75.0,
+      "lon_max": 79.0
+    },
+    {
+      "name": "克什米尔、中国西藏边境地区",
+      "lat_min": 32.0,
+      "lat_max": 34.0,
+      "lon_min": 75.0,
+      "lon_max": 78.0
+    },
+    {
+      "name": "中国西藏西部、印度边境地区",
+      "lat_min": 32.0,
+      "lat_max": 36.0,
+      "lon_min": 78.0,
+      "lon_max": 81.0
+    },
+    {
+      "name": "中国西藏",
+      "lat_min": 30.0,
+      "lat_max": 32.0,
+      "lon_min": 78.0,
+      "lon_max": 81.0
+    },
+    {
+      "name": "中国四川",
+      "lat_min": 28.0,
+      "lat_max": 36.0,
+      "lon_min": 80.0,
+      "lon_max": 99.0
+    },
+    {
+      "name": "印度北部",
+      "lat_min": 26.0,
+      "lat_max": 34.0,
+      "lon_min": 98.0,
+      "lon_max": 110.0
+    },
+    {
+      "name": "尼泊尔、印度边境地区",
+      "lat_min": 24.0,
+      "lat_max": 32.0,
+      "lon_min": 71.0,
+      "lon_max": 88.0
+    },
+    {
+      "name": "尼泊尔",
+      "lat_min": 26.0,
+      "lat_max": 30.0,
+      "lon_min": 80.0,
+      "lon_max": 88.0
+    },
+    {
+      "name": "印度锡金",
+      "lat_min": 27.0,
+      "lat_max": 30.0,
+      "lon_min": 81.0,
+      "lon_max": 88.0
+    },
+    {
+      "name": "不丹",
+      "lat_min": 27.0,
+      "lat_max": 28.0,
+      "lon_min": 88.0,
+      "lon_max": 89.0
+    },
+    {
+      "name": "中国西藏东部、印度边境地区",
+      "lat_min": 27.0,
+      "lat_max": 28.0,
+      "lon_min": 89.0,
+      "lon_max": 92.0
+    },
+    {
+      "name": "印度南部",
+      "lat_min": 26.0,
+      "lat_max": 30.0,
+      "lon_min": 92.0,
+      "lon_max": 98.0
+    },
+    {
+      "name": "印度、孟加拉国边境地区",
+      "lat_min": 8.0,
+      "lat_max": 24.0,
+      "lon_min": 68.0,
+      "lon_max": 89.0
+    },
+    {
+      "name": "孟加拉国",
+      "lat_min": 22.0,
+      "lat_max": 27.0,
+      "lon_min": 88.0,
+      "lon_max": 93.0
+    },
+    {
+      "name": "印度东北部",
+      "lat_min": 21.0,
+      "lat_max": 25.0,
+      "lon_min": 89.0,
+      "lon_max": 92.0
+    },
+    {
+      "name": "中国云南",
+      "lat_min": 25.0,
+      "lat_max": 27.0,
+      "lon_min": 90.0,
+      "lon_max": 95.0
+    },
+    {
+      "name": "孟加拉湾",
+      "lat_min": 22.0,
+      "lat_max": 29.0,
+      "lon_min": 99.0,
+      "lon_max": 106.0
+    },
+    {
+      "name": "吉尔吉斯斯坦、中国新疆边境地区",
+      "lat_min": 6.0,
+      "lat_max": 22.0,
+      "lon_min": 80.0,
+      "lon_max": 94.0
+    },
+    {
+      "name": "中国新疆南部",
+      "lat_min": 40.0,
+      "lat_max": 43.0,
+      "lon_min": 74.0,
+      "lon_max": 81.0
+    },
+    {
+      "name": "中国甘肃",
+      "lat_min": 35.0,
+      "lat_max": 42.0,
+      "lon_min": 74.0,
+      "lon_max": 95.0
+    },
+    {
+      "name": "中国内蒙古西部",
+      "lat_min": 33.0,
+      "lat_max": 43.0,
+      "lon_min": 94.0,
+      "lon_max": 109.0
+    },
+    {
+      "name": "克什米尔、中国新疆边境地区",
+      "lat_min": 36.0,
+      "lat_max": 43.0,
+      "lon_min": 97.0,
+      "lon_max": 111.0
+    },
+    {
+      "name": "中国青海",
+      "lat_min": 36.0,
+      "lat_max": 37.0,
+      "lon_min": 75.0,
+      "lon_max": 79.0
+    },
+    {
+      "name": "俄罗斯西伯利亚西南部",
+      "lat_min": 32.0,
+      "lat_max": 39.0,
+      "lon_min": 90.0,
+      "lon_max": 103.0
+    },
+    {
+      "name": "俄罗斯贝加尔湖地区",
+      "lat_min": 50.0,
+      "lat_max": 60.0,
+      "lon_min": 63.0,
+      "lon_max": 110.0
+    },
+    {
+      "name": "俄罗斯贝加尔湖以东",
+      "lat_min": 50.0,
+      "lat_max": 58.0,
+      "lon_min": 102.0,
+      "lon_max": 113.0
+    },
+    {
+      "name": "哈萨克斯坦东部",
+      "lat_min": 50.0,
+      "lat_max": 60.0,
+      "lon_min": 110.0,
+      "lon_max": 120.0
+    },
+    {
+      "name": "伊塞克湖地区",
+      "lat_min": 44.0,
+      "lat_max": 54.0,
+      "lon_min": 75.0,
+      "lon_max": 86.0
+    },
+    {
+      "name": "哈萨克斯坦、中国新疆边境地区",
+      "lat_min": 42.0,
+      "lat_max": 44.0,
+      "lon_min": 75.0,
+      "lon_max": 80.0
+    },
+    {
+      "name": "中国新疆北部",
+      "lat_min": 43.0,
+      "lat_max": 50.0,
+      "lon_min": 80.0,
+      "lon_max": 88.0
+    },
+    {
+      "name": "俄罗斯、蒙古边境地区",
+      "lat_min": 42.0,
+      "lat_max": 49.0,
+      "lon_min": 81.0,
+      "lon_max": 96.0
+    },
+    {
+      "name": "蒙古",
+      "lat_min": 49.0,
+      "lat_max": 53.0,
+      "lon_min": 88.0,
+      "lon_max": 117.0
+    },
+    {
+      "name": "俄罗斯乌拉尔山脉地区",
+      "lat_min": 42.0,
+      "lat_max": 51.0,
+      "lon_min": 88.0,
+      "lon_max": 119.0
+    },
+    {
+      "name": "哈萨克斯坦西部",
+      "lat_min": 51.0,
+      "lat_max": 69.0,
+      "lon_min": 55.0,
+      "lon_max": 68.0
+    },
+    {
+      "name": "高加索东部",
+      "lat_min": 41.0,
+      "lat_max": 54.0,
+      "lon_min": 47.0,
+      "lon_max": 65.0
+    },
+    {
+      "name": "里海",
+      "lat_min": 40.0,
+      "lat_max": 44.0,
+      "lon_min": 45.0,
+      "lon_max": 50.0
+    },
+    {
+      "name": "乌兹别克斯坦西北部",
+      "lat_min": 37.0,
+      "lat_max": 47.0,
+      "lon_min": 48.0,
+      "lon_max": 53.0
+    },
+    {
+      "name": "土库曼斯坦",
+      "lat_min": 39.0,
+      "lat_max": 46.0,
+      "lon_min": 56.0,
+      "lon_max": 65.0
+    },
+    {
+      "name": "土库曼斯坦、伊朗边境地区",
+      "lat_min": 36.0,
+      "lat_max": 43.0,
+      "lon_min": 52.0,
+      "lon_max": 65.0
+    },
+    {
+      "name": "土库曼斯坦、阿富汗边境地区",
+      "lat_min": 36.0,
+      "lat_max": 39.0,
+      "lon_min": 53.0,
+      "lon_max": 62.0
+    },
+    {
+      "name": "土耳其、伊朗边境地区",
+      "lat_min": 35.0,
+      "lat_max": 38.0,
+      "lon_min": 61.0,
+      "lon_max": 65.0
+    },
+    {
+      "name": "亚美尼亚、阿塞拜疆、伊朗边境地区",
+      "lat_min": 37.0,
+      "lat_max": 39.0,
+      "lon_min": 44.0,
+      "lon_max": 45.0
+    },
+    {
+      "name": "伊朗西北部",
+      "lat_min": 38.0,
+      "lat_max": 40.0,
+      "lon_min": 44.0,
+      "lon_max": 49.0
+    },
+    {
+      "name": "伊朗、伊拉克边境地区",
+      "lat_min": 36.0,
+      "lat_max": 39.0,
+      "lon_min": 45.0,
+      "lon_max": 49.0
+    },
+    {
+      "name": "伊朗西部",
+      "lat_min": 30.0,
+      "lat_max": 37.0,
+      "lon_min": 44.0,
+      "lon_max": 49.0
+    },
+    {
+      "name": "伊朗中北部",
+      "lat_min": 30.0,
+      "lat_max": 37.0,
+      "lon_min": 46.0,
+      "lon_max": 50.0
+    },
+    {
+      "name": "阿富汗西北部",
+      "lat_min": 30.0,
+      "lat_max": 38.0,
+      "lon_min": 50.0,
+      "lon_max": 61.0
+    },
+    {
+      "name": "阿富汗西南部",
+      "lat_min": 33.0,
+      "lat_max": 36.0,
+      "lon_min": 61.0,
+      "lon_max": 65.0
+    },
+    {
+      "name": "阿拉伯半岛东部",
+      "lat_min": 30.0,
+      "lat_max": 33.0,
+      "lon_min": 61.0,
+      "lon_max": 65.0
+    },
+    {
+      "name": "波斯湾",
+      "lat_min": 14.0,
+      "lat_max": 30.0,
+      "lon_min": 44.0,
+      "lon_max": 60.0
+    },
+    {
+      "name": "伊朗南部",
+      "lat_min": 25.0,
+      "lat_max": 30.0,
+      "lon_min": 49.0,
+      "lon_max": 55.0
+    },
+    {
+      "name": "巴基斯坦西南部",
+      "lat_min": 25.0,
+      "lat_max": 30.0,
+      "lon_min": 50.0,
+      "lon_max": 63.0
+    },
+    {
+      "name": "阿曼湾",
+      "lat_min": 25.0,
+      "lat_max": 30.0,
+      "lon_min": 61.0,
+      "lon_max": 65.0
+    },
+    {
+      "name": "巴基斯坦沿岸近海",
+      "lat_min": 23.0,
+      "lat_max": 25.0,
+      "lon_min": 57.0,
+      "lon_max": 61.0
+    },
+    {
+      "name": "乌克兰、摩尔多瓦、俄罗斯西南部地区",
+      "lat_min": 22.0,
+      "lat_max": 25.0,
+      "lon_min": 61.0,
+      "lon_max": 68.0
+    },
+    {
+      "name": "罗马尼亚",
+      "lat_min": 44.0,
+      "lat_max": 50.0,
+      "lon_min": 22.0,
+      "lon_max": 49.0
+    },
+    {
+      "name": "保加利亚",
+      "lat_min": 44.0,
+      "lat_max": 48.0,
+      "lon_min": 21.0,
+      "lon_max": 29.0
+    },
+    {
+      "name": "黑海",
+      "lat_min": 42.0,
+      "lat_max": 44.0,
+      "lon_min": 22.0,
+      "lon_max": 28.0
+    },
+    {
+      "name": "乌克兰克里米亚地区",
+      "lat_min": 42.0,
+      "lat_max": 45.0,
+      "lon_min": 28.0,
+      "lon_max": 41.0
+    },
+    {
+      "name": "高加索西部",
+      "lat_min": 44.0,
+      "lat_max": 46.0,
+      "lon_min": 32.0,
+      "lon_max": 37.0
+    },
+    {
+      "name": "希腊、保加利亚边境地区",
+      "lat_min": 41.0,
+      "lat_max": 45.0,
+      "lon_min": 37.0,
+      "lon_max": 45.0
+    },
+    {
+      "name": "希腊",
+      "lat_min": 41.0,
+      "lat_max": 42.0,
+      "lon_min": 23.0,
+      "lon_max": 27.0
+    },
+    {
+      "name": "爱琴海",
+      "lat_min": 38.0,
+      "lat_max": 41.0,
+      "lon_min": 20.0,
+      "lon_max": 24.0
+    },
+    {
+      "name": "土耳其",
+      "lat_min": 38.0,
+      "lat_max": 41.0,
+      "lon_min": 23.0,
+      "lon_max": 27.0
+    },
+    {
+      "name": "格鲁吉亚、亚美尼亚、土耳其边境地区",
+      "lat_min": 36.0,
+      "lat_max": 42.0,
+      "lon_min": 26.0,
+      "lon_max": 44.0
+    },
+    {
+      "name": "希腊南部",
+      "lat_min": 40.0,
+      "lat_max": 42.0,
+      "lon_min": 41.0,
+      "lon_max": 45.0
+    },
+    {
+      "name": "希腊多德卡尼斯群岛",
+      "lat_min": 36.0,
+      "lat_max": 38.0,
+      "lon_min": 21.0,
+      "lon_max": 25.0
+    },
+    {
+      "name": "希腊克里特岛",
+      "lat_min": 35.0,
+      "lat_max": 38.0,
+      "lon_min": 25.0,
+      "lon_max": 29.0
+    },
+    {
+      "name": "地中海东部",
+      "lat_min": 34.0,
+      "lat_max": 36.0,
+      "lon_min": 23.0,
+      "lon_max": 27.0
+    },
+    {
+      "name": "塞浦路斯地区",
+      "lat_min": 32.0,
+      "lat_max": 36.0,
+      "lon_min": 25.0,
+      "lon_max": 35.0
+    },
+    {
+      "name": "死海地区",
+      "lat_min": 34.0,
+      "lat_max": 36.0,
+      "lon_min": 31.0,
+      "lon_max": 35.0
+    },
+    {
+      "name": "约旦、叙利亚地区",
+      "lat_min": 30.0,
+      "lat_max": 33.0,
+      "lon_min": 34.0,
+      "lon_max": 37.0
+    },
+    {
+      "name": "伊拉克",
+      "lat_min": 30.0,
+      "lat_max": 37.0,
+      "lon_min": 35.0,
+      "lon_max": 43.0
+    },
+    {
+      "name": "葡萄牙",
+      "lat_min": 29.0,
+      "lat_max": 37.0,
+      "lon_min": 39.0,
+      "lon_max": 47.0
+    },
+    {
+      "name": "西班牙",
+      "lat_min": 37.0,
+      "lat_max": 42.0,
+      "lon_min": -10.0,
+      "lon_max": -6.0
+    },
+    {
+      "name": "比利牛斯山脉",
+      "lat_min": 37.0,
+      "lat_max": 44.0,
+      "lon_min": -10.0,
+      "lon_max": 4.0
+    },
+    {
+      "name": "法国南岸近海",
+      "lat_min": 42.0,
+      "lat_max": 44.0,
+      "lon_min": -2.0,
+      "lon_max": 4.0
+    },
+    {
+      "name": "法国科西嘉岛",
+      "lat_min": 43.0,
+      "lat_max": 44.0,
+      "lon_min": 3.0,
+      "lon_max": 8.0
+    },
+    {
+      "name": "意大利中部",
+      "lat_min": 41.0,
+      "lat_max": 44.0,
+      "lon_min": 8.0,
+      "lon_max": 10.0
+    },
+    {
+      "name": "亚得里亚海",
+      "lat_min": 42.0,
+      "lat_max": 44.0,
+      "lon_min": 10.0,
+      "lon_max": 15.0
+    },
+    {
+      "name": "巴尔干半岛西北部",
+      "lat_min": 40.0,
+      "lat_max": 45.0,
+      "lon_min": 13.0,
+      "lon_max": 19.0
+    },
+    {
+      "name": "直布罗陀以西",
+      "lat_min": 41.0,
+      "lat_max": 47.0,
+      "lon_min": 14.0,
+      "lon_max": 23.0
+    },
+    {
+      "name": "直布罗陀海峡",
+      "lat_min": 33.0,
+      "lat_max": 37.0,
+      "lon_min": -10.0,
+      "lon_max": -8.0
+    },
+    {
+      "name": "西班牙巴利阿里群岛",
+      "lat_min": 35.0,
+      "lat_max": 37.0,
+      "lon_min": -8.0,
+      "lon_max": -2.0
+    },
+    {
+      "name": "地中海西部",
+      "lat_min": 38.0,
+      "lat_max": 41.0,
+      "lon_min": 1.0,
+      "lon_max": 5.0
+    },
+    {
+      "name": "意大利撒丁岛",
+      "lat_min": 36.0,
+      "lat_max": 43.0,
+      "lon_min": -2.0,
+      "lon_max": 11.0
+    },
+    {
+      "name": "第勒尼安海",
+      "lat_min": 39.0,
+      "lat_max": 41.0,
+      "lon_min": 8.0,
+      "lon_max": 10.0
+    },
+    {
+      "name": "意大利南部",
+      "lat_min": 39.0,
+      "lat_max": 42.0,
+      "lon_min": 10.0,
+      "lon_max": 15.0
+    },
+    {
+      "name": "阿尔巴尼亚",
+      "lat_min": 38.0,
+      "lat_max": 42.0,
+      "lon_min": 12.0,
+      "lon_max": 19.0
+    },
+    {
+      "name": "希腊、阿尔巴尼亚边境地区",
+      "lat_min": 40.0,
+      "lat_max": 42.0,
+      "lon_min": 19.0,
+      "lon_max": 21.0
+    },
+    {
+      "name": "葡萄牙马德拉群岛地区",
+      "lat_min": 39.0,
+      "lat_max": 41.0,
+      "lon_min": 19.0,
+      "lon_max": 21.0
+    },
+    {
+      "name": "西班牙加那利群岛地区",
+      "lat_min": 31.0,
+      "lat_max": 35.0,
+      "lon_min": -22.0,
+      "lon_max": -10.0
+    },
+    {
+      "name": "摩洛哥",
+      "lat_min": 25.0,
+      "lat_max": 31.0,
+      "lon_min": -22.0,
+      "lon_max": -10.0
+    },
+    {
+      "name": "阿尔及利亚北部",
+      "lat_min": 28.0,
+      "lat_max": 35.0,
+      "lon_min": -13.0,
+      "lon_max": -1.0
+    },
+    {
+      "name": "突尼斯",
+      "lat_min": 28.0,
+      "lat_max": 37.0,
+      "lon_min": -7.0,
+      "lon_max": 10.0
+    },
+    {
+      "name": "意大利西西里岛",
+      "lat_min": 30.0,
+      "lat_max": 38.0,
+      "lon_min": 8.0,
+      "lon_max": 12.0
+    },
+    {
+      "name": "伊奥尼亚海",
+      "lat_min": 36.0,
+      "lat_max": 39.0,
+      "lon_min": 11.0,
+      "lon_max": 16.0
+    },
+    {
+      "name": "地中海中部",
+      "lat_min": 37.0,
+      "lat_max": 39.0,
+      "lon_min": 16.0,
+      "lon_max": 21.0
+    },
+    {
+      "name": "利比亚沿岸近海",
+      "lat_min": 31.0,
+      "lat_max": 37.0,
+      "lon_min": 12.0,
+      "lon_max": 25.0
+    },
+    {
+      "name": "北大西洋",
+      "lat_min": 30.0,
+      "lat_max": 33.0,
+      "lon_min": 10.0,
+      "lon_max": 25.0
+    },
+    {
+      "name": "中大西洋海岭北部",
+      "lat_min": 0.0,
+      "lat_max": 67.0,
+      "lon_min": -69.0,
+      "lon_max": -3.0
+    },
+    {
+      "name": "亚速尔群岛地区",
+      "lat_min": 10.0,
+      "lat_max": 54.0,
+      "lon_min": -48.0,
+      "lon_max": -20.0
+    },
+    {
+      "name": "葡萄牙亚速尔群岛",
+      "lat_min": 34.0,
+      "lat_max": 43.0,
+      "lon_min": -35.0,
+      "lon_max": -20.0
+    },
+    {
+      "name": "中大西洋海岭中部",
+      "lat_min": 36.0,
+      "lat_max": 40.0,
+      "lon_min": -33.0,
+      "lon_max": -25.0
+    },
+    {
+      "name": "阿森松岛以北",
+      "lat_min": -3.0,
+      "lat_max": 10.0,
+      "lon_min": -44.0,
+      "lon_max": -18.0
+    },
+    {
+      "name": "阿森松岛地区",
+      "lat_min": -5.0,
+      "lat_max": 2.0,
+      "lon_min": -18.0,
+      "lon_max": -9.0
+    },
+    {
+      "name": "南大西洋",
+      "lat_min": -12.0,
+      "lat_max": -5.0,
+      "lon_min": -18.0,
+      "lon_max": -9.0
+    },
+    {
+      "name": "中大西洋海岭南部",
+      "lat_min": -55.0,
+      "lat_max": 0.0,
+      "lon_min": -68.0,
+      "lon_max": 15.0
+    },
+    {
+      "name": "特里斯坦-达库尼亚群岛地区",
+      "lat_min": -60.0,
+      "lat_max": -12.0,
+      "lon_min": -27.0,
+      "lon_max": -2.0
+    },
+    {
+      "name": "布韦岛地区",
+      "lat_min": -43.0,
+      "lat_max": -34.0,
+      "lon_min": -16.0,
+      "lon_max": -6.0
+    },
+    {
+      "name": "非洲西南",
+      "lat_min": -60.0,
+      "lat_max": -49.0,
+      "lon_min": -2.0,
+      "lon_max": 9.0
+    },
+    {
+      "name": "大西洋东南部",
+      "lat_min": -60.0,
+      "lat_max": -41.0,
+      "lon_min": 9.0,
+      "lon_max": 20.0
+    },
+    {
+      "name": "亚丁湾东部",
+      "lat_min": -69.0,
+      "lat_max": -60.0,
+      "lon_min": -5.0,
+      "lon_max": 20.0
+    },
+    {
+      "name": "索科特拉地区",
+      "lat_min": 11.0,
+      "lat_max": 15.0,
+      "lon_min": 47.0,
+      "lon_max": 53.0
+    },
+    {
+      "name": "阿拉伯海",
+      "lat_min": 11.0,
+      "lat_max": 14.0,
+      "lon_min": 52.0,
+      "lon_max": 57.0
+    },
+    {
+      "name": "印度拉克沙群岛地区",
+      "lat_min": 8.0,
+      "lat_max": 22.0,
+      "lon_min": 59.0,
+      "lon_max": 73.0
+    },
+    {
+      "name": "索马里东北部",
+      "lat_min": 8.0,
+      "lat_max": 13.0,
+      "lon_min": 71.0,
+      "lon_max": 76.0
+    },
+    {
+      "name": "北印度洋",
+      "lat_min": 3.0,
+      "lat_max": 12.0,
+      "lon_min": 47.0,
+      "lon_max": 52.0
+    },
+    {
+      "name": "卡尔斯伯格海岭",
+      "lat_min": 0.0,
+      "lat_max": 11.0,
+      "lon_min": 44.0,
+      "lon_max": 92.0
+    },
+    {
+      "name": "马尔代夫群岛地区",
+      "lat_min": -7.0,
+      "lat_max": 11.0,
+      "lon_min": 54.0,
+      "lon_max": 70.0
+    },
+    {
+      "name": "拉克代夫海",
+      "lat_min": -3.0,
+      "lat_max": 8.0,
+      "lon_min": 70.0,
+      "lon_max": 78.0
+    },
+    {
+      "name": "斯里兰卡",
+      "lat_min": 2.0,
+      "lat_max": 8.0,
+      "lon_min": 75.0,
+      "lon_max": 80.0
+    },
+    {
+      "name": "南印度洋",
+      "lat_min": 5.0,
+      "lat_max": 10.0,
+      "lon_min": 79.0,
+      "lon_max": 83.0
+    },
+    {
+      "name": "查戈斯群岛地区",
+      "lat_min": -69.0,
+      "lat_max": 0.0,
+      "lon_min": 20.0,
+      "lon_max": 114.0
+    },
+    {
+      "name": "毛里求斯-留尼汪地区",
+      "lat_min": -10.0,
+      "lat_max": -3.0,
+      "lon_min": 68.0,
+      "lon_max": 78.0
+    },
+    {
+      "name": "西南印度洋海岭",
+      "lat_min": -25.0,
+      "lat_max": -17.0,
+      "lon_min": 53.0,
+      "lon_max": 67.0
+    },
+    {
+      "name": "中印度洋海岭",
+      "lat_min": -41.0,
+      "lat_max": -25.0,
+      "lon_min": 40.0,
+      "lon_max": 67.0
+    },
+    {
+      "name": "非洲以南",
+      "lat_min": -50.0,
+      "lat_max": -7.0,
+      "lon_min": 64.0,
+      "lon_max": 84.0
+    },
+    {
+      "name": "爱德华王子群岛地区",
+      "lat_min": -60.0,
+      "lat_max": -41.0,
+      "lon_min": 20.0,
+      "lon_max": 32.0
+    },
+    {
+      "name": "克罗泽群岛地区",
+      "lat_min": -52.0,
+      "lat_max": -41.0,
+      "lon_min": 32.0,
+      "lon_max": 44.0
+    },
+    {
+      "name": "凯尔盖朗群岛地区",
+      "lat_min": -52.0,
+      "lat_max": -41.0,
+      "lon_min": 44.0,
+      "lon_max": 57.0
+    },
+    {
+      "name": "布罗肯海岭",
+      "lat_min": -55.0,
+      "lat_max": -44.0,
+      "lon_min": 63.0,
+      "lon_max": 76.0
+    },
+    {
+      "name": "东南印度洋海岭",
+      "lat_min": -35.0,
+      "lat_max": -30.0,
+      "lon_min": 79.0,
+      "lon_max": 105.0
+    },
+    {
+      "name": "凯尔盖朗海台南部",
+      "lat_min": -54.0,
+      "lat_max": -34.0,
+      "lon_min": 84.0,
+      "lon_max": 114.0
+    },
+    {
+      "name": "澳大利亚以南",
+      "lat_min": -68.0,
+      "lat_max": -50.0,
+      "lon_min": 71.0,
+      "lon_max": 86.0
+    },
+    {
+      "name": "加拿大萨斯喀彻温省",
+      "lat_min": -67.0,
+      "lat_max": -40.0,
+      "lon_min": 114.0,
+      "lon_max": 148.0
+    },
+    {
+      "name": "加拿大马尼托巴省",
+      "lat_min": 49.0,
+      "lat_max": 60.0,
+      "lon_min": -110.0,
+      "lon_max": -102.0
+    },
+    {
+      "name": "哈德逊湾",
+      "lat_min": 49.0,
+      "lat_max": 60.0,
+      "lon_min": -102.0,
+      "lon_max": -90.0
+    },
+    {
+      "name": "加拿大安大略省",
+      "lat_min": 55.0,
+      "lat_max": 63.0,
+      "lon_min": -94.0,
+      "lon_max": -77.0
+    },
+    {
+      "name": "加拿大哈德逊海峡地区",
+      "lat_min": 46.0,
+      "lat_max": 57.0,
+      "lon_min": -95.0,
+      "lon_max": -79.0
+    },
+    {
+      "name": "加拿大魁北克省北部",
+      "lat_min": 59.0,
+      "lat_max": 64.0,
+      "lon_min": -80.0,
+      "lon_max": -64.0
+    },
+    {
+      "name": "戴维斯海峡",
+      "lat_min": 51.0,
+      "lat_max": 63.0,
+      "lon_min": -81.0,
+      "lon_max": -64.0
+    },
+    {
+      "name": "加拿大拉布拉多",
+      "lat_min": 60.0,
+      "lat_max": 69.0,
+      "lon_min": -65.0,
+      "lon_max": -49.0
+    },
+    {
+      "name": "拉布拉多海",
+      "lat_min": 52.0,
+      "lat_max": 61.0,
+      "lon_min": -68.0,
+      "lon_max": -55.0
+    },
+    {
+      "name": "加拿大魁北克省南部",
+      "lat_min": 48.0,
+      "lat_max": 60.0,
+      "lon_min": -63.0,
+      "lon_max": -52.0
+    },
+    {
+      "name": "加拿大加斯佩半岛",
+      "lat_min": 45.0,
+      "lat_max": 51.0,
+      "lon_min": -79.0,
+      "lon_max": -67.0
+    },
+    {
+      "name": "加拿大魁北克省东部",
+      "lat_min": 47.0,
+      "lat_max": 50.0,
+      "lon_min": -70.0,
+      "lon_max": -64.0
+    },
+    {
+      "name": "加拿大安蒂科斯蒂岛",
+      "lat_min": 50.0,
+      "lat_max": 52.0,
+      "lon_min": -67.0,
+      "lon_max": -57.0
+    },
+    {
+      "name": "加拿大新不伦瑞克省",
+      "lat_min": 49.0,
+      "lat_max": 50.0,
+      "lon_min": -65.0,
+      "lon_max": -61.0
+    },
+    {
+      "name": "加拿大新斯科舍省",
+      "lat_min": 45.0,
+      "lat_max": 48.0,
+      "lon_min": -68.0,
+      "lon_max": -64.0
+    },
+    {
+      "name": "加拿大爱德华王子岛省",
+      "lat_min": 43.0,
+      "lat_max": 47.0,
+      "lon_min": -67.0,
+      "lon_max": -59.0
+    },
+    {
+      "name": "圣劳伦斯湾",
+      "lat_min": 46.0,
+      "lat_max": 47.0,
+      "lon_min": -64.0,
+      "lon_max": -62.0
+    },
+    {
+      "name": "加拿大纽芬兰",
+      "lat_min": 47.0,
+      "lat_max": 50.0,
+      "lon_min": -64.0,
+      "lon_max": -59.0
+    },
+    {
+      "name": "蒙大拿州",
+      "lat_min": 46.0,
+      "lat_max": 52.0,
+      "lon_min": -59.0,
+      "lon_max": -52.0
+    },
+    {
+      "name": "爱达荷州东部",
+      "lat_min": 45.0,
+      "lat_max": 49.0,
+      "lon_min": -116.0,
+      "lon_max": -104.0
+    },
+    {
+      "name": "赫布根湖地区",
+      "lat_min": 42.0,
+      "lat_max": 45.0,
+      "lon_min": -114.0,
+      "lon_max": -111.0
+    },
+    {
+      "name": "怀俄明州黄石地区",
+      "lat_min": 44.0,
+      "lat_max": 45.0,
+      "lon_min": -112.0,
+      "lon_max": -111.0
+    },
+    {
+      "name": "怀俄明州",
+      "lat_min": 44.0,
+      "lat_max": 45.0,
+      "lon_min": -111.0,
+      "lon_max": -109.0
+    },
+    {
+      "name": "北达科他州",
+      "lat_min": 41.0,
+      "lat_max": 45.0,
+      "lon_min": -111.0,
+      "lon_max": -104.0
+    },
+    {
+      "name": "南达科他州",
+      "lat_min": 46.0,
+      "lat_max": 49.0,
+      "lon_min": -104.0,
+      "lon_max": -97.0
+    },
+    {
+      "name": "内布拉斯加州",
+      "lat_min": 43.0,
+      "lat_max": 46.0,
+      "lon_min": -104.0,
+      "lon_max": -97.0
+    },
+    {
+      "name": "明尼苏达州",
+      "lat_min": 40.0,
+      "lat_max": 43.0,
+      "lon_min": -104.0,
+      "lon_max": -96.0
+    },
+    {
+      "name": "爱荷华州",
+      "lat_min": 43.0,
+      "lat_max": 49.0,
+      "lon_min": -97.0,
+      "lon_max": -90.0
+    },
+    {
+      "name": "威斯康星州",
+      "lat_min": 40.0,
+      "lat_max": 43.0,
+      "lon_min": -97.0,
+      "lon_max": -91.0
+    },
+    {
+      "name": "伊利诺伊州",
+      "lat_min": 42.0,
+      "lat_max": 47.0,
+      "lon_min": -93.0,
+      "lon_max": -87.0
+    },
+    {
+      "name": "密歇根州",
+      "lat_min": 39.0,
+      "lat_max": 43.0,
+      "lon_min": -91.0,
+      "lon_max": -87.0
+    },
+    {
+      "name": "印第安纳州",
+      "lat_min": 42.0,
+      "lat_max": 48.0,
+      "lon_min": -90.0,
+      "lon_max": -82.0
+    },
+    {
+      "name": "加拿大安大略省南部",
+      "lat_min": 39.0,
+      "lat_max": 42.0,
+      "lon_min": -87.0,
+      "lon_max": -85.0
+    },
+    {
+      "name": "俄亥俄州",
+      "lat_min": 42.0,
+      "lat_max": 46.0,
+      "lon_min": -83.0,
+      "lon_max": -74.0
+    },
+    {
+      "name": "纽约州",
+      "lat_min": 39.0,
+      "lat_max": 42.0,
+      "lon_min": -85.0,
+      "lon_max": -80.0
+    },
+    {
+      "name": "宾夕法尼亚州",
+      "lat_min": 40.0,
+      "lat_max": 45.0,
+      "lon_min": -80.0,
+      "lon_max": -72.0
+    },
+    {
+      "name": "佛蒙特州、新罕布什尔州地区",
+      "lat_min": 40.0,
+      "lat_max": 42.0,
+      "lon_min": -81.0,
+      "lon_max": -75.0
+    },
+    {
+      "name": "缅因州",
+      "lat_min": 43.0,
+      "lat_max": 45.0,
+      "lon_min": -73.0,
+      "lon_max": -71.0
+    },
+    {
+      "name": "新英格兰南部",
+      "lat_min": 43.0,
+      "lat_max": 47.0,
+      "lon_min": -71.0,
+      "lon_max": -67.0
+    },
+    {
+      "name": "缅因湾",
+      "lat_min": 41.0,
+      "lat_max": 43.0,
+      "lon_min": -73.0,
+      "lon_max": -69.0
+    },
+    {
+      "name": "犹他州",
+      "lat_min": 42.0,
+      "lat_max": 44.0,
+      "lon_min": -70.0,
+      "lon_max": -66.0
+    },
+    {
+      "name": "科罗拉多州",
+      "lat_min": 37.0,
+      "lat_max": 42.0,
+      "lon_min": -114.0,
+      "lon_max": -109.0
+    },
+    {
+      "name": "堪萨斯州",
+      "lat_min": 37.0,
+      "lat_max": 41.0,
+      "lon_min": -109.0,
+      "lon_max": -102.0
+    },
+    {
+      "name": "爱荷华州、密苏里州边境地区",
+      "lat_min": 37.0,
+      "lat_max": 40.0,
+      "lon_min": -102.0,
+      "lon_max": -95.0
+    },
+    {
+      "name": "密苏里州、堪萨斯州边境地区",
+      "lat_min": 40.0,
+      "lat_max": 41.0,
+      "lon_min": -95.0,
+      "lon_max": -91.0
+    },
+    {
+      "name": "密苏里州",
+      "lat_min": 37.0,
+      "lat_max": 40.0,
+      "lon_min": -95.0,
+      "lon_max": -94.0
+    },
+    {
+      "name": "密苏里州、阿肯色州边境地区",
+      "lat_min": 37.0,
+      "lat_max": 40.0,
+      "lon_min": -94.0,
+      "lon_max": -91.0
+    },
+    {
+      "name": "密苏里州东部",
+      "lat_min": 36.0,
+      "lat_max": 37.0,
+      "lon_min": -94.0,
+      "lon_max": -91.0
+    },
+    {
+      "name": "密苏里州新马德里地区",
+      "lat_min": 37.0,
+      "lat_max": 39.0,
+      "lon_min": -91.0,
+      "lon_max": -90.0
+    },
+    {
+      "name": "密苏里州开普吉拉多地区",
+      "lat_min": 36.0,
+      "lat_max": 37.0,
+      "lon_min": -91.0,
+      "lon_max": -89.0
+    },
+    {
+      "name": "伊利诺伊州南部",
+      "lat_min": 37.0,
+      "lat_max": 38.0,
+      "lon_min": -90.0,
+      "lon_max": -89.0
+    },
+    {
+      "name": "印第安纳州南部",
+      "lat_min": 37.0,
+      "lat_max": 39.0,
+      "lon_min": -90.0,
+      "lon_max": -88.0
+    },
+    {
+      "name": "肯塔基州",
+      "lat_min": 38.0,
+      "lat_max": 39.0,
+      "lon_min": -88.0,
+      "lon_max": -86.0
+    },
+    {
+      "name": "西弗吉尼亚州",
+      "lat_min": 37.0,
+      "lat_max": 39.0,
+      "lon_min": -88.0,
+      "lon_max": -83.0
+    },
+    {
+      "name": "弗吉尼亚州",
+      "lat_min": 37.0,
+      "lat_max": 40.0,
+      "lon_min": -83.0,
+      "lon_max": -79.0
+    },
+    {
+      "name": "切萨皮克湾地区",
+      "lat_min": 37.0,
+      "lat_max": 40.0,
+      "lon_min": -80.0,
+      "lon_max": -77.0
+    },
+    {
+      "name": "新泽西州",
+      "lat_min": 37.0,
+      "lat_max": 40.0,
+      "lon_min": -77.0,
+      "lon_max": -75.0
+    },
+    {
+      "name": "亚利桑那州东部",
+      "lat_min": 39.0,
+      "lat_max": 41.0,
+      "lon_min": -75.0,
+      "lon_max": -74.0
+    },
+    {
+      "name": "新墨西哥州",
+      "lat_min": 32.0,
+      "lat_max": 37.0,
+      "lon_min": -112.0,
+      "lon_max": -109.0
+    },
+    {
+      "name": "得克萨斯州狭长地带",
+      "lat_min": 32.0,
+      "lat_max": 37.0,
+      "lon_min": -109.0,
+      "lon_max": -103.0
+    },
+    {
+      "name": "得克萨斯州西部",
+      "lat_min": 34.0,
+      "lat_max": 37.0,
+      "lon_min": -103.0,
+      "lon_max": -100.0
+    },
+    {
+      "name": "俄克拉何马州",
+      "lat_min": 30.0,
+      "lat_max": 34.0,
+      "lon_min": -105.0,
+      "lon_max": -100.0
+    },
+    {
+      "name": "得克萨斯州中部",
+      "lat_min": 34.0,
+      "lat_max": 37.0,
+      "lon_min": -100.0,
+      "lon_max": -95.0
+    },
+    {
+      "name": "阿肯色州、俄克拉何马州边境地区",
+      "lat_min": 29.0,
+      "lat_max": 34.0,
+      "lon_min": -100.0,
+      "lon_max": -95.0
+    },
+    {
+      "name": "阿肯色州",
+      "lat_min": 33.0,
+      "lat_max": 37.0,
+      "lon_min": -95.0,
+      "lon_max": -94.0
+    },
+    {
+      "name": "路易斯安那州、得克萨斯州边境地区",
+      "lat_min": 33.0,
+      "lat_max": 36.0,
+      "lon_min": -94.0,
+      "lon_max": -90.0
+    },
+    {
+      "name": "路易斯安那州",
+      "lat_min": 29.0,
+      "lat_max": 33.0,
+      "lon_min": -95.0,
+      "lon_max": -94.0
+    },
+    {
+      "name": "密西西比州",
+      "lat_min": 29.0,
+      "lat_max": 33.0,
+      "lon_min": -94.0,
+      "lon_max": -89.0
+    },
+    {
+      "name": "田纳西州",
+      "lat_min": 30.0,
+      "lat_max": 35.0,
+      "lon_min": -92.0,
+      "lon_max": -88.0
+    },
+    {
+      "name": "亚拉巴马州",
+      "lat_min": 35.0,
+      "lat_max": 37.0,
+      "lon_min": -90.0,
+      "lon_max": -82.0
+    },
+    {
+      "name": "佛罗里达州西部",
+      "lat_min": 31.0,
+      "lat_max": 35.0,
+      "lon_min": -88.0,
+      "lon_max": -85.0
+    },
+    {
+      "name": "佐治亚州",
+      "lat_min": 29.0,
+      "lat_max": 31.0,
+      "lon_min": -88.0,
+      "lon_max": -83.0
+    },
+    {
+      "name": "佛罗里达州、佐治亚州边境地区",
+      "lat_min": 31.0,
+      "lat_max": 35.0,
+      "lon_min": -85.0,
+      "lon_max": -81.0
+    },
+    {
+      "name": "南卡罗来纳州",
+      "lat_min": 30.0,
+      "lat_max": 31.0,
+      "lon_min": -83.0,
+      "lon_max": -81.0
+    },
+    {
+      "name": "北卡罗来纳州",
+      "lat_min": 32.0,
+      "lat_max": 35.0,
+      "lon_min": -83.0,
+      "lon_max": -78.0
+    },
+    {
+      "name": "美国东岸远海",
+      "lat_min": 34.0,
+      "lat_max": 37.0,
+      "lon_min": -84.0,
+      "lon_max": -75.0
+    },
+    {
+      "name": "佛罗里达半岛",
+      "lat_min": 24.0,
+      "lat_max": 41.0,
+      "lon_min": -81.0,
+      "lon_max": -69.0
+    },
+    {
+      "name": "巴哈马群岛",
+      "lat_min": 24.0,
+      "lat_max": 30.0,
+      "lon_min": -83.0,
+      "lon_max": -80.0
+    },
+    {
+      "name": "亚利桑那州东部、索诺拉州边境地区",
+      "lat_min": 21.0,
+      "lat_max": 28.0,
+      "lon_min": -80.0,
+      "lon_max": -69.0
+    },
+    {
+      "name": "新墨西哥州、奇瓦瓦州边境地区",
+      "lat_min": 31.0,
+      "lat_max": 32.0,
+      "lon_min": -112.0,
+      "lon_max": -109.0
+    },
+    {
+      "name": "得克萨斯州、墨西哥边境地区",
+      "lat_min": 31.0,
+      "lat_max": 32.0,
+      "lon_min": -109.0,
+      "lon_max": -107.0
+    },
+    {
+      "name": "得克萨斯州南部",
+      "lat_min": 25.0,
+      "lat_max": 32.0,
+      "lon_min": -107.0,
+      "lon_max": -97.0
+    },
+    {
+      "name": "得克萨斯州沿岸近海",
+      "lat_min": 27.0,
+      "lat_max": 29.0,
+      "lon_min": -100.0,
+      "lon_max": -98.0
+    },
+    {
+      "name": "墨西哥奇瓦瓦州",
+      "lat_min": 26.0,
+      "lat_max": 29.0,
+      "lon_min": -98.0,
+      "lon_max": -95.0
+    },
+    {
+      "name": "墨西哥北部",
+      "lat_min": 27.0,
+      "lat_max": 31.0,
+      "lon_min": -109.0,
+      "lon_max": -104.0
+    },
+    {
+      "name": "墨西哥中部",
+      "lat_min": 25.0,
+      "lat_max": 29.0,
+      "lon_min": -109.0,
+      "lon_max": -98.0
+    },
+    {
+      "name": "墨西哥哈利斯科州",
+      "lat_min": 18.0,
+      "lat_max": 25.0,
+      "lon_min": -108.0,
+      "lon_max": -97.0
+    },
+    {
+      "name": "墨西哥韦拉克鲁斯州",
+      "lat_min": 19.0,
+      "lat_max": 22.0,
+      "lon_min": -105.0,
+      "lon_max": -101.0
+    },
+    {
+      "name": "墨西哥湾",
+      "lat_min": 18.0,
+      "lat_max": 23.0,
+      "lon_min": -99.0,
+      "lon_max": -95.0
+    },
+    {
+      "name": "坎佩切湾",
+      "lat_min": 21.0,
+      "lat_max": 30.0,
+      "lon_min": -97.0,
+      "lon_max": -82.0
+    },
+    {
+      "name": "巴西",
+      "lat_min": 18.0,
+      "lat_max": 21.0,
+      "lon_min": -96.0,
+      "lon_max": -91.0
+    },
+    {
+      "name": "圭亚那",
+      "lat_min": -34.0,
+      "lat_max": 5.0,
+      "lon_min": -62.0,
+      "lon_max": -34.0
+    },
+    {
+      "name": "苏里南",
+      "lat_min": 1.0,
+      "lat_max": 9.0,
+      "lon_min": -61.0,
+      "lon_max": -57.0
+    },
+    {
+      "name": "法属圭亚那",
+      "lat_min": 2.0,
+      "lat_max": 7.0,
+      "lon_min": -58.0,
+      "lon_max": -54.0
+    },
+    {
+      "name": "爱尔兰",
+      "lat_min": 2.0,
+      "lat_max": 7.0,
+      "lon_min": -54.0,
+      "lon_max": -50.0
+    },
+    {
+      "name": "英国",
+      "lat_min": 51.0,
+      "lat_max": 55.0,
+      "lon_min": -11.0,
+      "lon_max": -6.0
+    },
+    {
+      "name": "北海",
+      "lat_min": 50.0,
+      "lat_max": 61.0,
+      "lon_min": -9.0,
+      "lon_max": 2.0
+    },
+    {
+      "name": "挪威南部",
+      "lat_min": 51.0,
+      "lat_max": 61.0,
+      "lon_min": -2.0,
+      "lon_max": 8.0
+    },
+    {
+      "name": "瑞典",
+      "lat_min": 58.0,
+      "lat_max": 64.0,
+      "lon_min": 4.0,
+      "lon_max": 12.0
+    },
+    {
+      "name": "波罗的海",
+      "lat_min": 55.0,
+      "lat_max": 69.0,
+      "lon_min": 10.0,
+      "lon_max": 24.0
+    },
+    {
+      "name": "法国",
+      "lat_min": 54.0,
+      "lat_max": 60.0,
+      "lon_min": 14.0,
+      "lon_max": 21.0
+    },
+    {
+      "name": "比斯凯湾",
+      "lat_min": 43.0,
+      "lat_max": 51.0,
+      "lon_min": -5.0,
+      "lon_max": 8.0
+    },
+    {
+      "name": "荷兰",
+      "lat_min": 44.0,
+      "lat_max": 47.0,
+      "lon_min": -5.0,
+      "lon_max": -2.0
+    },
+    {
+      "name": "比利时",
+      "lat_min": 51.0,
+      "lat_max": 54.0,
+      "lon_min": 3.0,
+      "lon_max": 7.0
+    },
+    {
+      "name": "丹麦",
+      "lat_min": 50.0,
+      "lat_max": 51.0,
+      "lon_min": 3.0,
+      "lon_max": 6.0
+    },
+    {
+      "name": "德国",
+      "lat_min": 55.0,
+      "lat_max": 58.0,
+      "lon_min": 8.0,
+      "lon_max": 13.0
+    },
+    {
+      "name": "瑞士",
+      "lat_min": 47.0,
+      "lat_max": 55.0,
+      "lon_min": 6.0,
+      "lon_max": 15.0
+    },
+    {
+      "name": "意大利北部",
+      "lat_min": 46.0,
+      "lat_max": 48.0,
+      "lon_min": 6.0,
+      "lon_max": 10.0
+    },
+    {
+      "name": "奥地利",
+      "lat_min": 44.0,
+      "lat_max": 47.0,
+      "lon_min": 7.0,
+      "lon_max": 14.0
+    },
+    {
+      "name": "捷克和斯洛伐克",
+      "lat_min": 46.0,
+      "lat_max": 49.0,
+      "lon_min": 10.0,
+      "lon_max": 17.0
+    },
+    {
+      "name": "波兰",
+      "lat_min": 48.0,
+      "lat_max": 51.0,
+      "lon_min": 13.0,
+      "lon_max": 21.0
+    },
+    {
+      "name": "匈牙利",
+      "lat_min": 49.0,
+      "lat_max": 55.0,
+      "lon_min": 14.0,
+      "lon_max": 24.0
+    },
+    {
+      "name": "非洲西北部",
+      "lat_min": 46.0,
+      "lat_max": 49.0,
+      "lon_min": 17.0,
+      "lon_max": 22.0
+    },
+    {
+      "name": "阿尔及利亚南部",
+      "lat_min": 20.5,
+      "lat_max": 27.5,
+      "lon_min": -4.5,
+      "lon_max": 9.0
+    },
+    {
+      "name": "利比亚",
+      "lat_min": 19.0,
+      "lat_max": 28.0,
+      "lon_min": -9.0,
+      "lon_max": 12.0
+    },
+    {
+      "name": "埃及",
+      "lat_min": 23.0,
+      "lat_max": 30.0,
+      "lon_min": 10.0,
+      "lon_max": 25.0
+    },
+    {
+      "name": "红海",
+      "lat_min": 22.0,
+      "lat_max": 32.0,
+      "lon_min": 25.0,
+      "lon_max": 36.0
+    },
+    {
+      "name": "阿拉伯半岛西部",
+      "lat_min": 15.0,
+      "lat_max": 28.0,
+      "lon_min": 34.0,
+      "lon_max": 42.0
+    },
+    {
+      "name": "乍得地区",
+      "lat_min": 12.0,
+      "lat_max": 30.0,
+      "lon_min": 35.0,
+      "lon_max": 48.0
+    },
+    {
+      "name": "苏丹",
+      "lat_min": 8.0,
+      "lat_max": 23.0,
+      "lon_min": 12.0,
+      "lon_max": 25.0
+    },
+    {
+      "name": "埃塞俄比亚",
+      "lat_min": 4.0,
+      "lat_max": 23.0,
+      "lon_min": 22.0,
+      "lon_max": 39.0
+    },
+    {
+      "name": "亚丁湾西部",
+      "lat_min": 4.0,
+      "lat_max": 18.0,
+      "lon_min": 34.0,
+      "lon_max": 47.0
+    },
+    {
+      "name": "索马里西北部",
+      "lat_min": 11.0,
+      "lat_max": 13.0,
+      "lon_min": 44.0,
+      "lon_max": 47.0
+    },
+    {
+      "name": "西北非南岸远海",
+      "lat_min": 8.0,
+      "lat_max": 11.0,
+      "lon_min": 43.0,
+      "lon_max": 47.0
+    },
+    {
+      "name": "喀麦隆",
+      "lat_min": 0.0,
+      "lat_max": 10.0,
+      "lon_min": -18.0,
+      "lon_max": 9.0
+    },
+    {
+      "name": "赤道几内亚",
+      "lat_min": 2.0,
+      "lat_max": 8.0,
+      "lon_min": 9.0,
+      "lon_max": 16.0
+    },
+    {
+      "name": "中非共和国",
+      "lat_min": 1.0,
+      "lat_max": 2.0,
+      "lon_min": 9.0,
+      "lon_max": 11.0
+    },
+    {
+      "name": "加蓬",
+      "lat_min": 3.0,
+      "lat_max": 11.0,
+      "lon_min": 15.0,
+      "lon_max": 27.0
+    },
+    {
+      "name": "刚果共和国",
+      "lat_min": -4.0,
+      "lat_max": 2.0,
+      "lon_min": 9.0,
+      "lon_max": 14.0
+    },
+    {
+      "name": "刚果民主共和国",
+      "lat_min": -5.0,
+      "lat_max": 4.0,
+      "lon_min": 11.0,
+      "lon_max": 19.0
+    },
+    {
+      "name": "乌干达",
+      "lat_min": -13.0,
+      "lat_max": 5.0,
+      "lon_min": 13.0,
+      "lon_max": 31.0
+    },
+    {
+      "name": "维多利亚湖地区",
+      "lat_min": -1.0,
+      "lat_max": 4.0,
+      "lon_min": 30.0,
+      "lon_max": 35.0
+    },
+    {
+      "name": "肯尼亚",
+      "lat_min": -4.0,
+      "lat_max": 1.0,
+      "lon_min": 31.0,
+      "lon_max": 35.0
+    },
+    {
+      "name": "索马里南部",
+      "lat_min": -5.0,
+      "lat_max": 5.0,
+      "lon_min": 34.0,
+      "lon_max": 42.0
+    },
+    {
+      "name": "坦噶尼喀湖地区",
+      "lat_min": -1.0,
+      "lat_max": 6.0,
+      "lon_min": 41.0,
+      "lon_max": 47.0
+    },
+    {
+      "name": "坦桑尼亚",
+      "lat_min": -10.0,
+      "lat_max": -1.0,
+      "lon_min": 28.0,
+      "lon_max": 32.0
+    },
+    {
+      "name": "马达加斯加西北部",
+      "lat_min": -12.0,
+      "lat_max": -2.0,
+      "lon_min": 31.0,
+      "lon_max": 41.0
+    },
+    {
+      "name": "安哥拉",
+      "lat_min": -14.0,
+      "lat_max": -1.0,
+      "lon_min": 40.0,
+      "lon_max": 51.0
+    },
+    {
+      "name": "赞比亚",
+      "lat_min": -18.0,
+      "lat_max": -5.0,
+      "lon_min": 11.0,
+      "lon_max": 24.0
+    },
+    {
+      "name": "马拉维",
+      "lat_min": -18.0,
+      "lat_max": -9.0,
+      "lon_min": 22.0,
+      "lon_max": 33.0
+    },
+    {
+      "name": "纳米比亚",
+      "lat_min": -17.0,
+      "lat_max": -10.0,
+      "lon_min": 33.0,
+      "lon_max": 36.0
+    },
+    {
+      "name": "博茨瓦纳",
+      "lat_min": -29.0,
+      "lat_max": -17.0,
+      "lon_min": 11.0,
+      "lon_max": 21.0
+    },
+    {
+      "name": "津巴布韦",
+      "lat_min": -27.0,
+      "lat_max": -18.0,
+      "lon_min": 20.0,
+      "lon_max": 29.0
+    },
+    {
+      "name": "莫桑比克",
+      "lat_min": -22.0,
+      "lat_max": -16.0,
+      "lon_min": 26.0,
+      "lon_max": 33.0
+    },
+    {
+      "name": "莫桑比克海峡",
+      "lat_min": -27.0,
+      "lat_max": -11.0,
+      "lon_min": 30.0,
+      "lon_max": 41.0
+    },
+    {
+      "name": "马达加斯加",
+      "lat_min": -26.0,
+      "lat_max": -14.0,
+      "lon_min": 35.0,
+      "lon_max": 46.0
+    },
+    {
+      "name": "南非",
+      "lat_min": -26.0,
+      "lat_max": -11.0,
+      "lon_min": 42.0,
+      "lon_max": 51.0
+    },
+    {
+      "name": "莱索托",
+      "lat_min": -35.0,
+      "lat_max": -22.0,
+      "lon_min": 16.0,
+      "lon_max": 33.0
+    },
+    {
+      "name": "斯威士兰",
+      "lat_min": -30.0,
+      "lat_max": -29.0,
+      "lon_min": 27.0,
+      "lon_max": 29.0
+    },
+    {
+      "name": "南非沿岸近海",
+      "lat_min": -27.0,
+      "lat_max": -26.0,
+      "lon_min": 31.0,
+      "lon_max": 32.0
+    },
+    {
+      "name": "澳大利亚西北",
+      "lat_min": -41.0,
+      "lat_max": -26.0,
+      "lon_min": 15.0,
+      "lon_max": 35.0
+    },
+    {
+      "name": "澳大利亚以西",
+      "lat_min": -22.0,
+      "lat_max": -12.0,
+      "lon_min": 105.0,
+      "lon_max": 125.0
+    },
+    {
+      "name": "西澳大利亚州",
+      "lat_min": -35.0,
+      "lat_max": -22.0,
+      "lon_min": 105.0,
+      "lon_max": 114.0
+    },
+    {
+      "name": "澳大利亚北领地",
+      "lat_min": -36.0,
+      "lat_max": -13.0,
+      "lon_min": 112.0,
+      "lon_max": 129.0
+    },
+    {
+      "name": "南澳大利亚州",
+      "lat_min": -26.0,
+      "lat_max": -11.0,
+      "lon_min": 129.0,
+      "lon_max": 138.0
+    },
+    {
+      "name": "卡奔塔利亚湾",
+      "lat_min": -35.0,
+      "lat_max": -26.0,
+      "lon_min": 129.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "澳大利亚昆士兰州",
+      "lat_min": -16.0,
+      "lat_max": -12.0,
+      "lon_min": 137.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "珊瑚海",
+      "lat_min": -29.0,
+      "lat_max": -10.0,
+      "lon_min": 138.0,
+      "lon_max": 154.0
+    },
+    {
+      "name": "新喀里多尼亚西北",
+      "lat_min": -18.0,
+      "lat_max": -9.0,
+      "lon_min": 144.0,
+      "lon_max": 159.0
+    },
+    {
+      "name": "新喀里多尼亚西南",
+      "lat_min": -17.0,
+      "lat_max": -15.0,
+      "lon_min": 156.0,
+      "lon_max": 162.0
+    },
+    {
+      "name": "澳大利亚西南",
+      "lat_min": -27.0,
+      "lat_max": -17.0,
+      "lon_min": 159.0,
+      "lon_max": 169.0
+    },
+    {
+      "name": "澳大利亚南岸近海",
+      "lat_min": -42.0,
+      "lat_max": -35.0,
+      "lon_min": 105.0,
+      "lon_max": 114.0
+    },
+    {
+      "name": "南澳大利亚州沿岸近海",
+      "lat_min": -40.0,
+      "lat_max": -33.0,
+      "lon_min": 114.0,
+      "lon_max": 142.0
+    },
+    {
+      "name": "澳大利亚新南威尔士州",
+      "lat_min": -39.0,
+      "lat_max": -31.0,
+      "lon_min": 129.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "澳大利亚维多利亚州",
+      "lat_min": -37.0,
+      "lat_max": -29.0,
+      "lon_min": 141.0,
+      "lon_max": 152.0
+    },
+    {
+      "name": "澳大利亚东南岸近海",
+      "lat_min": -37.0,
+      "lat_max": -35.0,
+      "lon_min": 141.0,
+      "lon_max": 148.0
+    },
+    {
+      "name": "澳大利亚东岸近海",
+      "lat_min": -39.0,
+      "lat_max": -32.0,
+      "lon_min": 141.0,
+      "lon_max": 154.0
+    },
+    {
+      "name": "澳大利亚以东",
+      "lat_min": -32.0,
+      "lat_max": -25.0,
+      "lon_min": 151.0,
+      "lon_max": 155.0
+    },
+    {
+      "name": "诺福克岛地区",
+      "lat_min": -39.0,
+      "lat_max": -18.0,
+      "lon_min": 149.0,
+      "lon_max": 165.0
+    },
+    {
+      "name": "新西兰西北",
+      "lat_min": -30.0,
+      "lat_max": -26.0,
+      "lon_min": 165.0,
+      "lon_max": 173.0
+    },
+    {
+      "name": "巴斯海峡",
+      "lat_min": -40.0,
+      "lat_max": -30.0,
+      "lon_min": 165.0,
+      "lon_max": 173.0
+    },
+    {
+      "name": "澳大利亚塔斯马尼亚地区",
+      "lat_min": -41.0,
+      "lat_max": -39.0,
+      "lon_min": 142.0,
+      "lon_max": 149.0
+    },
+    {
+      "name": "澳大利亚东南",
+      "lat_min": -46.0,
+      "lat_max": -41.0,
+      "lon_min": 142.0,
+      "lon_max": 150.0
+    },
+    {
+      "name": "北太平洋",
+      "lat_min": -46.0,
+      "lat_max": -39.0,
+      "lon_min": 149.0,
+      "lon_max": 165.0
+    },
+    {
+      "name": "夏威夷群岛地区",
+      "lat_min": 0.0,
+      "lat_max": 45.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "夏威夷州",
+      "lat_min": 15.0,
+      "lat_max": 32.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "加罗林群岛东部",
+      "lat_min": 18.0,
+      "lat_max": 23.0,
+      "lon_min": -161.0,
+      "lon_max": -154.0
+    },
+    {
+      "name": "马绍尔群岛地区",
+      "lat_min": 0.0,
+      "lat_max": 12.0,
+      "lon_min": 142.0,
+      "lon_max": 165.0
+    },
+    {
+      "name": "马绍尔群岛埃内韦塔克环礁地区",
+      "lat_min": 3.0,
+      "lat_max": 17.0,
+      "lon_min": 159.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "马绍尔群岛比基尼环礁地区",
+      "lat_min": 10.0,
+      "lat_max": 13.0,
+      "lon_min": 161.0,
+      "lon_max": 164.0
+    },
+    {
+      "name": "吉尔伯特群岛地区",
+      "lat_min": 10.0,
+      "lat_max": 13.0,
+      "lon_min": 164.0,
+      "lon_max": 167.0
+    },
+    {
+      "name": "约翰斯顿岛地区",
+      "lat_min": -4.0,
+      "lat_max": 5.0,
+      "lon_min": 165.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "基里巴斯莱恩群岛地区",
+      "lat_min": 15.0,
+      "lat_max": 18.0,
+      "lon_min": -172.0,
+      "lon_max": -165.0
+    },
+    {
+      "name": "基里巴斯巴尔米拉岛地区",
+      "lat_min": -13.0,
+      "lat_max": 10.0,
+      "lon_min": -165.0,
+      "lon_max": -148.0
+    },
+    {
+      "name": "基里巴斯基里蒂马蒂环礁地区",
+      "lat_min": 5.0,
+      "lat_max": 7.0,
+      "lon_min": -164.0,
+      "lon_max": -161.0
+    },
+    {
+      "name": "图瓦卢地区",
+      "lat_min": 1.0,
+      "lat_max": 5.0,
+      "lon_min": -161.0,
+      "lon_max": -156.0
+    },
+    {
+      "name": "菲尼克斯群岛地区",
+      "lat_min": -10.0,
+      "lat_max": -4.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "托克劳群岛地区",
+      "lat_min": -7.0,
+      "lat_max": 0.0,
+      "lon_min": -176.0,
+      "lon_max": -168.0
+    },
+    {
+      "name": "北库克群岛",
+      "lat_min": -10.0,
+      "lat_max": -7.0,
+      "lon_min": -175.0,
+      "lon_max": -168.0
+    },
+    {
+      "name": "库克群岛地区",
+      "lat_min": -15.0,
+      "lat_max": -7.0,
+      "lon_min": -165.0,
+      "lon_max": -157.0
+    },
+    {
+      "name": "社会群岛地区",
+      "lat_min": -24.0,
+      "lat_max": -15.0,
+      "lon_min": -166.0,
+      "lon_max": -156.0
+    },
+    {
+      "name": "土布艾群岛地区",
+      "lat_min": -20.0,
+      "lat_max": -13.0,
+      "lon_min": -157.0,
+      "lon_max": -147.0
+    },
+    {
+      "name": "马克萨斯群岛地区",
+      "lat_min": -26.0,
+      "lat_max": -20.0,
+      "lon_min": -156.0,
+      "lon_max": -145.0
+    },
+    {
+      "name": "图阿姆图群岛地区",
+      "lat_min": -13.0,
+      "lat_max": -5.0,
+      "lon_min": -144.0,
+      "lon_max": -134.0
+    },
+    {
+      "name": "南太平洋",
+      "lat_min": -26.0,
+      "lat_max": -13.0,
+      "lon_min": -149.0,
+      "lon_max": -133.0
+    },
+    {
+      "name": "罗蒙诺索夫海岭",
+      "lat_min": -60.0,
+      "lat_max": 0.0,
+      "lon_min": -180.0,
+      "lon_max": 176.0
+    },
+    {
+      "name": "北冰洋",
+      "lat_min": 80.0,
+      "lat_max": 90.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "格陵兰岛北部沿岸近海",
+      "lat_min": 76.0,
+      "lat_max": 88.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "格陵兰岛东部",
+      "lat_min": 80.0,
+      "lat_max": 85.0,
+      "lon_min": -67.0,
+      "lon_max": -10.0
+    },
+    {
+      "name": "冰岛地区",
+      "lat_min": 65.0,
+      "lat_max": 81.0,
+      "lon_min": -40.0,
+      "lon_max": -17.0
+    },
+    {
+      "name": "冰岛",
+      "lat_min": 61.0,
+      "lat_max": 69.0,
+      "lon_min": -30.0,
+      "lon_max": -10.0
+    },
+    {
+      "name": "扬马延岛地区",
+      "lat_min": 63.0,
+      "lat_max": 66.0,
+      "lon_min": -23.0,
+      "lon_max": -14.0
+    },
+    {
+      "name": "格陵兰海",
+      "lat_min": 69.0,
+      "lat_max": 73.0,
+      "lon_min": -20.0,
+      "lon_max": 0.0
+    },
+    {
+      "name": "斯瓦尔巴群岛以北",
+      "lat_min": 73.0,
+      "lat_max": 80.0,
+      "lon_min": -20.0,
+      "lon_max": 10.0
+    },
+    {
+      "name": "挪威海",
+      "lat_min": 80.0,
+      "lat_max": 88.0,
+      "lon_min": -15.0,
+      "lon_max": 35.0
+    },
+    {
+      "name": "斯瓦尔巴群岛地区",
+      "lat_min": 61.0,
+      "lat_max": 75.0,
+      "lon_min": -10.0,
+      "lon_max": 20.0
+    },
+    {
+      "name": "法兰士约瑟夫地群岛以北",
+      "lat_min": 75.0,
+      "lat_max": 82.0,
+      "lon_min": 5.0,
+      "lon_max": 35.0
+    },
+    {
+      "name": "俄罗斯法兰士约瑟夫地群岛",
+      "lat_min": 83.0,
+      "lat_max": 88.0,
+      "lon_min": 35.0,
+      "lon_max": 70.0
+    },
+    {
+      "name": "挪威北部",
+      "lat_min": 79.0,
+      "lat_max": 83.0,
+      "lon_min": 35.0,
+      "lon_max": 70.0
+    },
+    {
+      "name": "巴伦支海",
+      "lat_min": 64.0,
+      "lat_max": 72.0,
+      "lon_min": 10.0,
+      "lon_max": 31.0
+    },
+    {
+      "name": "俄罗斯新地岛",
+      "lat_min": 68.0,
+      "lat_max": 79.0,
+      "lon_min": 20.0,
+      "lon_max": 70.0
+    },
+    {
+      "name": "喀拉海",
+      "lat_min": 70.0,
+      "lat_max": 78.0,
+      "lon_min": 50.0,
+      "lon_max": 70.0
+    },
+    {
+      "name": "俄罗斯西西伯利亚沿岸近海",
+      "lat_min": 70.0,
+      "lat_max": 82.0,
+      "lon_min": 59.0,
+      "lon_max": 93.0
+    },
+    {
+      "name": "俄罗斯北地群岛以北",
+      "lat_min": 72.0,
+      "lat_max": 76.0,
+      "lon_min": 68.0,
+      "lon_max": 85.0
+    },
+    {
+      "name": "俄罗斯北地群岛",
+      "lat_min": 82.0,
+      "lat_max": 88.0,
+      "lon_min": 70.0,
+      "lon_max": 135.0
+    },
+    {
+      "name": "俄罗斯中西伯利亚沿岸近海",
+      "lat_min": 77.0,
+      "lat_max": 82.0,
+      "lon_min": 85.0,
+      "lon_max": 110.0
+    },
+    {
+      "name": "俄罗斯北地群岛以东",
+      "lat_min": 73.0,
+      "lat_max": 78.0,
+      "lon_min": 85.0,
+      "lon_max": 130.0
+    },
+    {
+      "name": "拉普捷夫海",
+      "lat_min": 78.0,
+      "lat_max": 82.0,
+      "lon_min": 110.0,
+      "lon_max": 135.0
+    },
+    {
+      "name": "俄罗斯西伯利亚东南部",
+      "lat_min": 72.0,
+      "lat_max": 78.0,
+      "lon_min": 116.0,
+      "lon_max": 139.0
+    },
+    {
+      "name": "俄罗斯东部、中国东北部边境地区",
+      "lat_min": 49.0,
+      "lat_max": 60.0,
+      "lon_min": 120.0,
+      "lon_max": 142.0
+    },
+    {
+      "name": "中国东北部",
+      "lat_min": 42.0,
+      "lat_max": 54.0,
+      "lon_min": 117.0,
+      "lon_max": 135.0
+    },
+    {
+      "name": "朝鲜",
+      "lat_min": 37.0,
+      "lat_max": 53.0,
+      "lon_min": 111.0,
+      "lon_max": 133.0
+    },
+    {
+      "name": "日本海",
+      "lat_min": 38.0,
+      "lat_max": 43.0,
+      "lon_min": 124.0,
+      "lon_max": 131.0
+    },
+    {
+      "name": "俄罗斯滨海边疆区",
+      "lat_min": 35.0,
+      "lat_max": 43.0,
+      "lon_min": 129.0,
+      "lon_max": 136.0
+    },
+    {
+      "name": "俄罗斯萨哈林岛",
+      "lat_min": 42.0,
+      "lat_max": 55.0,
+      "lon_min": 132.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "鄂霍次克海",
+      "lat_min": 46.0,
+      "lat_max": 55.0,
+      "lon_min": 141.0,
+      "lon_max": 145.0
+    },
+    {
+      "name": "中国东南部",
+      "lat_min": 46.0,
+      "lat_max": 60.0,
+      "lon_min": 139.0,
+      "lon_max": 160.0
+    },
+    {
+      "name": "黄海海域",
+      "lat_min": 20.0,
+      "lat_max": 37.0,
+      "lon_min": 104.0,
+      "lon_max": 123.0
+    },
+    {
+      "name": "中国东部东岸远海",
+      "lat_min": 33.0,
+      "lat_max": 37.0,
+      "lon_min": 121.0,
+      "lon_max": 125.0
+    },
+    {
+      "name": "新西伯利亚群岛以北",
+      "lat_min": 28.0,
+      "lat_max": 33.0,
+      "lon_min": 122.0,
+      "lon_max": 126.0
+    },
+    {
+      "name": "俄罗斯新西伯利亚群岛",
+      "lat_min": 77.0,
+      "lat_max": 80.0,
+      "lon_min": 135.0,
+      "lon_max": 161.0
+    },
+    {
+      "name": "东西伯利亚海",
+      "lat_min": 73.0,
+      "lat_max": 78.0,
+      "lon_min": 135.0,
+      "lon_max": 161.0
+    },
+    {
+      "name": "东西伯利亚北岸近海",
+      "lat_min": 70.0,
+      "lat_max": 77.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "俄罗斯东西伯利亚",
+      "lat_min": 66.0,
+      "lat_max": 73.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "楚科奇海",
+      "lat_min": 58.0,
+      "lat_max": 70.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "白令海峡",
+      "lat_min": 67.0,
+      "lat_max": 72.0,
+      "lon_min": -178.0,
+      "lon_max": -163.0
+    },
+    {
+      "name": "圣劳伦斯岛地区",
+      "lat_min": 63.0,
+      "lat_max": 68.0,
+      "lon_min": -171.0,
+      "lon_max": -165.0
+    },
+    {
+      "name": "波弗特海",
+      "lat_min": 62.0,
+      "lat_max": 64.0,
+      "lon_min": -172.0,
+      "lon_max": -168.0
+    },
+    {
+      "name": "阿拉斯加州北部",
+      "lat_min": 70.0,
+      "lat_max": 76.0,
+      "lon_min": -166.0,
+      "lon_max": -125.0
+    },
+    {
+      "name": "加拿大育空地区北部",
+      "lat_min": 62.0,
+      "lat_max": 72.0,
+      "lon_min": -168.0,
+      "lon_max": -141.0
+    },
+    {
+      "name": "加拿大伊丽莎白女王群岛",
+      "lat_min": 65.0,
+      "lat_max": 70.0,
+      "lon_min": -141.0,
+      "lon_max": -132.0
+    },
+    {
+      "name": "加拿大西北地区-努纳武特地区",
+      "lat_min": 74.0,
+      "lat_max": 84.0,
+      "lon_min": -125.0,
+      "lon_max": -60.0
+    },
+    {
+      "name": "格陵兰岛西部",
+      "lat_min": 60.0,
+      "lat_max": 75.0,
+      "lon_min": -137.0,
+      "lon_max": -74.0
+    },
+    {
+      "name": "巴芬湾",
+      "lat_min": 60.0,
+      "lat_max": 81.0,
+      "lon_min": -73.0,
+      "lon_max": -40.0
+    },
+    {
+      "name": "加拿大巴芬岛地区",
+      "lat_min": 69.0,
+      "lat_max": 77.0,
+      "lon_min": -79.0,
+      "lon_max": -55.0
+    },
+    {
+      "name": "太平洋东南中部",
+      "lat_min": 62.0,
+      "lat_max": 74.0,
+      "lon_min": -90.0,
+      "lon_max": -61.0
+    },
+    {
+      "name": "东太平洋海岭南部",
+      "lat_min": -41.0,
+      "lat_max": -15.0,
+      "lon_min": -107.0,
+      "lon_max": -77.0
+    },
+    {
+      "name": "复活节岛地区",
+      "lat_min": -60.0,
+      "lat_max": -15.0,
+      "lon_min": -127.0,
+      "lon_max": -105.0
+    },
+    {
+      "name": "西智利海岭",
+      "lat_min": -32.0,
+      "lat_max": -22.0,
+      "lon_min": -115.0,
+      "lon_max": -102.0
+    },
+    {
+      "name": "胡安·费尔南德斯群岛地区",
+      "lat_min": -45.0,
+      "lat_max": -30.0,
+      "lon_min": -105.0,
+      "lon_max": -81.0
+    },
+    {
+      "name": "新西兰北岛以东",
+      "lat_min": -35.0,
+      "lat_max": -31.0,
+      "lon_min": -85.0,
+      "lon_max": -77.0
+    },
+    {
+      "name": "新西兰查塔姆群岛地区",
+      "lat_min": -42.0,
+      "lat_max": -35.0,
+      "lon_min": -180.0,
+      "lon_max": -174.0
+    },
+    {
+      "name": "查塔姆群岛以南",
+      "lat_min": -46.0,
+      "lat_max": -42.0,
+      "lon_min": -180.0,
+      "lon_max": -170.0
+    },
+    {
+      "name": "太平洋-南极洲海岭",
+      "lat_min": -61.0,
+      "lat_max": -46.0,
+      "lon_min": -180.0,
+      "lon_max": -170.0
+    },
+    {
+      "name": "太平洋南部",
+      "lat_min": -70.0,
+      "lat_max": -52.0,
+      "lon_min": -180.0,
+      "lon_max": -127.0
+    },
+    {
+      "name": "太平洋东中部",
+      "lat_min": -74.0,
+      "lat_max": -37.0,
+      "lon_min": -162.0,
+      "lon_max": -65.0
+    },
+    {
+      "name": "东太平洋海岭中部",
+      "lat_min": -15.0,
+      "lat_max": 25.0,
+      "lon_min": -120.0,
+      "lon_max": -89.0
+    },
+    {
+      "name": "加拉帕戈斯群岛以西",
+      "lat_min": -15.0,
+      "lat_max": 0.0,
+      "lon_min": -119.0,
+      "lon_max": -100.0
+    },
+    {
+      "name": "加拉帕戈斯群岛地区",
+      "lat_min": -2.0,
+      "lat_max": 3.0,
+      "lon_min": -100.0,
+      "lon_max": -96.0
+    },
+    {
+      "name": "加拉帕戈斯群岛",
+      "lat_min": -4.0,
+      "lat_max": 3.0,
+      "lon_min": -96.0,
+      "lon_max": -86.0
+    },
+    {
+      "name": "加拉帕戈斯群岛西南",
+      "lat_min": -2.0,
+      "lat_max": 1.0,
+      "lon_min": -92.0,
+      "lon_max": -89.0
+    },
+    {
+      "name": "加拉帕戈斯群岛东南",
+      "lat_min": -15.0,
+      "lat_max": -2.0,
+      "lon_min": -107.0,
+      "lon_max": -92.0
+    },
+    {
+      "name": "塔斯马尼亚岛以南",
+      "lat_min": -15.0,
+      "lat_max": -4.0,
+      "lon_min": -92.0,
+      "lon_max": -81.0
+    },
+    {
+      "name": "麦夸里岛以西",
+      "lat_min": -52.0,
+      "lat_max": -46.0,
+      "lon_min": 142.0,
+      "lon_max": 150.0
+    },
+    {
+      "name": "巴勒尼群岛地区",
+      "lat_min": -61.0,
+      "lat_max": -52.0,
+      "lon_min": 135.0,
+      "lon_max": 155.0
+    },
+    {
+      "name": "印度安达曼群岛地区",
+      "lat_min": -71.0,
+      "lat_max": -61.0,
+      "lon_min": 148.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "印度尼科巴群岛地区",
+      "lat_min": 10.0,
+      "lat_max": 15.0,
+      "lon_min": 90.0,
+      "lon_max": 98.0
+    },
+    {
+      "name": "苏门答腊岛北部西岸远海",
+      "lat_min": 6.0,
+      "lat_max": 10.0,
+      "lon_min": 90.0,
+      "lon_max": 98.0
+    },
+    {
+      "name": "印尼苏门答腊岛北部",
+      "lat_min": 0.0,
+      "lat_max": 6.0,
+      "lon_min": 90.0,
+      "lon_max": 97.0
+    },
+    {
+      "name": "马来半岛",
+      "lat_min": 0.0,
+      "lat_max": 7.0,
+      "lon_min": 94.0,
+      "lon_max": 104.0
+    },
+    {
+      "name": "泰国湾",
+      "lat_min": 0.0,
+      "lat_max": 13.0,
+      "lon_min": 98.0,
+      "lon_max": 105.0
+    },
+    {
+      "name": "阿富汗东南部",
+      "lat_min": 6.0,
+      "lat_max": 12.0,
+      "lon_min": 100.0,
+      "lon_max": 104.0
+    },
+    {
+      "name": "巴基斯坦",
+      "lat_min": 30.0,
+      "lat_max": 35.0,
+      "lon_min": 65.0,
+      "lon_max": 71.0
+    },
+    {
+      "name": "克什米尔西南部",
+      "lat_min": 23.0,
+      "lat_max": 36.0,
+      "lon_min": 65.0,
+      "lon_max": 74.0
+    },
+    {
+      "name": "印度、巴基斯坦边境地区",
+      "lat_min": 32.0,
+      "lat_max": 35.0,
+      "lon_min": 74.0,
+      "lon_max": 75.0
+    },
+    {
+      "name": "哈萨克斯坦中部",
+      "lat_min": 23.0,
+      "lat_max": 32.0,
+      "lon_min": 68.0,
+      "lon_max": 75.0
+    },
+    {
+      "name": "乌兹别克斯坦东南部",
+      "lat_min": 41.0,
+      "lat_max": 55.0,
+      "lon_min": 65.0,
+      "lon_max": 75.0
+    },
+    {
+      "name": "塔吉克斯坦",
+      "lat_min": 38.0,
+      "lat_max": 41.0,
+      "lon_min": 65.0,
+      "lon_max": 69.0
+    },
+    {
+      "name": "吉尔吉斯斯坦",
+      "lat_min": 37.0,
+      "lat_max": 41.0,
+      "lon_min": 68.0,
+      "lon_max": 74.0
+    },
+    {
+      "name": "阿富汗、塔吉克斯坦边境地区",
+      "lat_min": 39.0,
+      "lat_max": 43.0,
+      "lon_min": 69.0,
+      "lon_max": 76.0
+    },
+    {
+      "name": "阿富汗兴都库什地区",
+      "lat_min": 36.0,
+      "lat_max": 39.0,
+      "lon_min": 65.0,
+      "lon_max": 73.0
+    },
+    {
+      "name": "塔吉克斯坦、中国新疆边境地区",
+      "lat_min": 35.0,
+      "lat_max": 37.0,
+      "lon_min": 65.0,
+      "lon_max": 71.0
+    },
+    {
+      "name": "克什米尔西北部",
+      "lat_min": 37.0,
+      "lat_max": 40.0,
+      "lon_min": 73.0,
+      "lon_max": 76.0
+    },
+    {
+      "name": "芬兰",
+      "lat_min": 35.0,
+      "lat_max": 37.0,
+      "lon_min": 73.0,
+      "lon_max": 75.0
+    },
+    {
+      "name": "挪威、俄罗斯边境地区",
+      "lat_min": 60.0,
+      "lat_max": 70.0,
+      "lon_min": 19.0,
+      "lon_max": 30.0
+    },
+    {
+      "name": "芬兰、俄罗斯边境地区",
+      "lat_min": 69.0,
+      "lat_max": 70.0,
+      "lon_min": 29.0,
+      "lon_max": 32.0
+    },
+    {
+      "name": "波罗的海、白俄罗斯、俄罗斯西北部地区",
+      "lat_min": 60.0,
+      "lat_max": 70.0,
+      "lon_min": 27.0,
+      "lon_max": 32.0
+    },
+    {
+      "name": "俄罗斯西伯利亚西北部",
+      "lat_min": 50.0,
+      "lat_max": 71.0,
+      "lon_min": 20.0,
+      "lon_max": 66.0
+    },
+    {
+      "name": "俄罗斯西伯利亚中北部",
+      "lat_min": 60.0,
+      "lat_max": 72.0,
+      "lon_min": 63.0,
+      "lon_max": 85.0
+    },
+    {
+      "name": "南极洲维多利亚地",
+      "lat_min": 60.0,
+      "lat_max": 75.0,
+      "lon_min": 85.0,
+      "lon_max": 130.0
+    },
+    {
+      "name": "罗斯海",
+      "lat_min": -79.0,
+      "lat_max": -70.0,
+      "lon_min": 155.0,
+      "lon_max": 171.0
+    },
+    {
+      "name": "南极洲",
+      "lat_min": -78.0,
+      "lat_max": -70.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "东太平洋海岭北部",
+      "lat_min": -90.0,
+      "lat_max": -65.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "洪都拉斯以北",
+      "lat_min": 7.0,
+      "lat_max": 15.0,
+      "lon_min": -106.0,
+      "lon_max": -100.0
+    },
+    {
+      "name": "南桑威奇群岛以东",
+      "lat_min": 16.0,
+      "lat_max": 20.0,
+      "lon_min": -88.0,
+      "lon_max": -79.0
+    },
+    {
+      "name": "泰国",
+      "lat_min": -62.0,
+      "lat_max": -56.0,
+      "lon_min": -22.0,
+      "lon_max": -7.0
+    },
+    {
+      "name": "老挝",
+      "lat_min": 11.0,
+      "lat_max": 20.0,
+      "lon_min": 98.0,
+      "lon_max": 106.0
+    },
+    {
+      "name": "柬埔寨",
+      "lat_min": 14.0,
+      "lat_max": 22.0,
+      "lon_min": 100.0,
+      "lon_max": 107.0
+    },
+    {
+      "name": "越南",
+      "lat_min": 10.0,
+      "lat_max": 14.0,
+      "lon_min": 103.0,
+      "lon_max": 108.0
+    },
+    {
+      "name": "北部湾",
+      "lat_min": 8.0,
+      "lat_max": 23.0,
+      "lon_min": 103.0,
+      "lon_max": 110.0
+    },
+    {
+      "name": "雷克雅内斯海岭",
+      "lat_min": 17.0,
+      "lat_max": 21.0,
+      "lon_min": 106.0,
+      "lon_max": 110.0
+    },
+    {
+      "name": "亚速尔群岛-圣文森特角海岭",
+      "lat_min": 52.0,
+      "lat_max": 61.0,
+      "lon_min": -37.0,
+      "lon_max": -27.0
+    },
+    {
+      "name": "欧文断裂带地区",
+      "lat_min": 35.0,
+      "lat_max": 39.0,
+      "lon_min": -20.0,
+      "lon_max": -10.0
+    },
+    {
+      "name": "印度洋三联点",
+      "lat_min": 11.0,
+      "lat_max": 23.0,
+      "lon_min": 53.0,
+      "lon_max": 65.0
+    },
+    {
+      "name": "西印度洋南极洲海岭",
+      "lat_min": -29.0,
+      "lat_max": -25.0,
+      "lon_min": 64.0,
+      "lon_max": 72.0
+    },
+    {
+      "name": "西撒哈拉",
+      "lat_min": -54.0,
+      "lat_max": -47.0,
+      "lon_min": 114.0,
+      "lon_max": 142.0
+    },
+    {
+      "name": "毛里塔尼亚",
+      "lat_min": 21.0,
+      "lat_max": 28.0,
+      "lon_min": -18.0,
+      "lon_max": -9.0
+    },
+    {
+      "name": "马里",
+      "lat_min": 15.0,
+      "lat_max": 27.0,
+      "lon_min": -18.0,
+      "lon_max": -5.0
+    },
+    {
+      "name": "塞内加尔、冈比亚地区",
+      "lat_min": 10.0,
+      "lat_max": 25.0,
+      "lon_min": -12.0,
+      "lon_max": 4.0
+    },
+    {
+      "name": "几内亚地区",
+      "lat_min": 12.0,
+      "lat_max": 17.0,
+      "lon_min": -18.0,
+      "lon_max": -11.0
+    },
+    {
+      "name": "塞拉利昂",
+      "lat_min": 8.0,
+      "lat_max": 13.0,
+      "lon_min": -18.0,
+      "lon_max": -8.0
+    },
+    {
+      "name": "利比里亚地区",
+      "lat_min": 6.0,
+      "lat_max": 10.0,
+      "lon_min": -15.0,
+      "lon_max": -10.0
+    },
+    {
+      "name": "科特迪瓦",
+      "lat_min": 4.0,
+      "lat_max": 8.0,
+      "lon_min": -13.0,
+      "lon_max": -7.0
+    },
+    {
+      "name": "布基纳法索",
+      "lat_min": 4.0,
+      "lat_max": 11.0,
+      "lon_min": -8.0,
+      "lon_max": -3.0
+    },
+    {
+      "name": "加纳",
+      "lat_min": 10.0,
+      "lat_max": 15.0,
+      "lon_min": -6.0,
+      "lon_max": 2.0
+    },
+    {
+      "name": "贝宁、多哥地区",
+      "lat_min": 4.0,
+      "lat_max": 11.0,
+      "lon_min": -3.0,
+      "lon_max": 1.0
+    },
+    {
+      "name": "尼日尔",
+      "lat_min": 4.0,
+      "lat_max": 12.0,
+      "lon_min": 0.0,
+      "lon_max": 4.0
+    },
+    {
+      "name": "尼日利亚",
+      "lat_min": 12.0,
+      "lat_max": 23.0,
+      "lon_min": 0.0,
+      "lon_max": 12.0
+    },
+    {
+      "name": "复活节岛东南",
+      "lat_min": 4.0,
+      "lat_max": 14.0,
+      "lon_min": 3.0,
+      "lon_max": 12.0
+    },
+    {
+      "name": "加拉帕戈斯三角洲地区",
+      "lat_min": -43.0,
+      "lat_max": -35.0,
+      "lon_min": -105.0,
+      "lon_max": -89.0
+    },
+    {
+      "name": "中国西藏、印度、缅甸边境地区",
+      "lat_min": 0.0,
+      "lat_max": 7.0,
+      "lon_min": -106.0,
+      "lon_max": -100.0
+    },
+    {
+      "name": "中国新疆",
+      "lat_min": 35.0,
+      "lat_max": 50.0,
+      "lon_min": 65.0,
+      "lon_max": 111.0
+    },
+    {
+      "name": "中国内蒙古",
+      "lat_min": 33.0,
+      "lat_max": 60.0,
+      "lon_min": 94.0,
+      "lon_max": 142.0
+    },
+    {
+      "name": "日本列岛",
+      "lat_min": 24.2121,
+      "lat_max": 55.0,
+      "lon_min": 122.9382,
+      "lon_max": 153.9856
+    },
+    {
+      "name": "朝鲜半岛",
+      "lat_min": 20.0,
+      "lat_max": 53.0,
+      "lon_min": 104.0,
+      "lon_max": 140.0
+    },
+    {
+      "name": "美国加利福尼亚州",
+      "lat_min": 32.0,
+      "lat_max": 49.0,
+      "lon_min": -132.0,
+      "lon_max": -112.0
+    },
+    {
+      "name": "墨西哥合众国",
+      "lat_min": 2.0,
+      "lat_max": 32.0,
+      "lon_min": -122.0,
+      "lon_max": -78.0
+    },
+    {
+      "name": "加拿大",
+      "lat_min": -67.0,
+      "lat_max": 84.0,
+      "lon_min": -168.0,
+      "lon_max": 148.0
+    },
+    {
+      "name": "澳大利亚",
+      "lat_min": -46.0,
+      "lat_max": -12.0,
+      "lon_min": 15.0,
+      "lon_max": 169.0
+    },
+    {
+      "name": "俄罗斯",
+      "lat_min": 13.0,
+      "lat_max": 88.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "印尼",
+      "lat_min": -15.0,
+      "lat_max": 6.0,
+      "lon_min": 90.0,
+      "lon_max": 162.0
+    },
+    {
+      "name": "印度",
+      "lat_min": -71.0,
+      "lat_max": 35.0,
+      "lon_min": 53.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "阿根廷",
+      "lat_min": -52.0,
+      "lat_max": -22.0,
+      "lon_min": -73.0,
+      "lon_max": -62.0
+    },
+    {
+      "name": "智利",
+      "lat_min": -56.0,
+      "lat_max": -14.0,
+      "lon_min": -83.0,
+      "lon_max": -53.0
+    },
+    {
+      "name": "菲律宾",
+      "lat_min": 4.0,
+      "lat_max": 23.0,
+      "lon_min": 118.0,
+      "lon_max": 128.0
+    },
+    {
+      "name": "哈萨克斯坦",
+      "lat_min": 23.0,
+      "lat_max": 69.0,
+      "lon_min": 55.0,
+      "lon_max": 120.0
+    },
+    {
+      "name": "日本",
+      "lat_min": 10.0,
+      "lat_max": 46.0,
+      "lon_min": 122.9382,
+      "lon_max": 153.9856
+    },
+    {
+      "name": "东太平洋海岭",
+      "lat_min": -90.0,
+      "lat_max": 25.0,
+      "lon_min": -180.0,
+      "lon_max": 180.0
+    },
+    {
+      "name": "中国东",
+      "lat_min": 42.0,
+      "lat_max": 60.0,
+      "lon_min": 117.0,
+      "lon_max": 160.0
+    },
+    {
+      "name": "中大西洋海岭",
+      "lat_min": -55.0,
+      "lat_max": 67.0,
+      "lon_min": -69.0,
+      "lon_max": 15.0
+    },
+    {
+      "name": "亚丁湾",
+      "lat_min": -69.0,
+      "lat_max": 18.0,
+      "lon_min": -5.0,
+      "lon_max": 47.0
+    },
+    {
+      "name": "亚利桑那州",
+      "lat_min": 36.0,
+      "lat_max": 41.0,
+      "lon_min": -117.0,
+      "lon_max": -74.0
+    },
+    {
+      "name": "伊朗",
+      "lat_min": 25.0,
+      "lat_max": 37.0,
+      "lon_min": 44.0,
+      "lon_max": 55.0
+    },
+    {
+      "name": "俄罗斯西伯利亚西",
+      "lat_min": 32.0,
+      "lat_max": 71.0,
+      "lon_min": 20.0,
+      "lon_max": 103.0
+    },
+    {
+      "name": "克什米尔西",
+      "lat_min": 23.0,
+      "lat_max": 40.0,
+      "lon_min": 65.0,
+      "lon_max": 76.0
+    },
+    {
+      "name": "加利福尼亚州",
+      "lat_min": 32.0,
+      "lat_max": 42.0,
+      "lon_min": -132.0,
+      "lon_max": -112.0
+    },
+    {
+      "name": "加拿大育空地区",
+      "lat_min": 45.0,
+      "lat_max": 72.0,
+      "lon_min": -168.0,
+      "lon_max": -141.0
+    },
+    {
+      "name": "加拿大魁北克省",
+      "lat_min": 47.0,
+      "lat_max": 64.0,
+      "lon_min": -80.0,
+      "lon_max": -52.0
+    },
+    {
+      "name": "加罗林群岛",
+      "lat_min": -12.0,
+      "lat_max": 23.0,
+      "lon_min": -161.0,
+      "lon_max": 141.0
+    },
+    {
+      "name": "印尼苏门答腊岛",
+      "lat_min": -12.0,
+      "lat_max": 6.0,
+      "lon_min": 90.0,
+      "lon_max": 105.0
+    },
+    {
+      "name": "地中海",
+      "lat_min": 34.0,
+      "lat_max": 41.0,
+      "lon_min": 1.0,
+      "lon_max": 27.0
+    },
+    {
+      "name": "墨西哥",
+      "lat_min": 25.0,
+      "lat_max": 31.0,
+      "lon_min": -109.0,
+      "lon_max": -98.0
+    },
+    {
+      "name": "得克萨斯州",
+      "lat_min": 25.0,
+      "lat_max": 37.0,
+      "lon_min": -107.0,
+      "lon_max": -95.0
+    },
+    {
+      "name": "意大利",
+      "lat_min": 39.0,
+      "lat_max": 48.0,
+      "lon_min": 6.0,
+      "lon_max": 15.0
+    },
+    {
+      "name": "挪威",
+      "lat_min": 51.0,
+      "lat_max": 83.0,
+      "lon_min": -2.0,
+      "lon_max": 70.0
+    },
+    {
+      "name": "日本本州",
+      "lat_min": 33.0,
+      "lat_max": 41.0,
+      "lon_min": 124.0,
+      "lon_max": 140.0
+    },
+    {
+      "name": "格陵兰岛",
+      "lat_min": 60.0,
+      "lat_max": 85.0,
+      "lon_min": -137.0,
+      "lon_max": -10.0
+    },
+    {
+      "name": "爱达荷州",
+      "lat_min": 42.0,
+      "lat_max": 49.0,
+      "lon_min": -124.0,
+      "lon_max": -104.0
+    },
+    {
+      "name": "玻利维亚",
+      "lat_min": -23.0,
+      "lat_max": -10.0,
+      "lon_min": -70.0,
+      "lon_max": -61.0
+    },
+    {
+      "name": "秘鲁",
+      "lat_min": -18.0,
+      "lat_max": 0.0,
+      "lon_min": -81.0,
+      "lon_max": -69.0
+    },
+    {
+      "name": "阿富汗西",
+      "lat_min": 30.0,
+      "lat_max": 38.0,
+      "lon_min": 50.0,
+      "lon_max": 65.0
+    },
+    {
+      "name": "阿尔及利亚",
+      "lat_min": 20.5,
+      "lat_max": 35.0,
+      "lon_min": -13.0,
+      "lon_max": 9.0
+    },
+    {
+      "name": "阿拉伯半岛",
+      "lat_min": 15.0,
+      "lat_max": 33.0,
+      "lon_min": 34.0,
+      "lon_max": 65.0
+    },
+    {
+      "name": "阿拉斯加州",
+      "lat_min": 62.0,
+      "lat_max": 76.0,
+      "lon_min": -166.0,
+      "lon_max": -125.0
+    },
+    {
+      "name": "马鲁古海",
+      "lat_min": -6.0,
+      "lat_max": 2.0,
+      "lon_min": 118.0,
+      "lon_max": 125.0
+    },
+    {
+      "name": "高加索",
+      "lat_min": 41.0,
+      "lat_max": 54.0,
+      "lon_min": 32.0,
+      "lon_max": 65.0
+    },
+    {
+      "name": "日本全境",
+      "lat_min": 24.2121,
+      "lat_max": 45.5204,
+      "lon_min": 122.9382,
+      "lon_max": 153.9856
+    }
+  ],
+  "japan_land_bbox_jpn": {
+    "lat_min": 24.2121,
+    "lat_max": 45.5204,
+    "lon_min": 122.9382,
+    "lon_max": 153.9856
+  }
+}

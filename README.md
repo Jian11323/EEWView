@@ -10,12 +10,15 @@
 
 | 区域 | 内容 |
 |------|------|
-| 顶栏健康 | `Jian` · `Wolfx` · `P2P` → **正常 / 波动 / 异常** |
-| Records | 速报历史（地名 / 时间 / M / 震度色块） |
-| EEW | 预警列表（报数 / M / 最大震度） |
-| Station | 测站列表 |
-| 地图 | 底图瓦片 + 震中 + P/S 波圈（JMA2001 走时） |
-| 信息头 / 倒计时 | 当前事件；本机经纬有效时显示 S 波剩余秒 |
+| 健康点 | `Jian` · `Wolfx` · `P2P` → **正常 / 波动 / 异常** |
+| 速报 | 速报历史（地名 / 时间 / M / 震度色块） |
+| 预警 | 预警列表（报数 / M / 最大震度） |
+| 测站 | NIED Kmoni 有感测站（列表 + 地图色点） |
+| 地图 | 暗色要石矢量 / 亮色地形瓦片 + 震中 + P/S 波圈（JMA2001 走时） |
+| 图例 / 时钟 | 左下烈度色标；右下本地时间（可加 JST） |
+| 信息头 / 倒计时 | 当前事件；本机经纬有效时 S 波剩余秒叠在右下时钟上方 |
+| 主题 | 设置 → 显示：暗色 / 亮色（主界面色板 + auto 底图同步切换） |
+| 设置 | API与数据源 / 地图与显示 / 音频 / 高级 / 关于（RhythmQuake 玻璃面板布局） |
 
 点击列表项可将地图居中到对应事件或测站，并刷新信息头。
 
@@ -25,12 +28,13 @@
 
 | 源 | 用途 | 配置 |
 |----|------|------|
-| **Jian Project API** | 预警 / 速报 / 测站 / 底图 | `[sources.jian]`；访问令牌用环境变量，勿写入仓库 |
+| **Jian Project API** | 预警 / 速报 / 测站 / 底图 | `[sources.jian]`；设置页用 `lk_` 换 `rt_`，或环境变量 `JIAN_ACCESS_TOKEN` / `JIAN_REFRESH_TOKEN` |
 | **Wolfx** | JMA / CENC 等预警与列表补充 | `[sources.wolfx]` |
 | **P2PQuake** | 气象厅地震情报等 | `[sources.p2pquake]` |
 
-底图：`https://tilemap.sismotide.top/{source}/{z}/{x}/{y}`（默认 `arcwob`）。  
-字段约定见 [`docs/数据源.md`](docs/数据源.md)。
+底图：`basemap = "auto"` 时暗色用 `geodata/kanameishi/` 要石矢量，亮色用自有海洋地形瓦片 `tilemap.sismotide.top/arcwob`（横向循环）。  
+国外源地名按融合历史 FE 格网修正（`assets/place/`）；JMA / CWA / HKO / CENC 保留原文。  
+字段约定见 [`docs/数据源.md`](docs/数据源.md)；底图说明见 [`geodata/README.md`](geodata/README.md)。
 
 ---
 
@@ -87,6 +91,15 @@ cargo run -p jian-app
 
 未配置令牌时仍可使用 Wolfx 与 P2PQuake；Jian 健康态为「异常」。
 
+Windows 预览目录（`jian.exe` 与 `assets/` `geodata/` `config/` 同级）：
+
+```powershell
+.\tools\pack_windows.ps1
+.\dist\EEWView\jian.exe
+```
+
+资源根默认是可执行文件所在目录（或其上级仓库根）；也可用环境变量 `EEWVIEW_ROOT` 指定。
+
 ---
 
 ## 目录
@@ -95,6 +108,7 @@ cargo run -p jian-app
 |------|------|
 | `crates/` | 应用、界面、地图、网络、音效、走时等 |
 | `assets/` | 音效、走时表、色标、图标 |
+| `geodata/` | 暗色要石 TopoJSON；可选行政区 GeoJSON 回退 |
 | `config/default.toml` | 默认配置（密钥勿提交） |
 | `docs/` | 架构与接口说明 |
 | `tools/` | 走时表转换等工具 |
@@ -111,3 +125,4 @@ cargo run -p jian-app
 
 - [`assets/sound/ATTRIBUTION.md`](assets/sound/ATTRIBUTION.md)
 - [`assets/travel/ATTRIBUTION.md`](assets/travel/ATTRIBUTION.md)
+- [`assets/place/ATTRIBUTION.md`](assets/place/ATTRIBUTION.md)

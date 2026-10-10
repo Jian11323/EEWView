@@ -10,4 +10,7 @@ jian-travel = { workspace = true }
 jian-util = { workspace = true }
 reqwest = { workspace = true }
 image = { workspace = true }
+resvg = { workspace = true }
 tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

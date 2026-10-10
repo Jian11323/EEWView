@@ -135,4 +135,14 @@ impl AudioEngine {
             p.set_mute(mute);
         }
     }
+
+    pub fn set_volumes(&mut self, master: f32, countdown_volume: f32) {
+        if let Some(p) = &mut self.player {
+            p.set_volumes(master, countdown_volume);
+        }
+    }
+
+    pub fn set_packs(&mut self, event_pack: &str, countdown_pack: &str) {
+        self.router.set_packs(event_pack, countdown_pack);
+    }
 }

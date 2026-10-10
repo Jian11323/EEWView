@@ -5,6 +5,11 @@ edition.workspace = true
 
 [dependencies]
 egui = { workspace = true }
+chrono = { workspace = true }
+image = { workspace = true }
+tracing = { workspace = true }
 jian-core = { workspace = true }
+jian-config = { workspace = true }
 jian-map = { workspace = true }
 jian-travel = { workspace = true }
+jian-net = { workspace = true }

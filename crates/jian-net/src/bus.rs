@@ -11,8 +11,8 @@ pub enum NetEvent {
     },
     Eew(EewReport),
     Record(EqRecord),
-    #[allow(dead_code)]
-    Station(StationSample),
+    /// Kmoni 等有感测站一帧快照
+    Stations(Vec<StationSample>),
 }
 
 pub type NetTx = mpsc::UnboundedSender<NetEvent>;

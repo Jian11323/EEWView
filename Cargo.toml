@@ -15,7 +15,7 @@ members = [
 default-members = ["crates/jian-app"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Jian11323"]
@@ -32,7 +32,7 @@ jian-map = { path = "crates/jian-map" }
 jian-ui = { path = "crates/jian-ui" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = { version = "0.8", features = ["parse", "display"] }
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
@@ -46,4 +46,5 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 directories = "6"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+resvg = { version = "0.45", default-features = false }
 rodio = { version = "0.20", features = ["wav", "mp3"] }

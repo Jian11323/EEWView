@@ -21,6 +21,11 @@ impl Router {
         }
     }
 
+    pub fn set_packs(&mut self, event_pack: &str, countdown_pack: &str) {
+        self.event_pack = event_pack.to_string();
+        self.countdown_pack = countdown_pack.to_string();
+    }
+
     pub fn sound_root(&self) -> &Path {
         &self.sound_root
     }
