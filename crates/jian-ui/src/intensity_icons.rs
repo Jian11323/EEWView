@@ -1,42 +1,49 @@
-//! CSIS 烈度（`assets/CSIS`）与 JMA 震度（`assets/zd`）图标。
+//! 烈度/震度图标：`assets/intensity/csis` 与 `assets/intensity/shindo`（SVG）。
 //!
-//! JMA：5弱→`5R`，5强→`5Q`；6弱→`6R`，6强→`6Q`。
+//! JMA：level 0–9 → 0,1,2,3,4,5弱,5强,6弱,6强,7。
 
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
 use jian_core::IntensityKind;
 use std::collections::HashMap;
 
-macro_rules! png {
+macro_rules! svg {
     ($rel:expr) => {
-        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/", $rel))
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/intensity/",
+            $rel
+        ))
     };
 }
 
-const CSIS_PNG: [&[u8]; 11] = [
-    png!("CSIS/1.png"),
-    png!("CSIS/2.png"),
-    png!("CSIS/3.png"),
-    png!("CSIS/4.png"),
-    png!("CSIS/5.png"),
-    png!("CSIS/6.png"),
-    png!("CSIS/7.png"),
-    png!("CSIS/8.png"),
-    png!("CSIS/9.png"),
-    png!("CSIS/10.png"),
-    png!("CSIS/11.png"),
+const RASTER_PX: u32 = 128;
+
+const SHINDO_SVG: [(&[u8], u8); 10] = [
+    (svg!("shindo/Shindo 0.svg"), 0),
+    (svg!("shindo/Shindo 1.svg"), 1),
+    (svg!("shindo/Shindo 2.svg"), 2),
+    (svg!("shindo/Shindo 3.svg"), 3),
+    (svg!("shindo/Shindo 4.svg"), 4),
+    (svg!("shindo/Shindo 5-.svg"), 5),
+    (svg!("shindo/Shindo 5+.svg"), 6),
+    (svg!("shindo/Shindo 6-.svg"), 7),
+    (svg!("shindo/Shindo 6+.svg"), 8),
+    (svg!("shindo/Shindo 7.svg"), 9),
 ];
 
-const JMA_PNG: [(&[u8], &str); 10] = [
-    (png!("zd/0.png"), "0"),
-    (png!("zd/1.png"), "1"),
-    (png!("zd/2.png"), "2"),
-    (png!("zd/3.png"), "3"),
-    (png!("zd/4.png"), "4"),
-    (png!("zd/5R.png"), "5R"),
-    (png!("zd/5Q.png"), "5Q"),
-    (png!("zd/6R.png"), "6R"),
-    (png!("zd/6Q.png"), "6Q"),
-    (png!("zd/7.png"), "7"),
+const CSIS_SVG: [(&[u8], u8); 12] = [
+    (svg!("csis/CSIS 1.svg"), 1),
+    (svg!("csis/CSIS 2.svg"), 2),
+    (svg!("csis/CSIS 3.svg"), 3),
+    (svg!("csis/CSIS 4.svg"), 4),
+    (svg!("csis/CSIS 5.svg"), 5),
+    (svg!("csis/CSIS 6.svg"), 6),
+    (svg!("csis/CSIS 7.svg"), 7),
+    (svg!("csis/CSIS 8.svg"), 8),
+    (svg!("csis/CSIS 9.svg"), 9),
+    (svg!("csis/CSIS 10.svg"), 10),
+    (svg!("csis/CSIS 11.svg"), 11),
+    (svg!("csis/CSIS 12.svg"), 12),
 ];
 
 #[derive(Default)]
@@ -52,19 +59,18 @@ impl IntensityIcons {
             return;
         }
         self.tried = true;
-        for (i, (bytes, name)) in JMA_PNG.iter().enumerate() {
-            if let Some(tex) = load_png(ctx, &format!("eewview/zd/{name}"), bytes) {
-                self.jma.insert(i as u8, tex);
+        for (bytes, level) in SHINDO_SVG {
+            if let Some(tex) = load_svg(ctx, &format!("eewview/shindo/{level}"), bytes) {
+                self.jma.insert(level, tex);
             }
         }
-        for (i, bytes) in CSIS_PNG.iter().enumerate() {
-            let level = (i + 1) as u8;
-            if let Some(tex) = load_png(ctx, &format!("eewview/csis/{level}"), bytes) {
+        for (bytes, level) in CSIS_SVG {
+            if let Some(tex) = load_svg(ctx, &format!("eewview/csis/{level}"), bytes) {
                 self.csis.insert(level, tex);
             }
         }
-        if self.jma.len() < 10 || self.csis.len() < 11 {
-            tracing::warn!("部分烈度/震度图标未能加载，将回退为色块文字");
+        if self.jma.len() < 10 || self.csis.len() < 12 {
+            tracing::warn!("部分烈度/震度 SVG 未能加载，将回退为色块文字");
         }
     }
 
@@ -73,15 +79,31 @@ impl IntensityIcons {
             IntensityKind::JmaShindo => self.jma.get(&level.min(9)),
             IntensityKind::CnIntensity => {
                 let lv = level.clamp(1, 12);
-                self.csis.get(&lv.min(11))
+                self.csis.get(&lv)
             }
         }
     }
 }
 
-fn load_png(ctx: &Context, name: &str, bytes: &[u8]) -> Option<TextureHandle> {
-    let img = image::load_from_memory(bytes).ok()?.into_rgba8();
-    let size = [img.width() as usize, img.height() as usize];
-    let color = ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-    Some(ctx.load_texture(name, color, TextureOptions::LINEAR))
+fn load_svg(ctx: &Context, name: &str, bytes: &[u8]) -> Option<TextureHandle> {
+    let image = rasterize_svg(bytes, RASTER_PX)?;
+    Some(ctx.load_texture(name, image, TextureOptions::LINEAR))
+}
+
+fn rasterize_svg(bytes: &[u8], max_px: u32) -> Option<ColorImage> {
+    let opt = resvg::usvg::Options::default();
+    let tree = resvg::usvg::Tree::from_data(bytes, &opt).ok()?;
+    let size = tree.size();
+    let sw = size.width().max(1.0);
+    let sh = size.height().max(1.0);
+    let scale = max_px as f32 / sw.max(sh);
+    let w = (sw * scale).round().max(1.0) as u32;
+    let h = (sh * scale).round().max(1.0) as u32;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h)?;
+    let transform = resvg::tiny_skia::Transform::from_scale(scale, scale);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    Some(ColorImage::from_rgba_premultiplied(
+        [w as usize, h as usize],
+        pixmap.data(),
+    ))
 }

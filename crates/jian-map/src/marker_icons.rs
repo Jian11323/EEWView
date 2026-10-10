@@ -4,17 +4,16 @@ use egui::{ColorImage, Context, TextureHandle, TextureOptions};
 
 const CROSS_SVG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/cross.svg"
+    "/../../assets/markers/cross.svg"
 ));
 const RED_SVG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/red.svg"
+    "/../../assets/markers/red.svg"
 ));
 const GREEN_SVG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/green.svg"
+    "/../../assets/markers/green.svg"
 ));
-
 /// 栅格化尺寸（屏幕绘制时再缩放）
 const RASTER_PX: u32 = 128;
 

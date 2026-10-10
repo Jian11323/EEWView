@@ -119,7 +119,7 @@ fn paint_epicenter_marker(
     }
 }
 
-/// 有感测站散点（视口外跳过）
+/// 测站散点（视口外跳过；計測 -3～7 用要石色带，低值点略小）
 pub fn paint_stations(
     ui: &mut Ui,
     rect: Rect,
@@ -134,7 +134,15 @@ pub fn paint_stations(
     }
     let painter = ui.painter_at(rect);
     let pad = 8.0_f32;
+    // 低缩放时略过极低計測值以减负；放大后补全整网（含 -3）
+    let show_quiet = zoom >= 4.5;
     for s in stations {
+        let quiet = s.instrumental < 0.5 && s.intensity_level == 0;
+        if quiet && !show_quiet {
+            if selected_id != Some(s.id.as_str()) {
+                continue;
+            }
+        }
         let p = projection::lonlat_to_screen(
             s.longitude,
             s.latitude,
@@ -150,10 +158,20 @@ pub fn paint_stations(
         {
             continue;
         }
-        let rgb = color_for(s.intensity_kind, s.intensity_level);
+        let rgb = if s.instrumental >= -3.0 {
+            jian_core::instrumental_rgb(s.instrumental)
+        } else {
+            color_for(s.intensity_kind, s.intensity_level)
+        };
         let fill = Color32::from_rgb(rgb.r, rgb.g, rgb.b);
         let selected = selected_id == Some(s.id.as_str());
-        let r = if selected { 5.5 } else { 3.0 };
+        let r = if selected {
+            5.5
+        } else if quiet {
+            2.2
+        } else {
+            3.2
+        };
         painter.circle_filled(p, r, fill);
         painter.circle_stroke(
             p,
@@ -179,7 +197,7 @@ pub fn paint_stations(
     }
 }
 
-/// 速报列表：`red.svg`，尺寸随震级
+/// 速报列表：`markers/red.svg`，尺寸随震级
 pub fn paint_records(
     ui: &mut Ui,
     rect: Rect,
@@ -216,7 +234,7 @@ pub fn paint_records(
     }
 }
 
-/// 本机位置（`green.svg`）
+/// 本机位置（`markers/green.svg`）
 pub fn paint_home(
     ui: &mut Ui,
     rect: Rect,
@@ -267,6 +285,7 @@ pub fn paint_wave_overlay(
     travel: Option<&TravelEngine>,
     elapsed_s: f64,
     icons: Option<&MarkerIcons>,
+    selected: bool,
 ) {
     let Some(ev) = active else { return };
     let painter = ui.painter_at(rect);
@@ -289,30 +308,101 @@ pub fn paint_wave_overlay(
     } else {
         static ONCE: Once = Once::new();
         ONCE.call_once(|| tracing::warn!("无走时表，波圈使用直线速度兜底"));
-        (elapsed_s * 7.0, elapsed_s * 5.0)
+        let depth = ev.depth_km.max(0.0);
+        let surface = |v: f64| {
+            let slant = elapsed_s * v;
+            if slant <= depth {
+                0.0
+            } else {
+                (slant * slant - depth * depth).sqrt()
+            }
+        };
+        (surface(7.0), surface(5.0))
     };
 
-    let max_r = rect.width().max(rect.height()) * 2.0;
+    let (p_alpha, s_alpha, p_w, s_w) = if selected {
+        (255_u8, 255_u8, 2.0_f32, 2.6_f32)
+    } else {
+        (160, 170, 1.3, 1.8)
+    };
+
+    // 未超过最大传播距离时画圈；接近上限时略淡
+    let max_r = rect.width().max(rect.height()) * 3.0;
     if p_km < max_km {
-        let p_r = projection::km_to_pixels(p_km, ev.latitude, zoom).max(2.0);
+        let fade = (1.0 - (p_km / max_km).clamp(0.0, 1.0)).mul_add(0.35, 0.65);
+        let p_r = projection::km_to_pixels(p_km, ev.latitude, zoom).max(3.0);
         if p_r < max_r {
             painter.circle_stroke(
                 epicenter,
                 p_r,
-                Stroke::new(1.5_f32, Color32::from_rgb(80, 180, 255)),
+                Stroke::new(
+                    p_w,
+                    Color32::from_rgba_unmultiplied(
+                        80,
+                        180,
+                        255,
+                        ((p_alpha as f64) * fade) as u8,
+                    ),
+                ),
             );
         }
     }
     if s_km < max_km {
-        let s_r = projection::km_to_pixels(s_km, ev.latitude, zoom).max(2.0);
+        let fade = (1.0 - (s_km / max_km).clamp(0.0, 1.0)).mul_add(0.35, 0.65);
+        let s_r = projection::km_to_pixels(s_km, ev.latitude, zoom).max(3.0);
         if s_r < max_r {
             painter.circle_stroke(
                 epicenter,
                 s_r,
-                Stroke::new(2.0_f32, Color32::from_rgb(255, 80, 80)),
+                Stroke::new(
+                    s_w,
+                    Color32::from_rgba_unmultiplied(
+                        255,
+                        80,
+                        80,
+                        ((s_alpha as f64) * fade) as u8,
+                    ),
+                ),
             );
         }
     }
 
-    paint_epicenter_marker(&painter, icons, epicenter, ev, true);
+    paint_epicenter_marker(&painter, icons, epicenter, ev, selected);
+}
+
+/// 各数据源最新预警叉标（无波圈；选中项带标签）
+pub fn paint_eew_markers(
+    ui: &mut Ui,
+    rect: Rect,
+    center_lon: f64,
+    center_lat: f64,
+    zoom: f64,
+    markers: &[EewReport],
+    selected: Option<(&str, &str)>,
+    icons: Option<&MarkerIcons>,
+) {
+    if markers.is_empty() {
+        return;
+    }
+    let painter = ui.painter_at(rect);
+    let pad = 28.0_f32;
+    for ev in markers {
+        let p = projection::lonlat_to_screen(
+            ev.longitude,
+            ev.latitude,
+            center_lon,
+            center_lat,
+            zoom,
+            rect,
+        );
+        if p.x < rect.left() - pad
+            || p.x > rect.right() + pad
+            || p.y < rect.top() - pad
+            || p.y > rect.bottom() + pad
+        {
+            continue;
+        }
+        let is_sel = selected == Some((ev.agency.0.as_str(), ev.event_id.as_str()));
+        paint_epicenter_marker(&painter, icons, p, ev, is_sel);
+    }
 }

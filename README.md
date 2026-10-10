@@ -107,7 +107,7 @@ Windows 预览目录（`jian.exe` 与 `assets/` `geodata/` `config/` 同级）�
 | 路径 | 说明 |
 |------|------|
 | `crates/` | 应用、界面、地图、网络、音效、走时等 |
-| `assets/` | 音效、走时表、色标、图标 |
+| `assets/` | 音效、走时、色标、烈度图标、地图标记、品牌 |
 | `geodata/` | 暗色要石 TopoJSON；可选行政区 GeoJSON 回退 |
 | `config/default.toml` | 默认配置（密钥勿提交） |
 | `docs/` | 架构与接口说明 |
@@ -125,4 +125,5 @@ Windows 预览目录（`jian.exe` 与 `assets/` `geodata/` `config/` 同级）�
 
 - [`assets/sound/ATTRIBUTION.md`](assets/sound/ATTRIBUTION.md)
 - [`assets/travel/ATTRIBUTION.md`](assets/travel/ATTRIBUTION.md)
+- [`assets/ATTRIBUTION.md`](assets/ATTRIBUTION.md)
 - [`assets/place/ATTRIBUTION.md`](assets/place/ATTRIBUTION.md)
