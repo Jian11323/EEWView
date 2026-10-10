@@ -324,13 +324,17 @@ fn draw_shell(
     restore: &mut bool,
     do_exchange: &mut bool,
 ) {
+    // RQ .shell inset
+    Frame::NONE
+        .inner_margin(Margin::symmetric(28, 18))
+        .show(ui, |ui| {
     ui.allocate_ui_with_layout(
         ui.available_size(),
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
             // 页眉（RQ .header）
             Frame::NONE
-                .inner_margin(Margin::symmetric(22, 14))
+                .inner_margin(Margin::symmetric(4, 6))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
@@ -423,6 +427,7 @@ fn draw_shell(
                 });
         },
     );
+        }); // shell inset
 }
 
 fn draw_nav(ui: &mut Ui, session: &mut SettingsSession, body_h: f32) {
@@ -463,8 +468,7 @@ fn draw_nav(ui: &mut Ui, session: &mut SettingsSession, body_h: f32) {
                         Color32::TRANSPARENT
                     };
                     let stroke = if selected {
-                        Stroke::new(
-                            1.0,
+                        Stroke::new(1.0_f32,
                             Color32::from_rgba_unmultiplied(
                                 accent.r(),
                                 accent.g(),
@@ -475,6 +479,14 @@ fn draw_nav(ui: &mut Ui, session: &mut SettingsSession, body_h: f32) {
                     } else {
                         Stroke::NONE
                     };
+                    // nav-btn.active base
+                    if selected {
+                        ui.painter().rect_filled(
+                            rect,
+                            10.0,
+                            Color32::from_rgba_unmultiplied(255, 255, 255, 26),
+                        );
+                    }
                     ui.painter()
                         .rect(rect, 10.0, fill, stroke, egui::StrokeKind::Inside);
 
@@ -596,16 +608,29 @@ fn draw_main(
 }
 
 fn paint_fade_rule(ui: &Ui, head: Rect, inset: f32) {
+    // RQ .panel-nav-head / .content-head ::after — mid band with faded ends.
     let y = head.bottom() - 1.0;
     let left = head.left() + inset;
     let right = head.right() - inset;
-    let mid_l = left + (right - left) * 0.18;
-    let mid_r = left + (right - left) * 0.82;
-    let c = Color32::from_rgba_unmultiplied(255, 255, 255, 30);
-    ui.painter().line_segment(
-        [Pos2::new(mid_l, y), Pos2::new(mid_r, y)],
-        Stroke::new(1.0, c),
-    );
+    let span = (right - left).max(1.0);
+    let stops = [
+        (0.00, 0),
+        (0.18, 30),
+        (0.50, 30),
+        (0.82, 30),
+        (1.00, 0),
+    ];
+    for w in stops.windows(2) {
+        let (t0, a0) = w[0];
+        let (t1, a1) = w[1];
+        let x0 = left + span * t0 as f32;
+        let x1 = left + span * t1 as f32;
+        let a = ((a0 + a1) / 2).max(1) as u8;
+        ui.painter().line_segment(
+            [Pos2::new(x0, y), Pos2::new(x1, y)],
+            Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, a)),
+        );
+    }
 }
 
 fn draw_content(
@@ -676,8 +701,7 @@ pub(super) fn control_row(
             icon_r,
             8.0,
             Color32::from_rgba_unmultiplied(0x82, 0xB1, 0xFF, 36),
-            Stroke::new(
-                1.0,
+            Stroke::new(1.0_f32,
                 Color32::from_rgba_unmultiplied(0x82, 0xB1, 0xFF, 72),
             ),
             egui::StrokeKind::Inside,
@@ -714,19 +738,18 @@ fn glass_btn(ui: &mut Ui, text: &str, emphasized: bool) -> egui::Response {
         *GHOST_BG
     };
     let stroke = if emphasized {
-        Stroke::new(
-            1.0,
+        Stroke::new(1.0_f32,
             Color32::from_rgba_unmultiplied(0x82, 0xB1, 0xFF, 200),
         )
     } else {
-        Stroke::new(1.0, *BORDER)
+        Stroke::new(1.0_f32, *BORDER)
     };
     ui.add(
         egui::Button::new(RichText::new(text).size(13.0).strong().color(TEXT))
             .fill(fill)
             .stroke(stroke)
             .corner_radius(10.0)
-            .min_size(Vec2::new(if emphasized { 108.0 } else { 76.0 }, 36.0)),
+            .min_size(Vec2::new(if emphasized { 108.0 } else { 76.0 }, 40.0)),
     )
 }
 
@@ -754,6 +777,15 @@ pub(super) fn toggle(ui: &mut Ui, on: &mut bool) -> egui::Response {
     };
     ui.painter()
         .circle_filled(Pos2::new(thumb_x, rect.center().y), 10.0, thumb_c);
+    // toggle hover ring
+    if resp.hovered() {
+        ui.painter().rect_stroke(
+            rect,
+            14.0,
+            Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(0x82, 0xB1, 0xFF, 90)),
+            egui::StrokeKind::Outside,
+        );
+    }
     resp
 }
 
