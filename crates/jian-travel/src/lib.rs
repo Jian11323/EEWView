@@ -236,11 +236,18 @@ impl TravelEngine {
         if !self.linear_last_resort {
             return 0.0;
         }
+        // 斜距匀速：先到地表再水平扩散（避免深震直接用 elapsed*v 虚高）
         let v = match wave {
             Wave::P => 7.0,
             Wave::S => 5.0,
         };
-        (elapsed_s * v).max(0.0)
+        let slant = (elapsed_s * v).max(0.0);
+        let depth = depth_km.max(0.0);
+        if slant <= depth {
+            0.0
+        } else {
+            (slant * slant - depth * depth).sqrt()
+        }
     }
 }
 

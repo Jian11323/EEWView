@@ -26,6 +26,21 @@ pub struct UiConfig {
     pub show_nied_clock: bool,
     pub sidebar_default_tab: String,
     pub intensity_scale: String,
+    /// 主窗口始终置顶（对齐滚动字幕「窗口置顶」）
+    #[serde(default)]
+    pub always_on_top: bool,
+    /// 新预警/报数更新时地图自动跟焦震中
+    #[serde(default = "default_true")]
+    pub auto_follow_eew: bool,
+    /// 跟焦时按 P/S 波圈自动缩放
+    #[serde(default = "default_true")]
+    pub auto_zoom_waves: bool,
+    /// 绘制 P/S 走时波圈
+    #[serde(default = "default_true")]
+    pub show_wave_rings: bool,
+    /// 地图左下角烈度图例
+    #[serde(default = "default_true")]
+    pub show_legend: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +92,50 @@ pub struct SourcesConfig {
     pub jian: JianSourceConfig,
     pub wolfx: WolfxSourceConfig,
     pub p2pquake: P2pSourceConfig,
+    /// 测站网：JMA（kmoni/lmoni/中转）、S-Net、KMA
+    #[serde(default)]
+    pub stations: StationsConfig,
+}
+
+/// 实时测站源选择（用户可切换原版 / Jian 中转）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StationsConfig {
+    /// 日本 JMA/NIED 测站总开关
+    #[serde(default = "default_true")]
+    pub jma_enabled: bool,
+    /// `jian` | `kmoni` | `lmoni`
+    #[serde(default = "default_jma_station_source")]
+    pub jma_source: String,
+    #[serde(default = "default_jian_station_ws")]
+    pub jma_jian_ws: String,
+    /// S-Net 海上强震网
+    #[serde(default)]
+    pub snet_enabled: bool,
+    /// `jian` | `original`
+    #[serde(default = "default_jma_station_source")]
+    pub snet_source: String,
+    #[serde(default = "default_snet_jian_ws")]
+    pub snet_jian_ws: String,
+    /// 韩国 KMA PEWS（仅 Jian API）
+    #[serde(default)]
+    pub kma_enabled: bool,
+    #[serde(default = "default_kma_station_ws")]
+    pub kma_jian_ws: String,
+}
+
+impl Default for StationsConfig {
+    fn default() -> Self {
+        Self {
+            jma_enabled: true,
+            jma_source: default_jma_station_source(),
+            jma_jian_ws: default_jian_station_ws(),
+            snet_enabled: false,
+            snet_source: default_jma_station_source(),
+            snet_jian_ws: default_snet_jian_ws(),
+            kma_enabled: false,
+            kma_jian_ws: default_kma_station_ws(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,7 +191,16 @@ pub struct FiltersConfig {
 
 impl FiltersConfig {
     pub fn eew_agency_on(&self, key: &str) -> bool {
-        self.eew_agency.get(key).copied().unwrap_or(true)
+        if let Some(v) = self.eew_agency.get(key) {
+            return *v;
+        }
+        // 旧配置曾把 CEA 预警误记为 cenc
+        if key == "cea" {
+            if let Some(v) = self.eew_agency.get("cenc") {
+                return *v;
+            }
+        }
+        true
     }
 
     pub fn set_eew_agency(&mut self, key: &str, on: bool) {
@@ -184,6 +252,15 @@ fn default_jian_ws() -> String {
 fn default_jian_station_ws() -> String {
     "wss://api.sismotide.top/kmoni".into()
 }
+fn default_jma_station_source() -> String {
+    "jian".into()
+}
+fn default_snet_jian_ws() -> String {
+    "wss://api.sismotide.top/s-net".into()
+}
+fn default_kma_station_ws() -> String {
+    "wss://api.sismotide.top/kma-station".into()
+}
 fn default_wolfx_ws() -> Vec<String> {
     vec!["wss://ws-api.wolfx.jp/jma_eew".into()]
 }
@@ -208,6 +285,11 @@ impl Default for AppConfig {
                 show_nied_clock: false,
                 sidebar_default_tab: "eew".into(),
                 intensity_scale: "auto".into(),
+                always_on_top: false,
+                auto_follow_eew: true,
+                auto_zoom_waves: true,
+                show_wave_rings: true,
+                show_legend: true,
             },
             map: MapConfig {
                 basemap: default_basemap(),
@@ -257,6 +339,7 @@ impl Default for AppConfig {
                     ws_url: default_p2p_ws(),
                     poll_secs: default_p2p_poll(),
                 },
+                stations: StationsConfig::default(),
             },
             filters: FiltersConfig::default(),
         }
@@ -336,8 +419,26 @@ impl AppConfig {
         Ok(path)
     }
 
+    /// 旧键 `jian.station_enabled` 与 `stations.jma_*` 双向对齐。
+    pub fn sync_station_compat(&mut self) {
+        // 若仍用旧开关且 stations 为默认 jian，则以旧键为准
+        if !self.sources.jian.station_enabled && self.sources.stations.jma_source == "jian" {
+            self.sources.stations.jma_enabled = false;
+        }
+        if self.sources.stations.jma_enabled && self.sources.stations.jma_source == "jian" {
+            self.sources.jian.station_enabled = true;
+            self.sources.jian.station_ws_url = self.sources.stations.jma_jian_ws.clone();
+        } else if self.sources.stations.jma_source == "jian" {
+            self.sources.jian.station_enabled = self.sources.stations.jma_enabled;
+        } else {
+            // 原版 kmoni/lmoni：关闭 Jian /kmoni 连接
+            self.sources.jian.station_enabled = false;
+        }
+    }
+
     /// 环境变量覆盖敏感项（不写进仓库）
     pub fn apply_env_overrides(&mut self) {
+        self.sync_station_compat();
         if let Ok(tok) = env::var("JIAN_REFRESH_TOKEN") {
             if tok.trim().starts_with("rt_") {
                 self.sources.jian.refresh_token = Some(tok.trim().to_string());
@@ -356,8 +457,12 @@ impl AppConfig {
     }
 
     pub fn any_source_enabled(&self) -> bool {
+        let st = &self.sources.stations;
         self.sources.jian.enabled
             || self.sources.jian.station_enabled
+            || st.jma_enabled
+            || st.snet_enabled
+            || st.kma_enabled
             || (self.sources.wolfx.enabled
                 && (self.sources.wolfx.eew_enabled || self.sources.wolfx.eqlist_enabled))
             || self.sources.p2pquake.enabled
@@ -370,6 +475,14 @@ impl AppConfig {
             && self.sources.jian.station_ws_url == other.sources.jian.station_ws_url
             && self.sources.jian.refresh_token == other.sources.jian.refresh_token
             && self.sources.jian.access_token == other.sources.jian.access_token
+            && self.sources.stations.jma_enabled == other.sources.stations.jma_enabled
+            && self.sources.stations.jma_source == other.sources.stations.jma_source
+            && self.sources.stations.jma_jian_ws == other.sources.stations.jma_jian_ws
+            && self.sources.stations.snet_enabled == other.sources.stations.snet_enabled
+            && self.sources.stations.snet_source == other.sources.stations.snet_source
+            && self.sources.stations.snet_jian_ws == other.sources.stations.snet_jian_ws
+            && self.sources.stations.kma_enabled == other.sources.stations.kma_enabled
+            && self.sources.stations.kma_jian_ws == other.sources.stations.kma_jian_ws
             && self.sources.wolfx.enabled == other.sources.wolfx.enabled
             && self.sources.wolfx.eew_enabled == other.sources.wolfx.eew_enabled
             && self.sources.wolfx.eqlist_enabled == other.sources.wolfx.eqlist_enabled

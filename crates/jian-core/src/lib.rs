@@ -16,9 +16,10 @@ pub use estimate::{
     hypocentral_km,
 };
 pub use intensity::{
-    cn_intensity_level, cn_intensity_text, intensity_kind_for_agency, jma_from_instrumental,
-    jma_shindo_level, jma_shindo_text, prefer_intensity_scale,
+    cn_intensity_level, cn_intensity_text, instrumental_display_text, intensity_kind_for_agency,
+    jma_from_instrumental, jma_shindo_level, jma_shindo_text, prefer_intensity_scale,
 };
+pub use palette::{instrumental_band_level, instrumental_band_rgb, instrumental_rgb};
 
 /// 机构 / 源 ID（与 WS type 对齐）
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -69,6 +70,9 @@ pub struct EqRecord {
     /// 发震时刻 unix ms（0 表示未知）
     #[serde(default)]
     pub origin_ms: i64,
+    /// CENC 等：自动测定（Wolfx `type=automatic`）
+    #[serde(default)]
+    pub is_auto: bool,
 }
 
 impl EqRecord {
@@ -102,6 +106,28 @@ pub struct StationSample {
     pub intensity_text: String,
     pub intensity_kind: IntensityKind,
     pub intensity_level: u8,
+    /// 計測震度（JMA 网约 -3～7；CN/KMA 可填烈度近似值；缺测用 -99）
+    #[serde(default = "default_instrumental")]
+    pub instrumental: f64,
+}
+
+fn default_instrumental() -> f64 {
+    -99.0
+}
+
+/// JMA 海啸情报（预报 / 注意报 / 警报等）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TsunamiInfo {
+    /// 标题，如「海啸警报」「海啸注意报」「海啸预报」
+    pub title: String,
+    /// 等级原文或归一化：Forecast / Watch / Warning / MajorWarning / Cancel
+    pub grade: String,
+    /// 区域摘要（逗号分隔）
+    pub areas: String,
+    pub cancelled: bool,
+    /// 发布时间 unix ms（0 未知）
+    #[serde(default)]
+    pub issued_ms: i64,
 }
 
 impl StationSample {
@@ -184,6 +210,8 @@ pub struct AppSnapshot {
     pub selection: Option<ListSelection>,
     /// 图例 P-S：是否绘制走时波圈
     pub show_wave_rings: bool,
+    /// 当前有效的 JMA 海啸情报（取消后为 None）
+    pub tsunami: Option<TsunamiInfo>,
 }
 
 impl AppSnapshot {
@@ -270,6 +298,7 @@ impl AppSnapshot {
                     longitude: 103.6,
                     depth_km: 12.0,
                     origin_ms: 0,
+                    is_auto: false,
                 },
                 EqRecord {
                     agency: AgencyId("jma".into()),
@@ -283,6 +312,7 @@ impl AppSnapshot {
                     longitude: 140.1,
                     depth_km: 40.0,
                     origin_ms: 0,
+                    is_auto: false,
                 },
                 EqRecord {
                     agency: AgencyId("jma".into()),
@@ -296,6 +326,7 @@ impl AppSnapshot {
                     longitude: 140.4,
                     depth_km: 10.0,
                     origin_ms: 0,
+                    is_auto: false,
                 },
             ],
             eew_list: vec![eew_a, eew_b, eew_pr, eew_c],
@@ -308,6 +339,7 @@ impl AppSnapshot {
                     intensity_text: "3".into(),
                     intensity_kind: IntensityKind::JmaShindo,
                     intensity_level: 3,
+                    instrumental: 3.2,
                 },
                 StationSample {
                     id: "OSAKA".into(),
@@ -317,6 +349,7 @@ impl AppSnapshot {
                     intensity_text: "2".into(),
                     intensity_kind: IntensityKind::JmaShindo,
                     intensity_level: 2,
+                    instrumental: 2.1,
                 },
                 StationSample {
                     id: "CD01".into(),
@@ -326,6 +359,7 @@ impl AppSnapshot {
                     intensity_text: "Ⅳ".into(),
                     intensity_kind: IntensityKind::CnIntensity,
                     intensity_level: 4,
+                    instrumental: 4.0,
                 },
             ],
             countdown_s: Some(28),
@@ -338,6 +372,7 @@ impl AppSnapshot {
                 index: 0,
             }),
             show_wave_rings: true,
+            tsunami: None,
         }
     }
 
@@ -388,7 +423,12 @@ impl AppSnapshot {
             tab: SidebarTab::Eew,
             selection: None,
             show_wave_rings: true,
+            tsunami: None,
         }
+    }
+
+    pub fn set_tsunami(&mut self, info: Option<TsunamiInfo>) {
+        self.tsunami = info;
     }
 
     pub fn set_health(&mut self, source: &str, status: HealthStatus) {
@@ -509,23 +549,57 @@ impl AppSnapshot {
         }
     }
 
+    /// 启动/空闲时选中最新预警；速报不进左上角，故不回退到速报。
+    /// 返回 `(lon, lat, zoom)`。
+    pub fn focus_latest_event(&mut self) -> Option<(f64, f64, f64)> {
+        let idx = self.eew_list.iter().position(|e| {
+            !e.is_cancel && (e.latitude.abs() > 0.01 || e.longitude.abs() > 0.01)
+        })?;
+        let ev = self.eew_list[idx].clone();
+        let lon = ev.longitude;
+        let lat = ev.latitude;
+        self.active = Some(ev);
+        self.overlay_mode = OverlayMode::Wave;
+        self.tab = SidebarTab::Eew;
+        self.selection = Some(ListSelection {
+            tab: SidebarTab::Eew,
+            index: idx,
+        });
+        Some((lon, lat, 6.0))
+    }
+
     /// 用一帧有感测站快照替换列表（按震度降序，上限 120）
-    pub fn replace_stations(&mut self, mut stations: Vec<StationSample>) {
+    pub fn replace_stations(&mut self, stations: Vec<StationSample>) {
+        self.merge_stations("default", stations);
+    }
+
+    /// 按网络前缀合并测站帧（`kmoni:` / `snet:` / `kma:`），互不覆盖。
+    pub fn merge_stations(&mut self, network: &str, mut stations: Vec<StationSample>) {
+        let prefix = format!("{network}:");
         let keep_id = self
             .active
             .as_ref()
             .and_then(|e| e.event_id.strip_prefix("station:"))
             .map(|s| s.to_string());
 
-        stations.sort_by(|a, b| {
-            b.intensity_level
-                .cmp(&a.intensity_level)
+        self.stations.retain(|s| !s.id.starts_with(&prefix));
+        for s in &mut stations {
+            if !s.id.starts_with(&prefix) {
+                s.id = format!("{prefix}{}", s.id);
+            }
+        }
+        self.stations.extend(stations);
+        self.stations.sort_by(|a, b| {
+            b.instrumental
+                .partial_cmp(&a.instrumental)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.intensity_level.cmp(&a.intensity_level))
                 .then_with(|| a.id.cmp(&b.id))
         });
-        if stations.len() > 120 {
-            stations.truncate(120);
+        // 全网测站上图与侧栏；上限放宽以免截掉低計測值点
+        if self.stations.len() > 2500 {
+            self.stations.truncate(2500);
         }
-        self.stations = stations;
 
         if let Some(id) = keep_id {
             if let Some((i, s)) = self
@@ -543,6 +617,60 @@ impl AppSnapshot {
             }
         }
     }
+}
+
+/// 可作为地图波圈绘制的预警（非测站/速报头、未取消、有坐标）。
+pub fn is_wave_candidate(e: &EewReport) -> bool {
+    !e.is_cancel
+        && !e.event_id.starts_with("station:")
+        && !e.event_id.starts_with("record:")
+        && (e.latitude.abs() > 0.01 || e.longitude.abs() > 0.01)
+}
+
+/// 仍在传播窗口内的多震列表（默认 30 分钟；`origin_ms<=0` 视为演示样本始终纳入）。
+pub fn live_wave_eews(list: &[EewReport], now_ms: i64, max_age_ms: i64) -> Vec<&EewReport> {
+    list.iter()
+        .filter(|e| {
+            if !is_wave_candidate(e) {
+                return false;
+            }
+            if e.origin_ms <= 0 {
+                return true;
+            }
+            let age = now_ms - e.origin_ms;
+            age >= -60_000 && age <= max_age_ms
+        })
+        .collect()
+}
+
+/// 每个数据源（机构 ID）保留最新一条未取消预警，供地图常驻叉标。
+pub fn latest_eew_per_source(list: &[EewReport]) -> Vec<&EewReport> {
+    let mut best: Vec<&EewReport> = Vec::new();
+    for e in list {
+        if e.is_cancel
+            || e.event_id.starts_with("station:")
+            || e.event_id.starts_with("record:")
+            || (e.latitude.abs() <= 0.01 && e.longitude.abs() <= 0.01)
+        {
+            continue;
+        }
+        if let Some(pos) = best.iter().position(|b| b.agency.0 == e.agency.0) {
+            let cur = best[pos];
+            let newer = recency_ms(e.origin_ms) > recency_ms(cur.origin_ms)
+                || (e.origin_ms == cur.origin_ms && e.serial > cur.serial);
+            if newer {
+                best[pos] = e;
+            }
+        } else {
+            best.push(e);
+        }
+    }
+    best.sort_by(|a, b| {
+        recency_ms(b.origin_ms)
+            .cmp(&recency_ms(a.origin_ms))
+            .then(b.serial.cmp(&a.serial))
+    });
+    best
 }
 
 fn recency_ms(origin_ms: i64) -> i64 {

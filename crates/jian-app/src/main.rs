@@ -5,7 +5,7 @@ use eframe::egui;
 use jian_audio::{AudioCue, AudioEngine};
 use jian_config::AppConfig;
 use jian_core::{AppSnapshot, HealthStatus, IntensityKind};
-use jian_net::{load_place_fix, spawn_hub, NetEvent, NetHub};
+use jian_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
 use jian_travel::TravelEngine;
 use jian_map::BasemapMode;
 use jian_ui::{MainShell, SettingsAction};
@@ -55,45 +55,74 @@ fn resolve_geodata_dir(configured: &str) -> PathBuf {
     }
 }
 
-/// 加载系统中文字体，避免汉字显示为方框。
+/// 加载系统 CJK 字体链：中文优先、日文回退，避免「・」等显示为方框。
 fn install_cjk_fonts(ctx: &egui::Context) {
-    let candidates = [
+    let chinese = [
         // Windows
-        r"C:\Windows\Fonts\simhei.ttf",
         r"C:\Windows\Fonts\msyh.ttc",
+        r"C:\Windows\Fonts\simhei.ttf",
         r"C:\Windows\Fonts\simsun.ttc",
         r"C:\Windows\Fonts\msyhbd.ttc",
         // macOS
         "/System/Library/Fonts/PingFang.ttc",
         "/System/Library/Fonts/Hiragino Sans GB.ttc",
-        "/Library/Fonts/Arial Unicode.ttf",
         // Linux
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
     ];
+    let japanese = [
+        // Windows：游ゴシック / 明朝 / ゴシック（含片假名中点・）
+        r"C:\Windows\Fonts\YuGothR.ttc",
+        r"C:\Windows\Fonts\YuGothM.ttc",
+        r"C:\Windows\Fonts\msgothic.ttc",
+        r"C:\Windows\Fonts\meiryo.ttc",
+        r"C:\Windows\Fonts\meiryob.ttc",
+        r"C:\Windows\Fonts\yugothr.ttc",
+        // macOS
+        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        // Linux
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+    ];
+
     let mut fonts = egui::FontDefinitions::default();
-    for path in candidates {
-        let Ok(bytes) = std::fs::read(path) else {
-            continue;
-        };
-        fonts.font_data.insert(
-            "cjk".into(),
-            egui::FontData::from_owned(bytes).into(),
-        );
-        if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-            fam.insert(0, "cjk".into());
+    let mut chain: Vec<String> = Vec::new();
+
+    for (name, paths) in [("cjk_cn", &chinese[..]), ("cjk_jp", &japanese[..])] {
+        for path in paths {
+            let Ok(bytes) = std::fs::read(path) else {
+                continue;
+            };
+            fonts.font_data.insert(
+                name.to_string(),
+                egui::FontData::from_owned(bytes).into(),
+            );
+            chain.push(name.to_string());
+            tracing::info!(path, name, "CJK font loaded");
+            break;
         }
-        if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-            fam.push("cjk".into());
-        }
-        tracing::info!(path, "CJK font loaded");
-        ctx.set_fonts(fonts);
+    }
+
+    if chain.is_empty() {
+        tracing::warn!("未找到系统 CJK 字体，界面汉字/假名可能显示为方框");
         return;
     }
-    tracing::warn!("未找到系统中文字体，界面汉字可能显示为方框");
+
+    if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        for (i, name) in chain.iter().enumerate() {
+            fam.insert(i, name.clone());
+        }
+    }
+    if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+        for name in &chain {
+            fam.push(name.clone());
+        }
+    }
+    ctx.set_fonts(fonts);
 }
 
 /// JMA intensity_level 0–9 → catalog shindo_0…7
@@ -184,7 +213,11 @@ fn main() -> Result<()> {
     let rt = Runtime::new()?;
     let net_rx = if live {
         let _enter = rt.enter();
-        Some(spawn_hub(&cfg.sources))
+        let stations_dir = assets.join("stations");
+        Some(spawn_hub_with_assets(
+            &cfg.sources,
+            stations_dir.is_dir().then_some(stations_dir),
+        ))
     } else {
         None
     };
@@ -221,18 +254,23 @@ fn main() -> Result<()> {
         shell.map.center_lat = ev.latitude;
     }
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1280.0, 720.0])
+        .with_title(format!(
+            "EEWView · 地震视监器  v{}",
+            env!("CARGO_PKG_VERSION")
+        ));
+    if cfg.ui.always_on_top {
+        viewport = viewport.with_always_on_top();
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 720.0])
-            .with_title(format!(
-                "EEWView · 地震视监器  v{}",
-                env!("CARGO_PKG_VERSION")
-            )),
+        viewport,
         ..Default::default()
     };
 
     let started = Instant::now();
     let has_local = cfg.local.latitude.is_some() && cfg.local.longitude.is_some();
+    snap.show_wave_rings = cfg.ui.show_wave_rings;
     eframe::run_native(
         "EEWView",
         options,
@@ -253,6 +291,7 @@ fn main() -> Result<()> {
                 net_rx,
                 audio,
                 auto_center_pending: live,
+                last_follow_key: None,
                 prev_health: (
                     HealthStatus::Abnormal,
                     HealthStatus::Abnormal,
@@ -308,6 +347,8 @@ struct JianApp {
     net_rx: Option<NetHub>,
     audio: Option<AudioEngine>,
     auto_center_pending: bool,
+    /// 已跟焦的预警 (event_id, serial)，避免每帧重复居中
+    last_follow_key: Option<(String, u32)>,
     prev_health: (HealthStatus, HealthStatus, HealthStatus),
 }
 
@@ -344,29 +385,74 @@ impl eframe::App for JianApp {
 
         self.tick_health_audio();
 
+        // 启动：稍等快照汇聚后跳到最新预警（速报不进左上角，也不自动跟焦）
         if self.auto_center_pending {
-            if let Some(ev) = &self.snap.active {
-                if ev.latitude.abs() > 0.01 || ev.longitude.abs() > 0.01 {
-                    self.shell.map.center_on(ev.longitude, ev.latitude, Some(6.0));
+            let has_data = !self.snap.eew_list.is_empty();
+            if has_data && self.started.elapsed().as_secs_f64() >= 1.2 {
+                if let Some((lon, lat, zoom)) = self.snap.focus_latest_event() {
+                    self.shell.map.fly_to(lon, lat, Some(zoom), 0.9);
                     self.auto_center_pending = false;
+                    if let Some(ev) = &self.snap.active {
+                        self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
+                    }
+                }
+            } else if !self.snap.eew_list.is_empty()
+                || self.started.elapsed().as_secs_f64() >= 4.0
+            {
+                // 超时仍无预警则放弃自动居中，避免空等
+                if self.snap.eew_list.is_empty() {
+                    self.auto_center_pending = false;
+                }
+            }
+        } else if self.cfg.ui.auto_follow_eew {
+            if let Some(ev) = &self.snap.active {
+                let is_eew = !ev.event_id.starts_with("record:")
+                    && !ev.event_id.starts_with("station:");
+                if is_eew && (ev.latitude.abs() > 0.01 || ev.longitude.abs() > 0.01) {
+                    let key = (ev.event_id.clone(), ev.serial);
+                    if self.last_follow_key.as_ref() != Some(&key) {
+                        // 新预警 / 报数更新：抛物线跳转；zoom 保持当前，落地后再由波圈平滑适配
+                        let duration = if self
+                            .last_follow_key
+                            .as_ref()
+                            .is_some_and(|(id, _)| id != &ev.event_id)
+                        {
+                            1.0
+                        } else {
+                            0.55
+                        };
+                        self.shell.map.fly_to(
+                            ev.longitude,
+                            ev.latitude,
+                            None,
+                            duration,
+                        );
+                        self.last_follow_key = Some(key);
+                    }
                 }
             }
         }
 
         if let Some(ev) = self.snap.active.as_ref() {
-            let elapsed = if ev.origin_ms > 0 {
-                let now = chrono::Utc::now().timestamp_millis();
-                ((now - ev.origin_ms) as f64 / 1000.0).max(0.0)
+            let is_eew = !ev.event_id.starts_with("record:")
+                && !ev.event_id.starts_with("station:");
+            if is_eew {
+                let elapsed = if ev.origin_ms > 0 {
+                    let now = chrono::Utc::now().timestamp_millis();
+                    ((now - ev.origin_ms) as f64 / 1000.0).max(0.0)
+                } else {
+                    self.started.elapsed().as_secs_f64()
+                };
+                refresh_countdown(
+                    &mut self.snap,
+                    self.travel.as_ref(),
+                    self.local_lat,
+                    self.local_lon,
+                    Some(elapsed),
+                );
             } else {
-                self.started.elapsed().as_secs_f64()
-            };
-            refresh_countdown(
-                &mut self.snap,
-                self.travel.as_ref(),
-                self.local_lat,
-                self.local_lon,
-                Some(elapsed),
-            );
+                self.snap.countdown_s = None;
+            }
         }
 
         // 倒计时播报：仅本机位置有效时（禁止无位置假播）
@@ -387,6 +473,14 @@ impl eframe::App for JianApp {
                 SettingsAction::Saved { cfg, close } => {
                     match self.apply_saved_config(cfg) {
                         Ok(path) => {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+                                if self.cfg.ui.always_on_top {
+                                    egui::WindowLevel::AlwaysOnTop
+                                } else {
+                                    egui::WindowLevel::Normal
+                                },
+                            ));
+                            self.snap.show_wave_rings = self.cfg.ui.show_wave_rings;
                             self.shell
                                 .settings
                                 .set_save_note(format!("已保存到 {}", path.display()));
@@ -425,6 +519,12 @@ impl eframe::App for JianApp {
                     }
                 }
                 SettingsAction::Cancelled => {}
+                SettingsAction::ClearTileCache => {
+                    self.shell.map.clear_tile_cache();
+                    self.shell
+                        .settings
+                        .set_save_note("已清除内存瓦片缓存");
+                }
             }
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
@@ -515,7 +615,11 @@ impl JianApp {
             drop(self.net_rx.take());
             if self.cfg.any_source_enabled() {
                 let _enter = self.rt.enter();
-                self.net_rx = Some(spawn_hub(&self.cfg.sources));
+                let stations_dir = self.assets_dir.join("stations");
+                self.net_rx = Some(spawn_hub_with_assets(
+                    &self.cfg.sources,
+                    stations_dir.is_dir().then_some(stations_dir),
+                ));
             }
         }
 

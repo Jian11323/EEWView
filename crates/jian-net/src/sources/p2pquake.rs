@@ -36,27 +36,31 @@ pub fn spawn(tx: NetTx, cfg: P2pSourceConfig) -> Vec<JoinHandle<()>> {
 
         loop {
             emit_health(&tx, "p2pquake", HealthStatus::Fluctuating);
-            let url = format!("{base}?codes=551&limit=20");
-            match client.get(&url).send().await {
-                Ok(resp) if resp.status().is_success() => match resp.text().await {
-                    Ok(body) => {
-                        ingest_p2p_items(&tx, &body);
-                        emit_health(&tx, "p2pquake", HealthStatus::Normal);
-                    }
-                    Err(e) => {
-                        warn!("p2p body: {e}");
-                        emit_health(&tx, "p2pquake", HealthStatus::Abnormal);
-                    }
-                },
-                Ok(resp) => {
-                    warn!(status = %resp.status(), "p2p http");
-                    emit_health(&tx, "p2pquake", HealthStatus::Abnormal);
-                }
-                Err(e) => {
-                    warn!("p2p fetch: {e}");
-                    emit_health(&tx, "p2pquake", HealthStatus::Abnormal);
+            // 551 地震情报；552 海啸情报（API 不接受逗号多 code，分开拉）
+            let mut ok_any = false;
+            for (codes, limit) in [("551", 20u32), ("552", 10u32)] {
+                let url = format!("{base}?codes={codes}&limit={limit}");
+                match client.get(&url).send().await {
+                    Ok(resp) if resp.status().is_success() => match resp.text().await {
+                        Ok(body) => {
+                            ingest_p2p_items(&tx, &body);
+                            ok_any = true;
+                        }
+                        Err(e) => warn!(%codes, "p2p body: {e}"),
+                    },
+                    Ok(resp) => warn!(%codes, status = %resp.status(), "p2p http"),
+                    Err(e) => warn!(%codes, "p2p fetch: {e}"),
                 }
             }
+            emit_health(
+                &tx,
+                "p2pquake",
+                if ok_any {
+                    HealthStatus::Normal
+                } else {
+                    HealthStatus::Abnormal
+                },
+            );
             sleep(Duration::from_secs(poll)).await;
         }
     })]

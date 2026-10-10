@@ -1,6 +1,6 @@
 //! 网络事件总线（tokio mpsc）。
 
-use jian_core::{EewReport, EqRecord, HealthStatus, StationSample};
+use jian_core::{EewReport, EqRecord, HealthStatus, StationSample, TsunamiInfo};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
@@ -11,8 +11,13 @@ pub enum NetEvent {
     },
     Eew(EewReport),
     Record(EqRecord),
-    /// Kmoni 等有感测站一帧快照
-    Stations(Vec<StationSample>),
+    /// 有感测站一帧快照；`network` 为 `kmoni` / `snet` / `kma` 等，用于多网合并
+    Stations {
+        network: &'static str,
+        list: Vec<StationSample>,
+    },
+    /// JMA 海啸情报（P2PQuake code 552 等）
+    Tsunami(TsunamiInfo),
 }
 
 pub type NetTx = mpsc::UnboundedSender<NetEvent>;

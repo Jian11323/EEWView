@@ -86,6 +86,17 @@ pub fn jma_from_instrumental(v: f64) -> (u8, &'static str) {
     (level, jma_shindo_text(level))
 }
 
+/// 测站列表/地图用展示文案：低于 0.5 显示取整計測值（含 -3～0），否则用震度阶级。
+pub fn instrumental_display_text(v: f64) -> String {
+    if !v.is_finite() || v < -3.0 {
+        "—".into()
+    } else if v < 0.5 {
+        format!("{}", v.round() as i32)
+    } else {
+        jma_from_instrumental(v).1.into()
+    }
+}
+
 /// 中国烈度罗马数字或阿拉伯数字 → 1–12
 pub fn cn_intensity_level(text: &str) -> u8 {
     let t = text.trim();
@@ -200,17 +211,7 @@ fn cn_to_jma_level(cn: u8) -> u8 {
 pub fn intensity_kind_for_agency(agency: &str) -> IntensityKind {
     use crate::agency::{agency_family, AgencyFamily};
     match agency_family(agency) {
-        AgencyFamily::Jma | AgencyFamily::Cwa => IntensityKind::JmaShindo,
-        AgencyFamily::Kma => IntensityKind::JmaShindo,
-        AgencyFamily::Cn
-        | AgencyFamily::Ningxia
-        | AgencyFamily::Yunnan
-        | AgencyFamily::Beijing
-        | AgencyFamily::Usgs
-        | AgencyFamily::Hko
-        | AgencyFamily::Emsc
-        | AgencyFamily::EarlyEst
-        | AgencyFamily::Sa
-        | AgencyFamily::Other => IntensityKind::CnIntensity,
+        AgencyFamily::Jma | AgencyFamily::Cwa | AgencyFamily::Kma => IntensityKind::JmaShindo,
+        _ => IntensityKind::CnIntensity,
     }
 }

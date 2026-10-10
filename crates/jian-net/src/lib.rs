@@ -60,19 +60,38 @@ impl SourceKind {
     }
 }
 
-/// 在已有 tokio runtime 内启动三源任务。
+/// 在已有 tokio runtime 内启动情报源与测站任务。
 pub fn spawn_hub(sources: &SourcesConfig) -> NetHub {
+    spawn_hub_with_assets(sources, None)
+}
+
+/// `assets_stations` 指向含 `nied_point.csv` 的目录（原版 kmoni/lmoni）。
+pub fn spawn_hub_with_assets(
+    sources: &SourcesConfig,
+    assets_stations: Option<std::path::PathBuf>,
+) -> NetHub {
     let (tx, rx) = channel();
     info!(
         jian = sources.jian.enabled,
         wolfx = sources.wolfx.enabled,
         p2p = sources.p2pquake.enabled,
+        jma_st = sources.stations.jma_enabled,
+        snet = sources.stations.snet_enabled,
+        kma = sources.stations.kma_enabled,
         "jian-net: spawning source tasks"
     );
     let mut tasks = Vec::new();
-    tasks.extend(sources::jian::spawn(tx.clone(), sources.jian.clone()));
+    // 测站由 stations 模块统一管理；jian 侧不再重复拉 /kmoni
+    let mut jian_cfg = sources.jian.clone();
+    jian_cfg.station_enabled = false;
+    tasks.extend(sources::jian::spawn(tx.clone(), jian_cfg));
     tasks.extend(sources::wolfx::spawn(tx.clone(), sources.wolfx.clone()));
-    tasks.extend(sources::p2pquake::spawn(tx, sources.p2pquake.clone()));
+    tasks.extend(sources::p2pquake::spawn(tx.clone(), sources.p2pquake.clone()));
+    tasks.extend(sources::stations::spawn(
+        tx,
+        sources.stations.clone(),
+        assets_stations,
+    ));
     NetHub { rx, tasks }
 }
 
@@ -106,7 +125,14 @@ pub fn apply_event_filtered(
             }
             snap.upsert_record(r);
         }
-        NetEvent::Stations(list) => snap.replace_stations(list),
+        NetEvent::Stations { network, list } => snap.merge_stations(network, list),
+        NetEvent::Tsunami(t) => {
+            if t.cancelled || t.grade.eq_ignore_ascii_case("Cancel") {
+                snap.set_tsunami(None);
+            } else {
+                snap.set_tsunami(Some(t));
+            }
+        }
     }
 }
 

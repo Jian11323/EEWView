@@ -3,6 +3,11 @@ theme = "dark"
 show_nied_clock = false
 sidebar_default_tab = "eew"
 intensity_scale = "auto"
+always_on_top = false
+auto_follow_eew = true
+auto_zoom_waves = true
+show_wave_rings = true
+show_legend = true
 
 [map]
 # auto = 暗色要石矢量 / 亮色地形瓦片；也可强制 vector | tiles | both
@@ -33,8 +38,20 @@ linear_last_resort = true
 
 [sources.jian]
 enabled = true
+# 兼容旧键：与 stations.jma_enabled + jma_source=jian 同步
 station_enabled = true
 # station_ws_url = "wss://api.sismotide.top/kmoni"
+
+[sources.stations]
+jma_enabled = true
+# jian = Jian 中转 /kmoni；kmoni / lmoni = NIED 原版图像采样
+jma_source = "jian"
+jma_jian_ws = "wss://api.sismotide.top/kmoni"
+snet_enabled = false
+snet_source = "jian"
+snet_jian_ws = "wss://api.sismotide.top/s-net"
+kma_enabled = false
+kma_jian_ws = "wss://api.sismotide.top/kma-station"
 
 [sources.wolfx]
 enabled = true
@@ -49,11 +66,11 @@ place_whitelist = ""
 
 [filters.eew_agency]
 jma = true
-cenc = true
+cea = true
 cwa = true
 kma = true
-early_est = true
 sa = true
+early_est = true
 
 [filters.record_mag]
 cenc = 0.0
@@ -62,7 +79,37 @@ cwa = 0.0
 jma = 0.0
 hko = 0.0
 emsc = 0.0
+kma = 0.0
 ningxia = 0.0
 yunnan = 0.0
+shanxi = 0.0
 beijing = 0.0
+gfz = 0.0
+bcsf = 0.0
+usp = 0.0
+ingv = 0.0
+nrcan = 0.0
+tmd = 0.0
+mmd = 0.0
+bmkg = 0.0
+geonet = 0.0
+afad = 0.0
+ipma = 0.0
+noa = 0.0
+sed = 0.0
+scsn = 0.0
+ipgp = 0.0
+infp = 0.0
+isc = 0.0
+knmi = 0.0
+ncedc = 0.0
+lmu = 0.0
+koeri = 0.0
+gsras = 0.0
+csn = 0.0
+phivolcs = 0.0
+ssn = 0.0
+ga = 0.0
+igepn = 0.0
+peru = 0.0
 other = -1.0

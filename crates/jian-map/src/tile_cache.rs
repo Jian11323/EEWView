@@ -60,6 +60,11 @@ impl TileCache {
         }
         self.tile_base = base;
         self.tile_source = tile_source;
+        self.clear();
+    }
+
+    /// 清空内存中的瓦片纹理与排队请求（不改 URL）。
+    pub fn clear(&mut self) {
         self.entries.clear();
         self.lru.clear();
         self.want.clear();

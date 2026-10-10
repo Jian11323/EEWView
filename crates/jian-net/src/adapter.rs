@@ -1,8 +1,9 @@
 //! 原始 JSON → core 模型（各源字段在此归一化）。
 
 use jian_core::{
-    cea_pr_agency_id, fill_intensity, intensity_kind_for_agency, jma_from_instrumental,
-    jma_shindo_level, AgencyId, EewReport, EqRecord, IntensityKind, StationSample,
+    cea_pr_agency_id, cn_intensity_text, fill_intensity, instrumental_display_text,
+    intensity_kind_for_agency, jma_from_instrumental, jma_shindo_level, AgencyId, EewReport,
+    EqRecord, IntensityKind, StationSample, TsunamiInfo,
 };
 use serde_json::Value;
 use tracing::debug;
@@ -118,27 +119,186 @@ pub fn ingest_kmoni_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
     let mut out = Vec::new();
     let n = ints.len().min(state.meta.len());
     for i in 0..n {
-        let raw = ints[i].as_f64().unwrap_or(-3.0);
-        if raw <= -3.0 {
-            continue;
-        }
-        // 列表只收有感（≥1）；0 档仍上地图时可再放宽
-        if raw < 0.5 {
+        let raw = ints[i].as_f64().unwrap_or(-99.0);
+        // < -3 缺测；-3 起全部上图（要石色带最低档深蓝）
+        if raw < -3.0 {
             continue;
         }
         let m = &state.meta[i];
-        let (level, text) = jma_from_instrumental(raw);
+        if m.lat.abs() < 1e-6 && m.lon.abs() < 1e-6 {
+            continue;
+        }
+        let (level, _) = jma_from_instrumental(raw);
         out.push(StationSample {
             id: m.code.clone(),
             name: m.name.clone(),
             latitude: m.lat,
             longitude: m.lon,
-            intensity_text: text.into(),
+            intensity_text: instrumental_display_text(raw),
             intensity_kind: IntensityKind::JmaShindo,
             intensity_level: level,
+            instrumental: raw,
         });
     }
-    let _ = tx.send(NetEvent::Stations(out));
+    let _ = tx.send(NetEvent::Stations {
+        network: "kmoni",
+        list: out,
+    });
+}
+
+/// Jian `/s-net`：协议与 kmoni 相同（`stations` + `int[]`）。
+pub fn ingest_snet_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
+    ingest_int_station_frame(state, tx, text, "s-net", "snet", true);
+}
+
+/// Jian `/kma-station`：`stations` + `mmi[]`（韩国烈度，映射为 CN 档展示）。
+pub fn ingest_kma_station_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
+    let Ok(v) = serde_json::from_str::<Value>(text) else {
+        return;
+    };
+    let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    if typ == "heartbeat" || typ == "pong" || typ == "error" {
+        return;
+    }
+    if let Some(arr) = v.get("stations").and_then(|s| s.as_array()) {
+        load_station_meta(state, arr);
+    }
+    let Some(mmis) = v.get("mmi").and_then(|i| i.as_array()) else {
+        return;
+    };
+    if state.meta.is_empty() {
+        return;
+    }
+    let mut out = Vec::new();
+    let n = mmis.len().min(state.meta.len());
+    for i in 0..n {
+        let raw = mmis[i].as_f64().unwrap_or(-3.0);
+        if raw < 0.0 {
+            continue;
+        }
+        let m = &state.meta[i];
+        if m.lat.abs() < 1e-6 && m.lon.abs() < 1e-6 {
+            continue;
+        }
+        let (level, text) = if raw < 1.0 {
+            (0_u8, "—".into())
+        } else {
+            let level = (raw.round() as u8).clamp(1, 12);
+            (level, cn_intensity_text(level).into())
+        };
+        out.push(StationSample {
+            id: m.code.clone(),
+            name: m.name.clone(),
+            latitude: m.lat,
+            longitude: m.lon,
+            intensity_text: text,
+            intensity_kind: IntensityKind::CnIntensity,
+            intensity_level: level,
+            instrumental: raw,
+        });
+    }
+    let _ = tx.send(NetEvent::Stations {
+        network: "kma",
+        list: out,
+    });
+}
+
+fn load_station_meta(state: &mut KmoniState, arr: &[Value]) {
+    state.meta.clear();
+    state.meta.reserve(arr.len());
+    for s in arr {
+        let code = s
+            .get("code")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        if code.is_empty() {
+            continue;
+        }
+        let name = s
+            .get("name")
+            .and_then(|x| x.as_str())
+            .unwrap_or(code.as_str())
+            .to_string();
+        let lat = field_f64(s, &["lat", "latitude"]).unwrap_or(0.0);
+        let lon = field_f64(s, &["lon", "lng", "longitude"]).unwrap_or(0.0);
+        state.meta.push(KmoniMeta {
+            code,
+            name,
+            lat,
+            lon,
+        });
+    }
+}
+
+fn ingest_int_station_frame(
+    state: &mut KmoniState,
+    tx: &NetTx,
+    text: &str,
+    expect_type: &str,
+    network: &'static str,
+    jma_scale: bool,
+) {
+    let Ok(v) = serde_json::from_str::<Value>(text) else {
+        return;
+    };
+    let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    if typ == "heartbeat" || typ == "pong" || typ == "error" {
+        return;
+    }
+    if typ != expect_type && v.get("int").is_none() && v.get("stations").is_none() {
+        return;
+    }
+    if let Some(arr) = v.get("stations").and_then(|s| s.as_array()) {
+        load_station_meta(state, arr);
+        debug!(n = state.meta.len(), %network, "stations meta");
+    }
+    let Some(ints) = v.get("int").and_then(|i| i.as_array()) else {
+        return;
+    };
+    if state.meta.is_empty() {
+        return;
+    }
+    let mut out = Vec::new();
+    let n = ints.len().min(state.meta.len());
+    for i in 0..n {
+        let raw = ints[i].as_f64().unwrap_or(-99.0);
+        if raw < -3.0 || raw >= 90.0 {
+            continue;
+        }
+        let m = &state.meta[i];
+        if m.lat.abs() < 1e-6 && m.lon.abs() < 1e-6 {
+            continue;
+        }
+        let (kind, level, text) = if jma_scale {
+            let (level, _) = jma_from_instrumental(raw);
+            (
+                IntensityKind::JmaShindo,
+                level,
+                instrumental_display_text(raw),
+            )
+        } else if raw < 1.0 {
+            (IntensityKind::CnIntensity, 0_u8, "—".into())
+        } else {
+            let level = (raw.round() as u8).clamp(1, 12);
+            (
+                IntensityKind::CnIntensity,
+                level,
+                cn_intensity_text(level).to_string(),
+            )
+        };
+        out.push(StationSample {
+            id: m.code.clone(),
+            name: m.name.clone(),
+            latitude: m.lat,
+            longitude: m.lon,
+            intensity_text: text,
+            intensity_kind: kind,
+            intensity_level: level,
+            instrumental: raw,
+        });
+    }
+    let _ = tx.send(NetEvent::Stations { network, list: out });
 }
 
 /// Jian `/all` 或单源信封：`{ type, Data, md5 }` 或 `source：xxx`
@@ -344,6 +504,7 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
     let raw = json_intensity_raw(data, &["maxIntensity", "intensity", "MaxIntensity"]);
     let (intensity_text, intensity_level) =
         fill_intensity(kind, magnitude, depth_km, raw.as_deref());
+    let is_auto = cenc_is_auto(agency, data);
 
     Some(EqRecord {
         agency: AgencyId(agency.into()),
@@ -357,7 +518,31 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
         longitude,
         depth_km,
         origin_ms,
+        is_auto,
     })
+}
+
+/// CENC 自动测定：Wolfx/Jian `type=automatic`，或文案含「自动」。
+fn cenc_is_auto(agency: &str, data: &Value) -> bool {
+    let a = agency.to_ascii_lowercase();
+    if !(a.contains("cenc") || a == "beijing") {
+        return false;
+    }
+    if let Some(t) = data
+        .get("type")
+        .or_else(|| data.get("Type"))
+        .or_else(|| data.get("infoType"))
+        .and_then(|v| v.as_str())
+    {
+        let t = t.trim().to_ascii_lowercase();
+        if t == "automatic" || t == "auto" || t.contains("自动") {
+            return true;
+        }
+        if t == "reviewed" || t.contains("正式") {
+            return false;
+        }
+    }
+    false
 }
 
 /// Wolfx `jma_eew` 扁平 JSON
@@ -493,6 +678,7 @@ pub fn ingest_wolfx_eqlist(tx: &NetTx, text: &str) {
             depth_km,
             raw.as_deref(),
         );
+        let is_auto = cenc_is_auto("wolfx-cenc", item);
 
         let _ = tx.send(NetEvent::Record(EqRecord {
             agency: AgencyId("wolfx-cenc".into()),
@@ -506,11 +692,12 @@ pub fn ingest_wolfx_eqlist(tx: &NetTx, text: &str) {
             longitude,
             depth_km,
             origin_ms,
+            is_auto,
         }));
     }
 }
 
-/// P2PQuake JSON API v2：`code` 551 地震情报
+/// P2PQuake JSON API v2：`code` 551 地震情报；552 海啸情报。
 pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
     let Ok(v) = serde_json::from_str::<Value>(text) else {
         return;
@@ -523,6 +710,12 @@ pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
 
     for item in items {
         let code = item.get("code").and_then(|c| c.as_u64()).unwrap_or(0);
+        if code == 552 {
+            if let Some(t) = parse_p2p_tsunami(item) {
+                let _ = tx.send(NetEvent::Tsunami(t));
+            }
+            continue;
+        }
         if code != 551 {
             continue;
         }
@@ -571,8 +764,81 @@ pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
             longitude,
             depth_km,
             origin_ms,
+            is_auto: false,
         }));
     }
+}
+
+/// P2PQuake 552：areas[].grade 常见 MajorWarning / Warning / Watch / Forecast。
+fn parse_p2p_tsunami(item: &Value) -> Option<TsunamiInfo> {
+    let cancelled = item
+        .get("cancelled")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false);
+    let areas = item.get("areas").and_then(|a| a.as_array());
+    let mut grade = "Forecast".to_string();
+    let mut names: Vec<String> = Vec::new();
+    let mut best_rank = 0_u8;
+    if let Some(arr) = areas {
+        for a in arr {
+            let g = a
+                .get("grade")
+                .and_then(|x| x.as_str())
+                .unwrap_or("Forecast");
+            let rank = match g {
+                "MajorWarning" | "Major" => 4,
+                "Warning" => 3,
+                "Watch" => 2,
+                "Forecast" => 1,
+                _ => 0,
+            };
+            if rank >= best_rank {
+                best_rank = rank;
+                grade = g.to_string();
+            }
+            if let Some(n) = a.get("name").and_then(|x| x.as_str()) {
+                if !n.is_empty() && !names.iter().any(|x| x == n) {
+                    names.push(n.to_string());
+                }
+            }
+        }
+    }
+    let title = if cancelled {
+        "海啸情报解除".into()
+    } else {
+        match grade.as_str() {
+            "MajorWarning" | "Major" => "大海啸警报".into(),
+            "Warning" => "海啸警报".into(),
+            "Watch" => "海啸注意报".into(),
+            _ => "海啸预报".into(),
+        }
+    };
+    let areas_summary = if names.is_empty() {
+        "—".into()
+    } else {
+        names.into_iter().take(8).collect::<Vec<_>>().join("、")
+    };
+    let issued_ms = item
+        .get("time")
+        .and_then(|x| x.as_str())
+        .and_then(parse_time_str)
+        .or_else(|| {
+            item.pointer("/issue/time")
+                .and_then(|x| x.as_str())
+                .and_then(parse_time_str)
+        })
+        .unwrap_or(0);
+    Some(TsunamiInfo {
+        title,
+        grade: if cancelled {
+            "Cancel".into()
+        } else {
+            grade
+        },
+        areas: areas_summary,
+        cancelled,
+        issued_ms,
+    })
 }
 
 #[cfg(test)]
@@ -607,5 +873,28 @@ mod tests {
         assert!((rec.depth_km - 10.0).abs() < 1e-9);
         assert_eq!(rec.intensity_level, 8);
         assert_eq!(rec.place, "巴拿马");
+        assert!(!rec.is_auto);
+    }
+
+    #[test]
+    fn wolfx_cenc_automatic_flag() {
+        let body = r#"{
+            "No1": {
+                "type": "automatic",
+                "time": "2026-10-10 12:14:01",
+                "placeName": "四川",
+                "magnitude": "3.2",
+                "depth": "10",
+                "latitude": "30.0",
+                "longitude": "103.0",
+                "intensity": "3"
+            }
+        }"#;
+        let (tx, mut rx) = channel();
+        ingest_wolfx_eqlist(&tx, body);
+        let NetEvent::Record(rec) = rx.try_recv().expect("record") else {
+            panic!("expected Record");
+        };
+        assert!(rec.is_auto);
     }
 }

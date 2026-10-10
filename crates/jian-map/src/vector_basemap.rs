@@ -443,45 +443,30 @@ impl VectorBasemap {
             return;
         }
 
-        let (min_lon, min_lat, max_lon, max_lat) =
-            viewport_bounds(center_lon, center_lat, zoom, rect);
+        let world_px = projection::world_size(zoom) as f32;
+        // 视口宽超过一整圈世界时，经纬度包围盒会因 wrap 塌缩；改为全球可见
+        let full_wrap = rect.width() >= world_px * 0.92;
+        let (min_lon, min_lat, max_lon, max_lat) = if full_wrap {
+            (-180.0, -85.0, 180.0, 85.0)
+        } else {
+            viewport_bounds(center_lon, center_lat, zoom, rect)
+        };
         let painter = ui.painter_at(rect);
         let mut shapes = Vec::with_capacity(512);
-        let world_px = projection::world_size(zoom) as f32;
         // 超过约 80° 经度的边视为跳变（宁拆勿穿）
         let max_jump_px = world_px * (80.0 / 360.0);
+        // 低缩放 / 宽窗口：横向循环多画几份世界（经度 ±360°），避免两侧空白
+        let half_copies = ((rect.width() * 0.5 / world_px.max(1.0)).ceil() as i32 + 1)
+            .clamp(1, 6);
 
-        // 1) 世界轮廓：连续解缠描边。egui 凹多边形填色会出射线，默认不填。
-        if !self.world.fine.is_empty() {
-            let rings = self.world.pick(zoom, 4.0, 6.0);
-            let min_seg = if zoom < 4.0 { 2.2_f32 } else { 1.4_f32 };
-            let stroke = Stroke::new(0.9_f32, style.world_border);
-            paint_rings(
-                &mut shapes,
-                rings,
-                center_lon,
-                center_lat,
-                zoom,
-                rect,
-                min_lon,
-                min_lat,
-                max_lon,
-                max_lat,
-                min_seg,
-                max_jump_px,
-                stroke,
-                false, // 世界层不填色
-                false,
-                style.land_fill,
-            );
-            let _ = fill_land; // 保留参数，避免调用方改签名
-        }
+        for k in -half_copies..=half_copies {
+            let lon_shift = f64::from(k) * 360.0;
 
-        // 2) 中日：远距只画国界轮廓；放大后才叠省界/都道府县
-        if zoom < ZOOM_REGIONAL {
-            if !self.national.fine.is_empty() {
-                let rings = self.national.pick(zoom, 3.0, 4.0);
-                let stroke = Stroke::new(0.95_f32, style.world_border);
+            // 1) 世界轮廓：连续解缠描边。egui 凹多边形填色会出射线，默认不填。
+            if !self.world.fine.is_empty() {
+                let rings = self.world.pick(zoom, 4.0, 6.0);
+                let min_seg = if zoom < 4.0 { 2.2_f32 } else { 1.4_f32 };
+                let stroke = Stroke::new(0.9_f32, style.world_border);
                 paint_rings(
                     &mut shapes,
                     rings,
@@ -489,57 +474,87 @@ impl VectorBasemap {
                     center_lat,
                     zoom,
                     rect,
-                    min_lon,
+                    min_lon + lon_shift,
                     min_lat,
-                    max_lon,
+                    max_lon + lon_shift,
                     max_lat,
-                    2.2,
+                    min_seg,
+                    max_jump_px,
+                    stroke,
+                    false, // 世界层不填色
+                    false,
+                    style.land_fill,
+                    lon_shift,
+                );
+            }
+
+            // 2) 中日：远距只画国界轮廓；放大后才叠省界/都道府县
+            if zoom < ZOOM_REGIONAL {
+                if !self.national.fine.is_empty() {
+                    let rings = self.national.pick(zoom, 3.0, 4.0);
+                    let stroke = Stroke::new(0.95_f32, style.world_border);
+                    paint_rings(
+                        &mut shapes,
+                        rings,
+                        center_lon,
+                        center_lat,
+                        zoom,
+                        rect,
+                        min_lon + lon_shift,
+                        min_lat,
+                        max_lon + lon_shift,
+                        max_lat,
+                        2.2,
+                        max_jump_px,
+                        stroke,
+                        false,
+                        false,
+                        style.land_fill,
+                        lon_shift,
+                    );
+                }
+            } else if !self.regional.fine.is_empty() {
+                let rings = self
+                    .regional
+                    .pick(zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
+                let min_seg = if zoom < ZOOM_REGIONAL_MED {
+                    2.0_f32
+                } else if zoom < ZOOM_REGIONAL_FINE {
+                    1.4_f32
+                } else {
+                    1.0_f32
+                };
+                let stroke = Stroke::new(
+                    if zoom < ZOOM_REGIONAL_MED {
+                        0.7_f32
+                    } else {
+                        0.95_f32
+                    },
+                    style.admin_border,
+                );
+                paint_rings(
+                    &mut shapes,
+                    rings,
+                    center_lon,
+                    center_lat,
+                    zoom,
+                    rect,
+                    min_lon + lon_shift,
+                    min_lat,
+                    max_lon + lon_shift,
+                    max_lat,
+                    min_seg,
                     max_jump_px,
                     stroke,
                     false,
-                    false,
+                    zoom >= ZOOM_REGIONAL_FINE,
                     style.land_fill,
+                    lon_shift,
                 );
             }
-        } else if !self.regional.fine.is_empty() {
-            let rings = self
-                .regional
-                .pick(zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
-            let min_seg = if zoom < ZOOM_REGIONAL_MED {
-                2.0_f32
-            } else if zoom < ZOOM_REGIONAL_FINE {
-                1.4_f32
-            } else {
-                1.0_f32
-            };
-            let stroke = Stroke::new(
-                if zoom < ZOOM_REGIONAL_MED {
-                    0.7_f32
-                } else {
-                    0.95_f32
-                },
-                style.admin_border,
-            );
-            paint_rings(
-                &mut shapes,
-                rings,
-                center_lon,
-                center_lat,
-                zoom,
-                rect,
-                min_lon,
-                min_lat,
-                max_lon,
-                max_lat,
-                min_seg,
-                max_jump_px,
-                stroke,
-                false,
-                zoom >= ZOOM_REGIONAL_FINE,
-                style.land_fill,
-            );
         }
 
+        let _ = fill_land;
         painter.extend(shapes);
     }
 }
@@ -561,9 +576,17 @@ fn paint_rings(
     fill: bool,
     draw_holes: bool,
     land_fill: Color32,
+    lon_shift: f64,
 ) {
     for ring in rings {
-        if !ring_visible(ring, min_lon, min_lat, max_lon, max_lat) {
+        // 可见性按未偏移地理范围；副本仅改投影经度
+        if !ring_visible(
+            ring,
+            min_lon - lon_shift,
+            min_lat,
+            max_lon - lon_shift,
+            max_lat,
+        ) {
             continue;
         }
 
@@ -575,6 +598,7 @@ fn paint_rings(
             rect,
             min_seg_px,
             max_jump_px,
+            lon_shift,
         );
         let nseg = segments.len();
         let do_fill = fill
@@ -620,6 +644,7 @@ fn paint_rings(
                     rect,
                     min_seg_px,
                     max_jump_px,
+                    lon_shift,
                 );
                 for hpts in hsegs {
                     if hpts.len() < 2 {
@@ -1381,6 +1406,7 @@ fn viewport_bounds(center_lon: f64, center_lat: f64, zoom: f64, rect: Rect) -> (
 }
 
 /// 相对视口中心连续解缠后投影；经度或屏幕跳变时拆段，禁止跨日界连线。
+/// `lon_shift`：世界副本偏移（±360°…），用于低缩放横向铺满。
 fn project_segments(
     ring: &[[f32; 2]],
     center_lon: f64,
@@ -1389,6 +1415,7 @@ fn project_segments(
     rect: Rect,
     min_seg_px: f32,
     max_jump_px: f32,
+    lon_shift: f64,
 ) -> Vec<Vec<Pos2>> {
     let min2 = min_seg_px * min_seg_px;
     let jump2 = max_jump_px * max_jump_px;
@@ -1399,7 +1426,7 @@ fn project_segments(
 
     for p in ring {
         let lat = p[1] as f64;
-        let mut lon = projection::wrap_lon_near(p[0] as f64, center_lon);
+        let mut lon = projection::wrap_lon_near(p[0] as f64, center_lon) + lon_shift;
         if let Some(prev) = prev_lon {
             while lon - prev > 180.0 {
                 lon -= 360.0;
@@ -1414,7 +1441,7 @@ fn project_segments(
                 } else {
                     cur.clear();
                 }
-                lon = projection::wrap_lon_near(p[0] as f64, center_lon);
+                lon = projection::wrap_lon_near(p[0] as f64, center_lon) + lon_shift;
             }
         }
 
