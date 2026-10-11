@@ -21,30 +21,36 @@ pub enum Wave {
     S = 1,
 }
 
-/// S 波最大传播距离（km）。对齐 eewcn `maxDistanceSWaveSpread(magnitude, depth)`（depth 未参与计算）。
+/// S 波最大传播距离（km）。震级越高越远；小震缩短以免远源小震长时间挂波圈。
 pub fn max_s_wave_spread_km(magnitude: f64) -> f64 {
-    if magnitude <= 3.0 {
-        600.0
+    if magnitude <= 2.0 {
+        200.0
+    } else if magnitude <= 2.5 {
+        350.0
+    } else if magnitude <= 3.0 {
+        500.0
+    } else if magnitude <= 3.5 {
+        700.0
     } else if magnitude <= 4.0 {
-        800.0
+        900.0
+    } else if magnitude <= 4.5 {
+        1200.0
     } else if magnitude <= 5.0 {
-        1500.0
+        1600.0
     } else if magnitude <= 5.5 {
-        2000.0
+        2100.0
     } else if magnitude <= 6.0 {
-        2250.0
-    } else if magnitude <= 6.2 {
-        2500.0
+        2600.0
     } else if magnitude <= 6.5 {
-        3200.0
+        3400.0
     } else if magnitude <= 7.0 {
-        4000.0
-    } else if magnitude <= 7.2 {
-        5000.0
+        4200.0
     } else if magnitude <= 7.5 {
-        6000.0
+        5200.0
+    } else if magnitude <= 8.0 {
+        6200.0
     } else {
-        6500.0
+        7500.0
     }
 }
 
@@ -251,18 +257,33 @@ impl TravelEngine {
     }
 }
 
+/// 与地图波圈一致：当前 S 地表半径是否仍小于震级上限（未结束）。
+pub fn s_wave_still_spreading(
+    eng: &TravelEngine,
+    magnitude: f64,
+    depth_km: f64,
+    elapsed_s: f64,
+) -> bool {
+    let max_km = max_s_wave_spread_km(magnitude);
+    eng.surface_distance_for_elapsed(Wave::S, depth_km, elapsed_s) < max_km
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn max_spread_matches_eewcn() {
-        assert_eq!(max_s_wave_spread_km(2.5), 600.0);
-        assert_eq!(max_s_wave_spread_km(3.0), 600.0);
-        assert_eq!(max_s_wave_spread_km(3.1), 800.0);
-        assert_eq!(max_s_wave_spread_km(5.5), 2000.0);
-        assert_eq!(max_s_wave_spread_km(6.2), 2500.0);
-        assert_eq!(max_s_wave_spread_km(7.5), 6000.0);
-        assert_eq!(max_s_wave_spread_km(8.0), 6500.0);
+    fn max_spread_scales_with_magnitude() {
+        assert_eq!(max_s_wave_spread_km(2.0), 200.0);
+        assert_eq!(max_s_wave_spread_km(2.5), 350.0);
+        assert_eq!(max_s_wave_spread_km(3.0), 500.0);
+        assert_eq!(max_s_wave_spread_km(4.0), 900.0);
+        assert_eq!(max_s_wave_spread_km(5.5), 2100.0);
+        assert_eq!(max_s_wave_spread_km(6.5), 3400.0);
+        assert_eq!(max_s_wave_spread_km(7.5), 5200.0);
+        assert_eq!(max_s_wave_spread_km(8.0), 6200.0);
+        assert_eq!(max_s_wave_spread_km(8.5), 7500.0);
+        assert!(max_s_wave_spread_km(3.0) < max_s_wave_spread_km(5.0));
+        assert!(max_s_wave_spread_km(5.0) < max_s_wave_spread_km(7.0));
     }
 }

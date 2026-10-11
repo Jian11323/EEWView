@@ -44,6 +44,8 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
                             source: "kmoni",
                             url,
                             on_open_texts: Vec::new(),
+                            periodic_texts: Vec::new(),
+                            periodic_secs: 0,
                             backoff_max_secs: 60,
                         },
                         move |tx, text| ingest_kmoni_frame(&mut state, tx, text),
@@ -81,6 +83,8 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
                     source: "kma-station",
                     url,
                     on_open_texts: Vec::new(),
+                    periodic_texts: Vec::new(),
+                    periodic_secs: 0,
                     backoff_max_secs: 60,
                 },
                 move |tx, text| ingest_kma_station_frame(&mut state, tx, text),
@@ -102,6 +106,8 @@ fn spawn_snet_jian(tx: NetTx, url: String) -> JoinHandle<()> {
                 source: "s-net",
                 url,
                 on_open_texts: Vec::new(),
+                periodic_texts: Vec::new(),
+                periodic_secs: 0,
                 backoff_max_secs: 60,
             },
             move |tx, text| ingest_snet_frame(&mut state, tx, text),
@@ -120,7 +126,7 @@ struct SnetPoint {
     y: u32,
 }
 
-/// 原版 MSIL S-Net：`pixels.csv` + 两张 zoom5 切片纵向拼接后按像素取色。
+/// 原版 MSIL S-Net：对齐 `Station/S-Net/SNet.py`（pixels.csv + z5 双切片纵向拼接取色）。
 fn spawn_snet_original(
     tx: NetTx,
     assets_stations: Option<std::path::PathBuf>,
@@ -175,8 +181,7 @@ fn spawn_snet_original(
             } else {
                 emit_health(&tx, "snet", jian_core::HealthStatus::Fluctuating);
             }
-            // MSIL S-Net 切片约每分钟更新；过频轮询无意义
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     })
 }
@@ -221,7 +226,11 @@ async fn fetch_snet_latest_time(client: &reqwest::Client) -> Option<String> {
     if !resp.status().is_success() {
         return None;
     }
-    let v: serde_json::Value = resp.json().await.ok()?;
+    let bytes = resp.bytes().await.ok()?;
+    // 上游偶发 UTF-8 BOM
+    let text = String::from_utf8_lossy(&bytes);
+    let text = text.trim_start_matches('\u{feff}');
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
     let arr = v.as_array()?;
     let last = arr.last()?;
     let t = last.get("validtime")?.as_str()?;
@@ -237,7 +246,6 @@ async fn sample_snet_tiles(
     key: &str,
     points: &[SnetPoint],
 ) -> Option<Vec<StationSample>> {
-    // 对齐 Station/S-Net：两张 z=5 切片 (28,11)+(28,12) 纵向拼接
     let base = "https://www.msil.go.jp/data/tiles/smoni/tileimage";
     let url1 = format!("{base}/{key}/{key}/5/28/11.png");
     let url2 = format!("{base}/{key}/{key}/5/28/12.png");
@@ -255,25 +263,38 @@ async fn sample_snet_tiles(
 
     let mut out = Vec::new();
     for pt in points {
-        if pt.x >= w || pt.y >= h {
-            continue;
-        }
-        let p = merged.get_pixel(pt.x, pt.y).0;
-        let Some(pos) = color_to_position_snet(p[0], p[1], p[2]) else {
-            continue;
+        let (r, g, b) = if pt.x < w && pt.y < h {
+            let p = merged.get_pixel(pt.x, pt.y).0;
+            (p[0], p[1], p[2])
+        } else {
+            (0, 0, 0)
         };
-        let shindo = 10.0 * pos - 3.0;
+        let shindo = match color_to_position_snet(r, g, b) {
+            Some(pos) => {
+                let v = 10.0 * pos - 3.0;
+                if v >= 7.0 {
+                    99.0
+                } else {
+                    (v * 10.0).round() / 10.0
+                }
+            }
+            None => -3.0,
+        };
         if shindo < -3.0 {
             continue;
         }
-        let instrumental = if shindo >= 7.0 { 7.0 } else { shindo };
+        let instrumental = if shindo >= 99.0 { 7.0 } else { shindo };
         let (level, _) = jma_from_instrumental(instrumental);
         out.push(StationSample {
             id: pt.code.clone(),
             name: pt.code.clone(),
             latitude: pt.lat,
             longitude: pt.lon,
-            intensity_text: instrumental_display_text(instrumental),
+            intensity_text: if shindo >= 99.0 {
+                "7".into()
+            } else {
+                instrumental_display_text(shindo)
+            },
             intensity_kind: IntensityKind::JmaShindo,
             intensity_level: level,
             instrumental,
@@ -282,7 +303,7 @@ async fn sample_snet_tiles(
     Some(out)
 }
 
-/// 对齐 Station/S-Net `hsv_to_position_p`（阈值略宽于 NIED 版）。
+/// 对齐 Station/S-Net `hsv_to_position_p`。
 fn color_to_position_snet(r: u8, g: u8, b: u8) -> Option<f64> {
     let (h, s, v) = rgb_to_hsv(r, g, b);
     if !(v > 0.1 && s > 0.75) {
@@ -313,14 +334,12 @@ enum NiedKind {
 }
 
 impl NiedKind {
-    fn base(self) -> &'static str {
-        match self {
-            Self::Kmoni => "http://www.kmoni.bosai.go.jp/data/map_img/RealTimeImg",
-            Self::Lmoni => "https://www.lmoni.bosai.go.jp/monitor/data/data/map_img/RealTimeImg",
-        }
+    /// 計測震度图：对齐 Station/NIED `jma_s`（lmoni 主机无 jma_s，改走 kmoni）。
+    fn shindo_base(self) -> &'static str {
+        "http://www.kmoni.bosai.go.jp/data/map_img/RealTimeImg"
     }
-    fn prefix(self) -> &'static str {
-        "juss"
+    fn shindo_prefix(self) -> &'static str {
+        "jma_s"
     }
 }
 
@@ -361,7 +380,7 @@ fn spawn_nied_image(
                 return;
             }
         };
-        info!(n = points.len(), "stations: NIED points loaded");
+        info!(n = points.len(), kind = kind_label(kind), "stations: NIED points loaded");
         emit_health(&tx, "kmoni", jian_core::HealthStatus::Normal);
 
         let client = reqwest::Client::builder()
@@ -374,15 +393,15 @@ fn spawn_nied_image(
             let latest = fetch_latest_time(&client).await;
             if let Some(key) = latest {
                 if key != last_key {
-                    if let Some(list) =
-                        sample_nied_gif(&client, kind, &key, &points).await
-                    {
+                    if let Some(list) = sample_nied_gif(&client, kind, &key, &points).await {
                         let _ = tx.send(NetEvent::Stations {
                             network: "kmoni",
                             list,
                         });
                         last_key = key;
                         emit_health(&tx, "kmoni", jian_core::HealthStatus::Normal);
+                    } else {
+                        emit_health(&tx, "kmoni", jian_core::HealthStatus::Fluctuating);
                     }
                 }
             } else {
@@ -393,17 +412,25 @@ fn spawn_nied_image(
     })
 }
 
+fn kind_label(kind: NiedKind) -> &'static str {
+    match kind {
+        NiedKind::Kmoni => "kmoni",
+        NiedKind::Lmoni => "lmoni",
+    }
+}
+
 fn load_nied_points(path: &std::path::Path) -> Result<Vec<NiedPoint>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for (i, line) in text.lines().enumerate() {
-        if i == 0 && line.contains("Type") {
+        if i == 0 && (line.contains("Type") || line.starts_with("Type")) {
             continue;
         }
         let cols: Vec<&str> = line.split(',').collect();
         if cols.len() < 9 {
             continue;
         }
+        // 对齐 Station/NIED：X 列为表头时跳过
         if cols[7].trim() == "X" {
             continue;
         }
@@ -436,7 +463,6 @@ async fn fetch_latest_time(client: &reqwest::Client) -> Option<String> {
     }
     let v: serde_json::Value = resp.json().await.ok()?;
     let t = v.get("latest_time")?.as_str()?;
-    // "2026/10/10 12:34:56" → 20261010123456
     let digits: String = t.chars().filter(|c| c.is_ascii_digit()).collect();
     if digits.len() >= 14 {
         Some(digits[..14].to_string())
@@ -452,13 +478,14 @@ async fn sample_nied_gif(
     points: &[NiedPoint],
 ) -> Option<Vec<StationSample>> {
     let day = &key[..8];
+    let pref = kind.shindo_prefix();
     let url = format!(
         "{}/{}/{}/{}.{}.gif",
-        kind.base(),
-        kind.prefix(),
+        kind.shindo_base(),
+        pref,
         day,
         key,
-        kind.prefix()
+        pref
     );
     let resp = client.get(&url).send().await.ok()?;
     if resp.status().as_u16() == 404 {
@@ -472,14 +499,20 @@ async fn sample_nied_gif(
     let (w, h) = img.dimensions();
     let mut out = Vec::new();
     for pt in points {
-        if pt.stop || pt.x >= w || pt.y >= h {
+        if pt.stop {
             continue;
         }
-        let p = img.get_pixel(pt.x, pt.y).0;
-        let Some(pos) = color_to_position(p[0], p[1], p[2]) else {
-            continue;
+        let (r, g, b) = if pt.x < w && pt.y < h {
+            let p = img.get_pixel(pt.x, pt.y).0;
+            (p[0], p[1], p[2])
+        } else {
+            (0, 0, 0)
         };
-        let shindo = 10.0 * pos - 3.0;
+        // 对齐 Station/NIED：无感色 → int=-3.0 仍上图
+        let shindo = match color_to_position(r, g, b) {
+            Some(pos) => ((10.0 * pos - 3.0) * 100.0).round() / 100.0,
+            None => -3.0,
+        };
         if shindo < -3.0 {
             continue;
         }

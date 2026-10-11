@@ -443,11 +443,17 @@ pub fn paint_wave_overlay(
         let fade = (1.0 - (s_km / max_km).clamp(0.0, 1.0)).mul_add(0.35, 0.65);
         let p_stroke = Stroke::new(
             p_w,
-            Color32::from_rgba_unmultiplied(80, 180, 255, ((p_alpha as f64) * fade) as u8),
+            Color32::from_rgba_unmultiplied(255, 255, 255, ((p_alpha as f64) * fade) as u8),
         );
+        let s_rgb = color_for(ev.intensity_kind, ev.intensity_level);
         let s_stroke = Stroke::new(
             s_w,
-            Color32::from_rgba_unmultiplied(255, 80, 80, ((s_alpha as f64) * fade) as u8),
+            Color32::from_rgba_unmultiplied(
+                s_rgb.r,
+                s_rgb.g,
+                s_rgb.b,
+                ((s_alpha as f64) * fade) as u8,
+            ),
         );
         if view.mode.is_globe() {
             stroke_polyline(

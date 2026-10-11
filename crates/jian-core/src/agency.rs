@@ -120,16 +120,14 @@ pub fn agency_bracket(agency: &str) -> String {
 fn cea_pr_province(agency: &str) -> Option<&str> {
     let a = agency.trim();
     let lower = a.to_ascii_lowercase().replace('_', "-");
-    if lower == "cea-pr" {
+    if lower == "cea-pr" || lower == "wolfx-cea-pr" {
         return Some("");
     }
-    if let Some(rest) = lower.strip_prefix("cea-pr:") {
-        let start = a.len().saturating_sub(rest.len());
-        return Some(a[start..].trim());
-    }
-    if let Some(rest) = lower.strip_prefix("cea-pr/") {
-        let start = a.len().saturating_sub(rest.len());
-        return Some(a[start..].trim());
+    for prefix in ["wolfx-cea-pr:", "wolfx-cea-pr/", "cea-pr:", "cea-pr/"] {
+        if let Some(rest) = lower.strip_prefix(prefix) {
+            let start = a.len().saturating_sub(rest.len());
+            return Some(a[start..].trim());
+        }
     }
     None
 }
@@ -343,6 +341,19 @@ impl AgencyFamily {
     }
 }
 
+/// EEW 镜像源优先级：Jian > Wolfx > 其它（同事件合并时高者优先展示机构名）。
+pub fn eew_feed_priority(agency: &str) -> u8 {
+    let a = agency.trim().to_ascii_lowercase().replace('_', "-");
+    if a.starts_with("wolfx") {
+        return 2;
+    }
+    if a.contains("p2p") || a.contains("pancakes") {
+        return 1;
+    }
+    // Jian 直连 / 中转（jma-eew、cea、cwa…）
+    3
+}
+
 pub fn agency_family(agency: &str) -> AgencyFamily {
     let a = agency.trim().to_ascii_lowercase().replace('_', "-");
 
@@ -390,8 +401,14 @@ pub fn agency_family(agency: &str) -> AgencyFamily {
     {
         return AgencyFamily::Cenc;
     }
-    // CEA 预警（含省级 cea-pr）
-    if a == "cea" || a.starts_with("cea-") || a.contains("cea-pr") || a.contains("cea/") {
+    // CEA 预警（含省级 cea-pr；Wolfx cenc_eew → wolfx-cea，省级 → wolfx-cea-pr:省）
+    if a == "cea"
+        || a == "wolfx-cea"
+        || a.starts_with("cea-")
+        || a.starts_with("wolfx-cea")
+        || a.contains("cea-pr")
+        || a.contains("cea/")
+    {
         return AgencyFamily::Cea;
     }
     if a.contains("jma") || a.contains("p2p") || a.contains("wolfx-jma") {
@@ -526,6 +543,11 @@ mod tests {
             "阿坝州红原县 [四川地震局]"
         );
         assert_eq!(cea_pr_agency_id(Some("四川")), "cea-pr:四川");
+        assert_eq!(agency_family("wolfx-cea"), AgencyFamily::Cea);
+        assert_eq!(agency_bracket("wolfx-cea"), "CN");
+        assert_eq!(agency_bracket("wolfx-cea-pr:四川"), "四川地震局");
+        assert_eq!(agency_family("wolfx-cea-pr:福建"), AgencyFamily::Cea);
+        assert_eq!(agency_family("wolfx-cwa-eew"), AgencyFamily::Cwa);
     }
 
     #[test]

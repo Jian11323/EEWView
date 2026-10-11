@@ -43,7 +43,15 @@ def copy_tree(src: Path, dst: Path) -> None:
         src,
         dst,
         ignore=shutil.ignore_patterns(
-            "__pycache__", "*.pyc", ".git", "local.toml", "Thumbs.db", ".DS_Store"
+            "__pycache__",
+            "*.pyc",
+            ".git",
+            "local.toml",
+            "Thumbs.db",
+            ".DS_Store",
+            "LXGWWenKai-Light.ttf",
+            "LXGWWenKai-Medium.ttf",
+            "LXGWWenKaiMono-*.ttf",
         ),
     )
 

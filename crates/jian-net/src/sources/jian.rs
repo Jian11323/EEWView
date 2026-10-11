@@ -66,8 +66,20 @@ pub fn spawn(tx: NetTx, cfg: JianSourceConfig) -> Vec<JoinHandle<()>> {
                 WsLoopOpts {
                     source: "jian",
                     url,
-                    // 官方仅 cenc/cwa/jma/hko 支持 *list；预警靠 /all 快照最新一报
-                    on_open_texts: vec!["alllist".into()],
+                    // 官方仅 cenc/cwa/jma/hko 支持 *list；分别拉取后由 upsert 混合去重、新→旧
+                    on_open_texts: vec![
+                        "cenclist".into(),
+                        "cwalist".into(),
+                        "jmalist".into(),
+                        "hkolist".into(),
+                    ],
+                    periodic_texts: vec![
+                        "cenclist".into(),
+                        "cwalist".into(),
+                        "jmalist".into(),
+                        "hkolist".into(),
+                    ],
+                    periodic_secs: 60,
                     backoff_max_secs: 60,
                 },
                 |tx, text| ingest_jian_frame(tx, text),
@@ -102,6 +114,8 @@ fn spawn_kmoni_if(tx: &NetTx, cfg: &JianSourceConfig) -> Vec<JoinHandle<()>> {
                 source: "kmoni",
                 url,
                 on_open_texts: Vec::new(),
+                periodic_texts: Vec::new(),
+                periodic_secs: 0,
                 backoff_max_secs: 60,
             },
             move |tx, text| ingest_kmoni_frame(&mut state, tx, text),

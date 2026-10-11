@@ -3,7 +3,7 @@
 use futures_util::{SinkExt, StreamExt};
 use jian_core::HealthStatus;
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::time::{interval, sleep, MissedTickBehavior};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
 
@@ -14,6 +14,10 @@ pub struct WsLoopOpts {
     pub url: String,
     /// 连接成功后立刻发送的文本（鉴权 / query / list）
     pub on_open_texts: Vec<String>,
+    /// 连接存活期间周期性重发（如 Jian cenclist）；空则不发
+    pub periodic_texts: Vec<String>,
+    /// 周期秒数；0 或 periodic_texts 空则禁用
+    pub periodic_secs: u64,
     pub backoff_max_secs: u64,
 }
 
@@ -38,38 +42,68 @@ where
                     }
                 }
                 let mut rate_limited = false;
-                while let Some(msg) = read.next().await {
-                    match msg {
-                        Ok(Message::Text(t)) => {
-                            let text = t.as_str();
-                            if is_conn_limit_error(text) {
-                                warn!(
-                                    source = opts.source,
-                                    "服务器连接数超限，请关闭其它占用同令牌或同 IP 的客户端后重试"
-                                );
-                                emit_health(&tx, opts.source, HealthStatus::Abnormal);
-                                rate_limited = true;
-                                break;
+                let use_periodic =
+                    opts.periodic_secs > 0 && !opts.periodic_texts.is_empty();
+                let mut tick = if use_periodic {
+                    let mut t = interval(Duration::from_secs(opts.periodic_secs));
+                    t.set_missed_tick_behavior(MissedTickBehavior::Delay);
+                    // 跳过立刻触发的首 tick（on_open 已发过）
+                    t.tick().await;
+                    Some(t)
+                } else {
+                    None
+                };
+                loop {
+                    tokio::select! {
+                        msg = read.next() => {
+                            match msg {
+                                Some(Ok(Message::Text(t))) => {
+                                    let text = t.as_str();
+                                    if is_conn_limit_error(text) {
+                                        warn!(
+                                            source = opts.source,
+                                            "服务器连接数超限，请关闭其它占用同令牌或同 IP 的客户端后重试"
+                                        );
+                                        emit_health(&tx, opts.source, HealthStatus::Abnormal);
+                                        rate_limited = true;
+                                        break;
+                                    }
+                                    if is_error_frame(text) {
+                                        let msg = error_message(text).unwrap_or("error");
+                                        warn!(source = opts.source, message = %msg, "上游 error 帧");
+                                        emit_health(&tx, opts.source, HealthStatus::Abnormal);
+                                    }
+                                    on_text(&tx, text);
+                                }
+                                Some(Ok(Message::Ping(p))) => {
+                                    let _ = write.send(Message::Pong(p)).await;
+                                }
+                                Some(Ok(Message::Close(_))) => {
+                                    warn!(source = opts.source, "server closed");
+                                    break;
+                                }
+                                Some(Err(e)) => {
+                                    warn!(source = opts.source, "ws error: {e}");
+                                    break;
+                                }
+                                None => break,
+                                _ => {}
                             }
-                            if is_error_frame(text) {
-                                let msg = error_message(text).unwrap_or("error");
-                                warn!(source = opts.source, message = %msg, "上游 error 帧");
-                                emit_health(&tx, opts.source, HealthStatus::Abnormal);
+                        }
+                        _ = async {
+                            if let Some(t) = tick.as_mut() {
+                                t.tick().await;
+                            } else {
+                                std::future::pending::<()>().await;
                             }
-                            on_text(&tx, text);
+                        } => {
+                            for text in &opts.periodic_texts {
+                                if let Err(e) = write.send(Message::Text(text.clone().into())).await {
+                                    warn!(source = opts.source, "periodic send failed: {e}");
+                                    break;
+                                }
+                            }
                         }
-                        Ok(Message::Ping(p)) => {
-                            let _ = write.send(Message::Pong(p)).await;
-                        }
-                        Ok(Message::Close(_)) => {
-                            warn!(source = opts.source, "server closed");
-                            break;
-                        }
-                        Err(e) => {
-                            warn!(source = opts.source, "ws error: {e}");
-                            break;
-                        }
-                        _ => {}
                     }
                 }
                 if rate_limited {

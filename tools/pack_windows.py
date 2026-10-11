@@ -48,6 +48,10 @@ def copy_tree(src: Path, dst: Path) -> None:
             "local.toml",
             "Thumbs.db",
             ".DS_Store",
+            # 仅嵌入 Regular；其它字重体积大且未使用
+            "LXGWWenKai-Light.ttf",
+            "LXGWWenKai-Medium.ttf",
+            "LXGWWenKaiMono-*.ttf",
         ),
         dirs_exist_ok=False,
     )
