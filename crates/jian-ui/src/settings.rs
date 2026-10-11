@@ -144,7 +144,7 @@ impl SettingsTab {
         match self {
             Self::Sources => "接口开关、鉴权与连接状态",
             Self::General => "主题、底图、窗口与定位",
-            Self::Audio => "音量、静音与音效包",
+            Self::Audio => "音量与静音",
             Self::Advanced => "走时表、缓存与配置·径",
             Self::About => "版本、致谢与版权",
         }
@@ -1266,22 +1266,13 @@ fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> bool {
             );
         });
         row_divider(ui);
-        control_row(ui, "试听", "按草稿音量 / 事件包立即试听（无需先保存）", "\u{25b6}", |ui| {
+        control_row(ui, "试听", "按草稿音量立即试听（无需先保存）", "\u{25b6}", |ui| {
             if glass_btn(ui, "试听首报音", true).clicked() {
                 test = true;
             }
         });
     });
 
-    section(ui, "音效包", "\u{266a}", |ui| {
-        control_row(ui, "事件包", "默认 srev（CC BY-SA 2.0）", "\u{25ce}", |ui| {
-            framed_edit(ui, &mut draft.audio.event_pack, 140.0);
-        });
-        row_divider(ui);
-        control_row(ui, "倒计时包", "countdown（非自由，不随仓分发）", "\u{25ce}", |ui| {
-            framed_edit(ui, &mut draft.audio.countdown_pack, 140.0);
-        });
-    });
     test
 }
 
