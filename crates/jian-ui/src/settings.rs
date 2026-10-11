@@ -311,13 +311,19 @@ impl SettingsSession {
         let viewport_id = egui::ViewportId::from_hash_of("eewview_settings");
         ctx.show_viewport_immediate(
             viewport_id,
-            egui::ViewportBuilder::default()
-                .with_title("EEWView \u{00b7} 设置")
-                // 对齐 RQ 原型约 1180x660 比例，略收以适应常见桌面
-                .with_inner_size([1080.0, 640.0])
-                .with_min_inner_size([860.0, 520.0])
-                .with_max_inner_size([1280.0, 900.0])
-                .with_resizable(true),
+            {
+                let mut vb = egui::ViewportBuilder::default()
+                    .with_title("EEW View \u{00b7} 设置")
+                    // 对齐 RQ 原型约 1180x660 比例，略收以适应常见桌面
+                    .with_inner_size([1080.0, 640.0])
+                    .with_min_inner_size([860.0, 520.0])
+                    .with_max_inner_size([1280.0, 900.0])
+                    .with_resizable(true);
+                if let Some(icon) = crate::app_icon_data() {
+                    vb = vb.with_icon(icon);
+                }
+                vb
+            },
             |ctx, class| {
                 if ctx.input(|i| i.viewport().close_requested()) {
                     close_requested = true;
@@ -1072,7 +1078,7 @@ fn draw_sources(
             });
             ui.add_space(8.0);
             ui.label(
-                RichText::new("默认开 GQ 与 JMA 火山；其余子源上游已停。")
+                RichText::new("默认开 GQ 与 JMA 火山；其余子源上游·停。")
                     .size(12.0)
                     .color(chrome().muted),
             );
@@ -1627,7 +1633,11 @@ fn snet_station_src_label(s: &str) -> String {
 }
 
 fn draw_about(ui: &mut Ui) {
-    section(ui, "EEWView \u{00b7} 地震视监器", "\u{24d8}", |ui| {
+    if let Some(tex) = crate::logo_texture(ui.ctx()) {
+        ui.add(egui::Image::new((tex.id(), egui::Vec2::splat(64.0))));
+        ui.add_space(10.0);
+    }
+    section(ui, "EEW View \u{00b7} 地震视监器", "\u{24d8}", |ui| {
         ui.label(
             RichText::new(format!(
                 "版本 Beta {}",
@@ -1639,7 +1649,7 @@ fn draw_about(ui: &mut Ui) {
         ui.add_space(8.0);
         ui.label(
             RichText::new(
-                "跨平台地震预警与速报视监客户端。聚合多源实时情报，在地图上展示震中、\
+                "·平台地震预警与速报视监客·端。聚合多源实时情报，在地图上展示震中、\
 走时波圈与测站烈度，并提供本机倒计时与音效播报。",
             )
             .size(13.0)
@@ -1686,7 +1696,7 @@ fn draw_about(ui: &mut Ui) {
         );
         ui.label(
             RichText::new(
-                "\u{00b7} EEW CN\n\u{00b7} GlobalQuake 0.11开源版\n\u{00b7} Kanameishi\n\u{00b7} RhythmQuake\n\u{00b7} Scratch-Realtime-Earthquake-Viewer-Page",
+                "\u{00b7} EEW CN\n\u{00b7} GlobalQuake 0.11\n\u{00b7} Kanameishi\n\u{00b7} RhythmQuake\n\u{00b7} Scratch-Realtime-Earthquake-Viewer-Page",
             )
             .size(12.0)
             .color(chrome().muted),
@@ -1700,7 +1710,7 @@ fn draw_about(ui: &mut Ui) {
         );
         ui.label(
             RichText::new(
-                "本项目参考以下软件的源代码。\n\u{00b7} RhythmQuake\n\u{00b7} Kanameishi\n\u{00b7} OPEN EEWCN\n\u{00b7} GlobalQuake 0.11开源版",
+                "本项目参考以下软件的源代码。\n\u{00b7} RhythmQuake\n\u{00b7} Kanameishi\n\u{00b7} OPEN EEWCN\n\u{00b7} GlobalQuake 0.11",
             )
             .size(12.0)
             .color(chrome().muted),
@@ -1714,7 +1724,7 @@ fn draw_about(ui: &mut Ui) {
         );
         ui.label(
             RichText::new(
-                "本软件仅供信息展示与学习研究，不构成官方预警渠道。请以各国气象/地震主管部门发布为准；紧急情况下请遵从当地防灾指引。开发者不保证数据的实时性、完整性与准确性。",
+                "本软件仅供信息展示与学习研究，不构成官方预警渠道。·以各国气象/地震主管部门发布为准；紧急情况下·遵从当地防灾指引。开发者不保证数据的实时性、完整性与准确性。",
             )
             .size(12.0)
             .color(chrome().muted),

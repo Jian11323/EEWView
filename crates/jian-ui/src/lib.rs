@@ -1,8 +1,11 @@
 //! 主界面分区：地图视口 + 浮层信息头 / 图例 / 倒计时 + 右栏列表。
 
+mod brand;
 mod intensity_icons;
 mod settings;
 mod theme;
+
+pub use brand::{app_icon_data, logo_texture, APP_DISPLAY_NAME};
 
 use chrono::{FixedOffset, Local};
 use egui::{Color32, FontFamily, FontId, Frame, Margin, RichText, Sense, Stroke, Ui, Vec2};

@@ -88,7 +88,7 @@ SOURCES_INNER = rf'''
             toggle(ui, &mut draft.sources.jian.enabled);
         }});
         row_divider(ui);
-        control_row(ui, "登录密钥 lk_", "换取长期 Token rt_ 并写入用户配置", "\u{{25ce}}", |ui| {{
+        control_row(ui, "登录密钥 lk_", "换取长期 Token rt_ 并写入用·配置", "\u{{25ce}}", |ui| {{
             framed_edit(ui, login_key, 200.0);
         }});
         ui.add_space(8.0);
@@ -122,7 +122,7 @@ SOURCES_INNER = rf'''
         }}
         if draft.sources.jian.access_token.is_some() {{
             ui.label(
-                RichText::new("短期 at_ 已由 JIAN_ACCESS_TOKEN 注入（不写入文件）。")
+                RichText::new("短期 at_ ·由 JIAN_ACCESS_TOKEN 注入（不写入文件）。")
                     .size(11.5)
                     .color(chrome().muted),
             );
@@ -188,7 +188,7 @@ SOURCES_INNER = rf'''
             }});
         }}
         row_divider(ui);
-        control_row(ui, "S-Net", "海上强震网（中转 / 原版 MSIL）", "\u{{25ce}}", |ui| {{
+        control_row(ui, "S-Net", "·上强震网（中转 / 原版 MSIL）", "\u{{25ce}}", |ui| {{
             toggle(ui, &mut draft.sources.stations.snet_enabled);
         }});
         if draft.sources.stations.snet_enabled {{
@@ -236,7 +236,7 @@ SOURCES_INNER = '''
             toggle(ui, &mut draft.sources.jian.enabled);
         });
         row_divider(ui);
-        control_row(ui, "登录密钥 lk_", "换取长期 Token rt_ 并写入用户配置", "\\u{25ce}", |ui| {
+        control_row(ui, "登录密钥 lk_", "换取长期 Token rt_ 并写入用·配置", "\\u{25ce}", |ui| {
             framed_edit(ui, login_key, 200.0);
         });
         ui.add_space(8.0);
@@ -270,7 +270,7 @@ SOURCES_INNER = '''
         }
         if draft.sources.jian.access_token.is_some() {
             ui.label(
-                RichText::new("短期 at_ 已由 JIAN_ACCESS_TOKEN 注入（不写入文件）。")
+                RichText::new("短期 at_ ·由 JIAN_ACCESS_TOKEN 注入（不写入文件）。")
                     .size(11.5)
                     .color(chrome().muted),
             );
@@ -336,7 +336,7 @@ SOURCES_INNER = '''
             });
         }
         row_divider(ui);
-        control_row(ui, "S-Net", "海上强震网（中转 / 原版 MSIL）", "\\u{25ce}", |ui| {
+        control_row(ui, "S-Net", "·上强震网（中转 / 原版 MSIL）", "\\u{25ce}", |ui| {
             toggle(ui, &mut draft.sources.stations.snet_enabled);
         });
         if draft.sources.stations.snet_enabled {
@@ -404,7 +404,7 @@ GENERAL_BODY = r'''fn draw_general(
     capture_view: &mut bool,
 ) {
     section(ui, "外观", "\u{25d0}", |ui| {
-        control_row(ui, "界面主题", "切换后设置页立即跟随；保存后应用到主界面", "\u{25d0}", |ui| {
+        control_row(ui, "界面主题", "切换后设置页立即·随；保存后应用到主界面", "\u{25d0}", |ui| {
             egui::ComboBox::from_id_salt("set_theme")
                 .selected_text(theme_display(&draft.ui.theme))
                 .width(120.0)
@@ -414,13 +414,13 @@ GENERAL_BODY = r'''fn draw_general(
                 });
         });
         row_divider(ui);
-        control_row(ui, "地图底图", "跟随主题，或固定矢量 / 地形地图", "\u{25a3}", |ui| {
+        control_row(ui, "地图底图", "·随主题，或固定矢量 / 地形地图", "\u{25a3}", |ui| {
             egui::ComboBox::from_id_salt("set_basemap_preset")
                 .selected_text(basemap_preset_label(draft))
                 .width(200.0)
                 .show_ui(ui, |ui| {
                     if ui
-                        .selectable_label(is_basemap_auto(draft), "跟随主题（推荐）")
+                        .selectable_label(is_basemap_auto(draft), "·随主题（推荐）")
                         .clicked()
                     {
                         draft.map.basemap = "auto".into();
@@ -453,7 +453,7 @@ GENERAL_BODY = r'''fn draw_general(
     });
 
     section(ui, "地图显示", "\u{25a3}", |ui| {
-        control_row(ui, "预警自动跟焦", "新预警或报数更新时地图移到震中", "\u{25ce}", |ui| {
+        control_row(ui, "预警自动·焦", "新预警或报数更新时地图移到震中", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.auto_follow_eew);
         });
         row_divider(ui);
@@ -465,7 +465,7 @@ GENERAL_BODY = r'''fn draw_general(
             toggle(ui, &mut draft.ui.show_wave_rings);
         });
         row_divider(ui);
-        control_row(ui, "烈度图例", "地图左下角显示烈度色标", "\u{25ce}", |ui| {
+        control_row(ui, "烈度图例", "地图·下角显示烈度色标", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_legend);
         });
     });
@@ -532,7 +532,7 @@ GENERAL_BODY = r'''fn draw_general(
         row_divider(ui);
         let picking = matches!(*map_pick, Some(MapPickKind::DefaultViewport));
         let sub = if picking {
-            "请点击主窗口地图选点，Esc 取消"
+            "·点击主窗口地图选点，Esc 取消"
         } else {
             "在主地图单击选点，或采用当前视野中心"
         };
@@ -576,7 +576,7 @@ GENERAL_BODY = r'''fn draw_general(
             row_divider(ui);
             let picking = matches!(*map_pick, Some(MapPickKind::LocalLocation));
             let sub = if picking {
-                "请点击主窗口地图选点，Esc 取消"
+                "·点击主窗口地图选点，Esc 取消"
             } else {
                 "在主地图单击设置本机位置"
             };
@@ -592,7 +592,7 @@ GENERAL_BODY = r'''fn draw_general(
 
 ADVANCED_BODY = r'''fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<SettingsAction>) {
     section(ui, "走时表", "\u{25ce}", |ui| {
-        control_row(ui, "主表（近距）", "默认 JMA2001", "\u{25ce}", |ui| {
+        control_row(ui, "主表（近·）", "默认 JMA2001", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("adv_travel_primary")
                 .selected_text(draft.travel.primary.clone())
                 .width(140.0)
@@ -602,7 +602,7 @@ ADVANCED_BODY = r'''fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action:
                 });
         });
         row_divider(ui);
-        control_row(ui, "远距回退", "主表插值失败时使用", "\u{25ce}", |ui| {
+        control_row(ui, "远·回退", "主表插值失败时使用", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("adv_travel_fallback")
                 .selected_text(draft.travel.fallback.clone())
                 .width(140.0)
@@ -628,20 +628,20 @@ ADVANCED_BODY = r'''fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action:
     section(ui, "配置文件", "\u{25ce}", |ui| {
         if let Some(path) = AppConfig::user_config_path() {
             ui.label(
-                RichText::new(format!("用户覆盖：{}", path.display()))
+                RichText::new(format!("用·覆盖：{}", path.display()))
                     .size(12.0)
                     .color(chrome().muted),
             );
         } else {
             ui.label(
-                RichText::new("未能解析用户配置目录。")
+                RichText::new("未能解析用·配置目录。")
                     .size(12.0)
                     .color(chrome().muted),
             );
         }
         ui.add_space(6.0);
         ui.label(
-            RichText::new("WebSocket 等开发向端点请直接编辑配置文件；访问令牌不会写入覆盖文件。")
+            RichText::new("WebSocket 等开发向端点·直接编辑配置文件；访问令牌不会写入覆盖文件。")
                 .size(12.0)
                 .color(chrome().muted),
         );
@@ -651,7 +651,7 @@ ADVANCED_BODY = r'''fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action:
 
 ABOUT_BODY = (
     "fn draw_about(ui: &mut Ui) {\n"
-    f'    section(ui, "EEWView {MD} 地震视监器", "\\u{{24d8}}", |ui| {{\n'
+    f'    section(ui, "EEW View {MD} 地震视监器", "\\u{{24d8}}", |ui| {{\n'
     '        ui.label(\n'
     '            RichText::new(format!("版本 {}", env!("CARGO_PKG_VERSION")))\n'
     "                .size(14.0)\n"
@@ -660,7 +660,7 @@ ABOUT_BODY = (
     "        ui.add_space(8.0);\n"
     "        ui.label(\n"
     "            RichText::new(\n"
-    '                "跨平台地震预警与速报视监客户端。聚合多源实时情报，在地图上展示震中、\\\n'
+    '                "·平台地震预警与速报视监客·端。聚合多源实时情报，在地图上展示震中、\\\n'
     '走时波圈与测站烈度，并提供本机倒计时与音效播报。",\n'
     "            )\n"
     "            .size(13.0)\n"
@@ -692,7 +692,7 @@ ABOUT_BODY = (
     "        );\n"
     "        ui.label(\n"
     "            RichText::new(\n"
-    '                "界面布局参考 RhythmQuake（已获授权）。地图标记 SVG 与部分交互参考 eewcn（已获授权）。\\\n'
+    '                "界面布局参考 RhythmQuake（··授权）。地图标记 SVG 与部分交互参考 eewcn（··授权）。\\\n'
     '音效包 srev 采用 CC BY-SA 2.0。底图与走时表等第三方数据按其各自许可使用。",\n'
     "            )\n"
     "            .size(12.0)\n"
@@ -707,8 +707,8 @@ ABOUT_BODY = (
     "        );\n"
     "        ui.label(\n"
     "            RichText::new(\n"
-    '                "本软件仅供信息展示与学习研究，不构成官方预警渠道。请以各国气象/地震主管部门发布为准；\\\n'
-    '紧急情况下请遵从当地防灾指引。开发者不保证数据的实时性、完整性与准确性。",\n'
+    '                "本软件仅供信息展示与学习研究，不构成官方预警渠道。·以各国气象/地震主管部门发布为准；\\\n'
+    '紧急情况下·遵从当地防灾指引。开发者不保证数据的实时性、完整性与准确性。",\n'
     "            )\n"
     "            .size(12.0)\n"
     "            .color(chrome().muted),\n"
@@ -751,7 +751,7 @@ def main() -> int:
     sub(
         r"//! \?+ RhythmQuake `design/settings-page\.html` \+ `SettingsControlStyle`\n//! .+",
         "//! 设置页：按 RhythmQuake `design/settings-page.html` + `SettingsControlStyle`\n"
-        "//! 以 egui 重写（统一玻璃面板、左侧分类、扁平行；已获授权参考）。",
+        "//! 以 egui 重写（统一玻璃面板、·侧分类、扁平行；··授权参考）。",
     )
     sub(
         r'            Self::Sources => "API\?+",\n'
@@ -774,7 +774,7 @@ def main() -> int:
         '            Self::Sources => "接口开关、鉴权与连接状态",\n'
         '            Self::General => "主题、底图、窗口与定位",\n'
         '            Self::Audio => "音量、静音与音效包",\n'
-        '            Self::Advanced => "走时表、缓存与配置路径",\n'
+        '            Self::Advanced => "走时表、缓存与配置·径",\n'
         '            Self::About => "版本、许可与署名",\n',
     )
     sub(r"/// \?+ Material Icons \?+", "/// 导航字形（无 Material Icons 时的占位）")
@@ -784,7 +784,7 @@ def main() -> int:
     sub(r"/// \?+ `map_pick`\.?", "/// 主地图单击坐标写入对应 `map_pick`。")
     sub(
         r'self\.save_note = Some\("\?+"\.into\(\)\);\n        \}\n        self\.capture_view = false;',
-        'self.save_note = Some("已用当前视野写入默认视口".into());\n        }\n        self.capture_view = false;',
+        'self.save_note = Some("·用当前视野写入默认视口".into());\n        }\n        self.capture_view = false;',
     )
     sub(
         r'MapPickKind::DefaultViewport => \{\n'
@@ -796,7 +796,7 @@ def main() -> int:
         "                draft.map.default_lon = lon;\n"
         "                draft.map.default_lat = lat;\n"
         "                draft.map.default_zoom = zoom;\n"
-        '                self.save_note = Some("已用地图选点写入默认视口".into());',
+        '                self.save_note = Some("·用地图选点写入默认视口".into());',
     )
     sub(
         r'MapPickKind::LocalLocation => \{\n'
@@ -806,11 +806,11 @@ def main() -> int:
         "MapPickKind::LocalLocation => {\n"
         "                draft.local.longitude = Some(lon);\n"
         "                draft.local.latitude = Some(lat);\n"
-        '                self.save_note = Some("已用地图选点写入本机位置".into());',
+        '                self.save_note = Some("·用地图选点写入本机位置".into());',
     )
     sub(
         r'\.with_title\("EEWView [^"]*"\)',
-        f'.with_title("EEWView {MD} 设置")',
+        f'.with_title("EEW View {MD} 设置")',
     )
     sub(
         r"// .*RQ .*1180.660 .*",
@@ -821,7 +821,7 @@ def main() -> int:
     sub(r'format!\("\?+\{e\}"\)', 'format!("鉴权失败：{e}")')
     sub(
         r'self\.save_note = Some\("\?+"\.into\(\)\);\n        \}\n\n        if close_requested',
-        'self.save_note = Some("已恢复默认（令牌保留）；点「保存全部」写入".into());\n        }\n\n        if close_requested',
+        'self.save_note = Some("·恢复默认（令牌保留）；点「保存全部」写入".into());\n        }\n\n        if close_requested',
     )
     sub(r"// \?+RQ \.header\??", "// 页眉（RQ .header）")
     sub(
@@ -830,11 +830,11 @@ def main() -> int:
     )
     sub(
         r'RichText::new\("EEWView [^"]*"\)',
-        f'RichText::new("EEWView {MD} 左侧分类与右侧内容合并为同一玻璃面板")',
+        f'RichText::new("EEW View {MD} ·侧分类与右侧内容合并为同一玻璃面板")',
     )
     sub(r"// \?+RQ \.panel\??", "// 统一面板（RQ .panel）")
     sub(r"// \?+\n                            let \(line, _\)", "// 竖分割线\n                            let (line, _)")
-    sub(r"// \?+EEWView \?+RQ \?+", "// 底栏：EEWView 草稿保存（RQ 即时写入；此处保留显式保存）")
+    sub(r"// \?+EEWView \?+RQ \?+", "// 底栏：EEW View 草稿保存（RQ 即时写入；此处保留显式保存）")
     sub(
         r'glass_btn\(ui, "\?+", false\)\.clicked\(\) \{\n                            \*restore = true;',
         'glass_btn(ui, "恢复默认", false).clicked() {\n                            *restore = true;',
@@ -862,7 +862,7 @@ def main() -> int:
     sub(r"// \?+RQ \.content-head\??", "// 内容头（RQ .content-head）")
     sub(
         r"/// RQ SettingsControlRow\?+",
-        "/// RQ SettingsControlRow：左侧图标盒 + 标题副标题，右侧控件",
+        "/// RQ SettingsControlRow：·侧图标盒 + 标题副标题，右侧控件",
     )
     sub(
         r'HealthStatus::Normal => \(chrome\(\)\.status_ok, "\?+"\),\n'
@@ -878,7 +878,7 @@ def main() -> int:
         r'        _ => "\?+"\.into\(\),',
         '"vector" => "矢量地图".into(),\n'
         '        "tiles" | "both" => "地形地图".into(),\n'
-        '        _ => "跟随主题（推荐）".into(),',
+        '        _ => "·随主题（推荐）".into(),',
     )
     sub(
         r'"records" \| "record" => "\?+"\.into\(\),\n'

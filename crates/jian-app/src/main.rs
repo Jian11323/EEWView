@@ -1,4 +1,4 @@
-//! EEWView（地震视监器）桌面客户端入口。
+//! EEW View（地震视监器）桌面客户端入口。
 
 // release：GUI 子系统，双击不弹控制台；debug：保留控制台便于看日志
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -211,9 +211,13 @@ fn main() -> Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1280.0, 720.0])
         .with_title(format!(
-            "EEWView · 地震视监器  [Beta] v{}",
+            "{} \u{00b7} 地震视监器  [Beta] v{}",
+            jian_ui::APP_DISPLAY_NAME,
             env!("CARGO_PKG_VERSION")
         ));
+    if let Some(icon) = jian_ui::app_icon_data() {
+        viewport = viewport.with_icon(icon);
+    }
     if cfg.ui.always_on_top {
         viewport = viewport.with_always_on_top();
     }
@@ -226,7 +230,7 @@ fn main() -> Result<()> {
     let has_local = cfg.local.latitude.is_some() && cfg.local.longitude.is_some();
     snap.show_wave_rings = cfg.ui.show_wave_rings;
     eframe::run_native(
-        "EEWView",
+        jian_ui::APP_DISPLAY_NAME,
         options,
         Box::new(move |cc| {
             install_cjk_fonts(&cc.egui_ctx);

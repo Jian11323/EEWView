@@ -15,9 +15,11 @@
 
 | 文件 | 用途 |
 |------|------|
-| brand/logo.svg | 应用图标 |
+| brand/logo.svg | 矢量应用图标（源） |
 | brand/logo-wordmark.svg | 字标 |
-| brand/favicon.svg | 站点/窗口图标 |
+| brand/favicon.svg | 站点小图标 |
+| brand/app.png | 窗口/关于页位图（由 logo.svg 生成） |
+| brand/app.ico | Windows exe 图标（由 logo.svg 生成） |
 
 ## 烈度 / 震度图标（intensity/）
 
@@ -28,13 +30,13 @@
 | 目录 | 标度 | 说明 |
 |------|------|------|
 | intensity/csis/ | 中国烈度（CSIS） | 列表与信息头 |
-| intensity/csis_inst/ | 中国仪器烈度 | 已接入 |
+| intensity/csis_inst/ | 中国仪器烈度 | ·接入 |
 | intensity/shindo/ | 气象厅震度 | 列表与信息头；5-/5+ 为 5弱/5强 |
-| intensity/shindo_inst/ | 仪器震度 | 已接入 |
-| intensity/mmi/ | MMI | 已接入 |
-| intensity/mmi_inst/ | MMI 仪器烈度 | 已接入 |
-| intensity/lpgm/ | 长周期地震动阶级 | 已接入 |
-| intensity/lpgm_inst/ | 仪器长周期阶级 | 已接入 |
+| intensity/shindo_inst/ | 仪器震度 | ·接入 |
+| intensity/mmi/ | MMI | ·接入 |
+| intensity/mmi_inst/ | MMI 仪器烈度 | ·接入 |
+| intensity/lpgm/ | 长周期地震动阶级 | ·接入 |
+| intensity/lpgm_inst/ | 仪器长周期阶级 | ·接入 |
 
 ## 测站表（stations/）
 

@@ -1,0 +1,11 @@
+[workspace]
+
+[package]
+name = "gen_brand_icon"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+resvg = { version = "0.45", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }

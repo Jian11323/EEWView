@@ -49,7 +49,7 @@ def copy_tree(src: Path, dst: Path) -> None:
 
 
 def write_usage(out: Path, ver: str) -> None:
-    usage = f"""EEWView 便携测试包（Linux x86_64）
+    usage = f"""EEW View 便携测试包（Linux x86_64）
 ================================
 
 版本：Beta {ver}
@@ -63,7 +63,7 @@ def write_usage(out: Path, ver: str) -> None:
 【首次使用】
 1. 设置 → API与数据源，用 lk_ 换票绑定 Jian（可选）
 2. 未配置 Jian 时 Wolfx / P2P / Pancakes 仍可用
-3. 配置写在用户目录，不回写本包
+3. 配置写在用·目录，不回写本包
 
 【版本规则】
 - PATCH：修 bug / 微调
@@ -110,7 +110,7 @@ def main() -> int:
         cli_bin = args[args.index("--bin") + 1]
 
     ver = workspace_version()
-    log(f"EEWView Beta {ver} Linux x86_64 portable")
+    log(f"EEW View Beta {ver} Linux x86_64 portable")
 
     if not skip_build and cli_bin is None and platform.system() == "Linux":
         log("cargo build -p jian-app --release")

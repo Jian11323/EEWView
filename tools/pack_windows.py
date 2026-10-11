@@ -60,7 +60,7 @@ def workspace_version() -> str:
 
 
 def write_usage(out: Path, ver: str) -> None:
-    usage = f"""EEWView 便携测试包
+    usage = f"""EEW View 便携测试包
 ================
 
 版本：Beta {ver}
@@ -107,7 +107,7 @@ def zip_out(out: Path, ver: str) -> Path:
 
 def main() -> int:
     ver = workspace_version()
-    log(f"EEWView Beta {ver} portable pack")
+    log(f"EEW View Beta {ver} portable pack")
 
     skip_build = "--skip-build" in sys.argv
     exe_src = ROOT / "target" / "release" / "jian.exe"
