@@ -1049,12 +1049,12 @@ fn draw_sources(
 
 
     section(ui, "PancakesAPI", "\u{25ce}", |ui| {
-        control_row(ui, "启用 Pancakes", "api.aloys23.link 全灾害聚合", "\u{26a1}", |ui| {
+        control_row(ui, "启用 Pancakes", "默认只连 GlobalQuake（gq）", "\u{26a1}", |ui| {
             toggle(ui, &mut draft.sources.pancakes.enabled);
         });
         if draft.sources.pancakes.enabled {
             row_divider(ui);
-            control_row(ui, "GlobalQuake", "全球预警（gq）", "\u{26a1}", |ui| {
+            control_row(ui, "GlobalQuake", "专用 /ws/gq；维护者推荐单独连接", "\u{26a1}", |ui| {
                 toggle(ui, &mut draft.sources.pancakes.gq);
             });
             row_divider(ui);
@@ -1066,6 +1066,16 @@ fn draw_sources(
                         .fixed_decimals(1),
                 );
             });
+            row_divider(ui);
+            control_row(ui, "聚合通道 /ws/all", "默认关；仅兼容旧用法", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.pancakes.use_all);
+            });
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("以下子源上游·停，默认关闭；一般无需开启。")
+                    .size(12.0)
+                    .color(chrome().muted),
+            );
             row_divider(ui);
             control_row(ui, "USGS", "美国地质调查局速报", "\u{25ce}", |ui| {
                 toggle(ui, &mut draft.sources.pancakes.usgs);
@@ -1104,6 +1114,7 @@ fn draw_sources(
             });
         }
     });
+
 
 
     section(ui, "实时测站", "\u{25ce}", |ui| {
@@ -1557,7 +1568,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
                 });
         });
         row_divider(ui);
-        control_row(ui, "同时输出 stderr", "便携 release 无黑窗；开发构建默认已开", "\u{25ce}", |ui| {
+        control_row(ui, "同时输出 stderr", "便携 release 无黑窗；开发构建默认·开", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.log.console);
         });
         row_divider(ui);
@@ -1569,7 +1580,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
             );
         });
         row_divider(ui);
-        control_row(ui, "日志目录", "相对资源根或绝对路径", "\u{25ce}", |ui| {
+        control_row(ui, "日志目录", "相对资源根或绝对·径", "\u{25ce}", |ui| {
             framed_edit(ui, &mut draft.log.dir, 180.0);
         });
         row_divider(ui);
@@ -1637,7 +1648,7 @@ fn draw_about(ui: &mut Ui) {
         ui.add_space(8.0);
         ui.label(
             RichText::new(
-                "·平台地震预警与速报视监客·端。聚合多源实时情报，在地图上展示震中、\
+                "跨平台地震预警与速报视监客户端。聚合多源实时情报，在地图上展示震中、\
 走时波圈与测站烈度，并提供本机倒计时与音效播报。",
             )
             .size(13.0)
@@ -1653,7 +1664,7 @@ fn draw_about(ui: &mut Ui) {
         ui.label(
             RichText::new(
                 "\u{00b7} Jian Project API（预警 / 速报 / 测站中转）\n\
-                \u{00b7} PancakesAPI（GQ / USGS / JMA / NMEFC / CMA）\n\
+                \u{00b7} PancakesAPI（默认 GlobalQuake /ws/gq）\n\
 \u{00b7} Wolfx（all_eew 预警与速报）\n\
 \u{00b7} P2PQuake（气象厅地震情报）\n\
 \u{00b7} NIED kmoni / lmoni 原版测站图像（可选）",
@@ -1670,8 +1681,7 @@ fn draw_about(ui: &mut Ui) {
         );
         ui.label(
             RichText::new(
-                "界面布局参考 RhythmQuake（··授权）。地图标记 SVG 与部分交互参考 eewcn（··授权）。\
-音效包 srev 采用 CC BY-SA 2.0。底图与走时表等第三方数据按其各自许可使用。",
+                "图标提供：平平无奇的4。界面布局参考 RhythmQuake（已获授权）。地图标记 SVG 与部分交互参考 eewcn（已获授权）。音效包 srev 采用 CC BY-SA 2.0。底图与走时表等第三方数据按其各自许可使用。",
             )
             .size(12.0)
             .color(chrome().muted),
@@ -1685,8 +1695,7 @@ fn draw_about(ui: &mut Ui) {
         );
         ui.label(
             RichText::new(
-                "本软件仅供信息展示与学习研究，不构成官方预警渠道。·以各国气象/地震主管部门发布为准；\
-紧急情况下·遵从当地防灾指引。开发者不保证数据的实时性、完整性与准确性。",
+                "本软件仅供信息展示与学习研究，不构成官方预警渠道。请以各国气象/地震主管部门发布为准；紧急情况下请遵从当地防灾指引。开发者不保证数据的实时性、完整性与准确性。",
             )
             .size(12.0)
             .color(chrome().muted),

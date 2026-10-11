@@ -8,18 +8,20 @@
 | markers/red.svg | 速报震中（绘制尺寸随震级） |
 | markers/green.svg | 本机位置（蓝色房子） |
 
-来源：eewcn（中国地震预警网相关客户端素材）。**已获开发者授权**，可在 EEWView 中使用。  
-再分发或商用请自行确认授权范围。
+来源：eewcn（中国地震预警网相关客·端素材）。**··开发者授权**，可在 EEWView 中使用。  
+再分发或商用·自行确认授权范围。
 
-## 品牌（rand/）
+## 品牌（brand/）
 
 | 文件 | 用途 |
 |------|------|
-| rand/logo.svg | 应用图标 |
-| rand/logo-wordmark.svg | 字标 |
-| rand/favicon.svg | 站点/窗口图标 |
+| brand/logo.svg | 应用图标 |
+| brand/logo-wordmark.svg | 字标 |
+| brand/favicon.svg | 站点/窗口图标 |
 
 ## 烈度 / 震度图标（intensity/）
+
+图标提供：**平平无奇的4**。
 
 运行时由 jian-ui 嵌入 csis/shindo/mmi/lpgm 及对应 `_inst`（SVG）。
 
@@ -41,4 +43,14 @@
 | stations/nied_point.csv | 原版 NIED kmoni/lmoni 像素坐标 |
 | stations/pixels.csv | 原版 MSIL S-Net / 相模湾像素坐标 |
 
-`pixels.csv` 字段：`x,y,type,code,lon,lat`；切片源为海上保安厅 MSIL `smoni`。
+`pixels.csv` 字段：`x,y,type,code,lon,lat`；切片源为·上保安厅 MSIL `smoni`。
+
+## 霞鹜文·（lxgw-wenkai-v1.522/）
+
+| 文件 | 用途 |
+|------|------|
+| LXGWWenKai-Regular.ttf | 界面主字体（`include_bytes!` 编译嵌入） |
+| LXGWWenKaiMono-*.ttf / Light·Medium | 随仓备用（未嵌入，减小二进制与编译时间） |
+| OFL.txt | SIL Open Font License 1.1 |
+
+来源：[lxgw/LxgwWenKai](https://github.com/lxgw/LxgwWenKai) v1.522。**SIL OFL 1.1**，可免费开源商用；再分发须保留许可证与著作权声明。运行时不依赖外置字体文件。

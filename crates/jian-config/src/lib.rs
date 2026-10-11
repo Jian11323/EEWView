@@ -155,13 +155,13 @@ pub struct SourcesConfig {
 }
 
 
-/// PancakesAPI：地震 / 海洋 / 气象 / 火山。
+/// PancakesAPI：默认只接 GlobalQuake（gq）；其余子源上游已关，开关仅兼容保留。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PancakesSourceConfig {
     #[serde(default)]
     pub enabled: bool,
-    /// 使用 `/api/v1/alert/ws/all` 聚合通道
-    #[serde(default = "default_true")]
+    /// `true` → `/api/v1/alert/ws/all`；`false`（默认）→ 专用 `/api/v1/alert/ws/gq`
+    #[serde(default)]
     pub use_all: bool,
     #[serde(default = "default_pancakes_base")]
     pub base_url: String,
@@ -174,45 +174,46 @@ pub struct PancakesSourceConfig {
     pub gq_min_magnitude: f64,
     #[serde(default = "default_true")]
     pub gq: bool,
-    #[serde(default = "default_true")]
+    /// 以下子源默认关（维护者：上游已停）；保留开关便于兼容
+    #[serde(default)]
     pub usgs: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub jma_eew: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub jma_eqlist: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub nmefc: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub nmefc_wave: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub nmefc_surge: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub jma_tsunami: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub cma: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub jma_volcano: bool,
 }
 
 impl Default for PancakesSourceConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
-            use_all: true,
+            enabled: true,
+            use_all: false,
             base_url: default_pancakes_base(),
             ws_url: default_pancakes_ws(),
             client_id: default_pancakes_client(),
             gq_min_magnitude: default_gq_min_mag(),
             gq: true,
-            usgs: true,
-            jma_eew: true,
-            jma_eqlist: true,
-            nmefc: true,
-            nmefc_wave: true,
-            nmefc_surge: true,
-            jma_tsunami: true,
-            cma: true,
-            jma_volcano: true,
+            usgs: false,
+            jma_eew: false,
+            jma_eqlist: false,
+            nmefc: false,
+            nmefc_wave: false,
+            nmefc_surge: false,
+            jma_tsunami: false,
+            cma: false,
+            jma_volcano: false,
         }
     }
 }

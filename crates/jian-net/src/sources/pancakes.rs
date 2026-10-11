@@ -1,13 +1,19 @@
-//! PancakesAPI（api.aloys23.link）：全源聚合 WebSocket + HTTP 冷启动。
+//! PancakesAPI（api.aloys23.link）：默认只连 GlobalQuake（gq）专用通道。
+//! 维护者说明：其余子源已在上游关闭；可选开关仅作兼容保留。
 
 use jian_config::PancakesSourceConfig;
 use jian_core::HealthStatus;
+use std::time::Duration;
 use tokio::task::JoinHandle;
+use tokio::time::sleep;
 use tracing::{info, warn};
 
 use crate::adapter::ingest_pancakes_event;
 use crate::bus::{emit_health, NetTx};
 use crate::sources::ws::{run_ws_loop, WsLoopOpts};
+
+/// 速报类 HTTP 列表轮询间隔（秒）。
+const RECORD_POLL_SECS: u64 = 45;
 
 pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
     if !cfg.enabled {
@@ -23,44 +29,70 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
         cfg.client_id.trim().to_string()
     };
 
-    // HTTP 冷启动：地震列表
-    let cold = cfg.clone();
-    let tx_http = tx.clone();
-    let base_http = base.clone();
-    tasks.push(tokio::spawn(async move {
-        cold_start(tx_http, base_http, cold).await;
-    }));
+    // HTTP：冷启动 / 可选速报轮询（默认仅 gq）
+    if needs_http(&cfg) {
+        let cold = cfg.clone();
+        let tx_http = tx.clone();
+        let base_http = base.clone();
+        tasks.push(tokio::spawn(async move {
+            poll_and_cold(tx_http, base_http, cold).await;
+        }));
+    }
 
     let ws_base = cfg.ws_url.trim_end_matches('/').to_string();
-    let url = if cfg.use_all {
-        format!("{ws_base}/api/v1/alert/ws/all?clientId={client_id}")
+    // 维护者：单独连 GQ；`use_all` 仅兼容旧聚合通道
+    if cfg.gq || cfg.use_all {
+        let url = if cfg.use_all {
+            format!("{ws_base}/api/v1/alert/ws/all?clientId={client_id}")
+        } else {
+            format!("{ws_base}/api/v1/alert/ws/gq?clientId={client_id}")
+        };
+        info!(%url, use_all = cfg.use_all, "pancakes: spawn ws");
+        let filter = cfg.clone();
+        let tx_ws = tx.clone();
+        tasks.push(tokio::spawn(async move {
+            run_ws_loop(
+                tx_ws,
+                WsLoopOpts {
+                    source: "pancakes",
+                    url,
+                    on_open_texts: Vec::new(),
+                    periodic_texts: Vec::new(),
+                    periodic_secs: 0,
+                    backoff_max_secs: 60,
+                },
+                move |tx, text| ingest_pancakes_event(tx, text, &filter),
+            )
+            .await;
+        }));
     } else {
-        // 分源时仍优先 all，由 ingest 按开关过滤；避免占满多路连接
-        format!("{ws_base}/api/v1/alert/ws/all?clientId={client_id}")
-    };
-    info!(%url, "pancakes: spawn ws");
-    let filter = cfg.clone();
-    let tx_ws = tx.clone();
-    tasks.push(tokio::spawn(async move {
-        run_ws_loop(
-            tx_ws,
-            WsLoopOpts {
-                source: "pancakes",
-                url,
-                on_open_texts: Vec::new(),
-                backoff_max_secs: 60,
-            },
-            move |tx, text| ingest_pancakes_event(tx, text, &filter),
-        )
-        .await;
-    }));
+        warn!("pancakes: enabled but gq off and use_all off → no websocket");
+    }
+
     tasks
 }
 
-async fn cold_start(tx: NetTx, base: String, cfg: PancakesSourceConfig) {
+fn needs_http(cfg: &PancakesSourceConfig) -> bool {
+    cfg.gq
+        || cfg.usgs
+        || cfg.jma_eew
+        || cfg.jma_eqlist
+        || cfg.nmefc
+        || cfg.nmefc_wave
+        || cfg.nmefc_surge
+        || cfg.jma_tsunami
+        || cfg.cma
+        || cfg.jma_volcano
+}
+
+async fn poll_and_cold(tx: NetTx, base: String, cfg: PancakesSourceConfig) {
     let client = match reqwest::Client::builder()
-        .user_agent(concat!("EEWView/", env!("CARGO_PKG_VERSION"), " (+https://github.com/Jian11323/EEWView)"))
-        .timeout(std::time::Duration::from_secs(20))
+        .user_agent(concat!(
+            "EEWView/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/Jian11323/EEWView)"
+        ))
+        .timeout(Duration::from_secs(20))
         .build()
     {
         Ok(c) => c,
@@ -70,11 +102,10 @@ async fn cold_start(tx: NetTx, base: String, cfg: PancakesSourceConfig) {
         }
     };
 
-    let paths: &[(&str, bool)] = &[
+    // 非速报：冷启动一次（默认仅 gq）
+    let once: &[(&str, bool)] = &[
         ("/api/v1/alert/quake/gq", cfg.gq),
-        ("/api/v1/alert/quake/usgs", cfg.usgs),
         ("/api/v1/alert/quake/jma_eew", cfg.jma_eew),
-        ("/api/v1/alert/quake/jma_eqlist", cfg.jma_eqlist),
         ("/api/v1/alert/ocean/nmefc", cfg.nmefc),
         ("/api/v1/alert/ocean/nmefc-wave", cfg.nmefc_wave),
         ("/api/v1/alert/ocean/nmefc-surge", cfg.nmefc_surge),
@@ -82,24 +113,49 @@ async fn cold_start(tx: NetTx, base: String, cfg: PancakesSourceConfig) {
         ("/api/v1/alert/weather/cma", cfg.cma),
         ("/api/v1/alert/volcano/jma", cfg.jma_volcano),
     ];
+    for (path, on) in once {
+        if *on {
+            fetch_path(&client, &tx, &base, path, &cfg).await;
+        }
+    }
 
-    for (path, on) in paths {
-        if !*on {
-            continue;
+    // 速报：仅当对应开关开启时周期轮询（默认全关）
+    let record_paths: &[(&str, bool)] = &[
+        ("/api/v1/alert/quake/usgs", cfg.usgs),
+        ("/api/v1/alert/quake/jma_eqlist", cfg.jma_eqlist),
+    ];
+    if !record_paths.iter().any(|(_, on)| *on) {
+        return;
+    }
+    info!(poll_secs = RECORD_POLL_SECS, "pancakes: spawn record list poll");
+    loop {
+        for (path, on) in record_paths {
+            if *on {
+                fetch_path(&client, &tx, &base, path, &cfg).await;
+            }
         }
-        let url = format!("{base}{path}");
-        match client.get(&url).send().await {
-            Ok(resp) if resp.status().is_success() => match resp.text().await {
-                Ok(body) => {
-                    info!(%path, bytes = body.len(), "pancakes: cold start");
-                    let fallback = source_from_path(path);
-                    ingest_http_list(&tx, &body, &cfg, fallback);
-                }
-                Err(e) => warn!(%path, "pancakes body: {e}"),
-            },
-            Ok(resp) => warn!(%path, status = %resp.status(), "pancakes http"),
-            Err(e) => warn!(%path, "pancakes http: {e}"),
-        }
+        sleep(Duration::from_secs(RECORD_POLL_SECS)).await;
+    }
+}
+
+async fn fetch_path(
+    client: &reqwest::Client,
+    tx: &NetTx,
+    base: &str,
+    path: &str,
+    cfg: &PancakesSourceConfig,
+) {
+    let url = format!("{base}{path}");
+    match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => match resp.text().await {
+            Ok(body) => {
+                let fallback = source_from_path(path);
+                ingest_http_list(tx, &body, cfg, fallback);
+            }
+            Err(e) => warn!(%path, "pancakes body: {e}"),
+        },
+        Ok(resp) => warn!(%path, status = %resp.status(), "pancakes http"),
+        Err(e) => warn!(%path, "pancakes http: {e}"),
     }
 }
 
@@ -134,7 +190,6 @@ fn ingest_http_list(
     };
     let mut n = 0u32;
     for item in arr.iter().take(40) {
-        // 摘要项常无 source 字段：用 URL 路径回填，否则整批被跳过
         let source = item
             .get("source")
             .and_then(|x| x.as_str())
@@ -149,7 +204,6 @@ fn ingest_http_list(
             .and_then(|x| x.as_str())
             .unwrap_or(default_type_for_source(&source))
             .to_string();
-        // HTTP 列表项本身即 payload；若已包一层 payload 则拆开
         let payload = item.get("payload").cloned().unwrap_or_else(|| item.clone());
         let envelope = serde_json::json!({
             "source": source,
@@ -164,7 +218,7 @@ fn ingest_http_list(
         }
     }
     if n > 0 {
-        info!(source = fallback_source, n, "pancakes: cold start ingested");
+        info!(source = fallback_source, n, "pancakes: http list ingested");
     }
 }
 
