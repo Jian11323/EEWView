@@ -1672,7 +1672,7 @@ fn draw_about(ui: &mut Ui) {
         );
         ui.label(
             RichText::new(
-                "图标提供：平平无奇的4\n音效来源：SREV\n授权参考：悦琳雅韵☆Rhythm(Stille)\n图标提供：lxFLY2000\n以及各位给与帮助的EEW爱好者",
+                "图标提供：平平无奇的4\n音效来源：SREV\n授权参考：悦琳雅韵☆Rhythm(Stille)\n图标提供：lxfly2000\n以及各位给与帮助的EEW爱好者",
             )
             .size(12.0)
             .color(chrome().muted),
