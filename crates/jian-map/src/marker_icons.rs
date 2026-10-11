@@ -1,6 +1,7 @@
-//! 地图标记 SVG（eewcn 授权）：预警 cross / 速报 red / 本机 green。
+//! 地图标记 SVG：预警 cross / 速报 red / 本机蓝房子；测站震度 shindo_inst。
 
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
+use std::collections::HashMap;
 
 const CROSS_SVG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -14,6 +15,30 @@ const GREEN_SVG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../assets/markers/green.svg"
 ));
+
+macro_rules! shindo_inst {
+    ($name:expr) => {
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/intensity/shindo_inst/",
+            $name
+        ))
+    };
+}
+
+const SHINDO_INST_SVG: [(&[u8], u8); 10] = [
+    (shindo_inst!("Shindo 0.svg"), 0),
+    (shindo_inst!("Shindo 1.svg"), 1),
+    (shindo_inst!("Shindo 2.svg"), 2),
+    (shindo_inst!("Shindo 3.svg"), 3),
+    (shindo_inst!("Shindo 4.svg"), 4),
+    (shindo_inst!("Shindo 5-.svg"), 5),
+    (shindo_inst!("Shindo 5+.svg"), 6),
+    (shindo_inst!("Shindo 6-.svg"), 7),
+    (shindo_inst!("Shindo 6+.svg"), 8),
+    (shindo_inst!("Shindo 7.svg"), 9),
+];
+
 /// 栅格化尺寸（屏幕绘制时再缩放）
 const RASTER_PX: u32 = 128;
 
@@ -22,6 +47,8 @@ pub struct MarkerIcons {
     cross: Option<TextureHandle>,
     red: Option<TextureHandle>,
     green: Option<TextureHandle>,
+    /// JMA 仪器震度图标（level 0–9）
+    shindo_inst: HashMap<u8, TextureHandle>,
     tried: bool,
 }
 
@@ -35,8 +62,18 @@ impl MarkerIcons {
         self.cross = load_svg_texture(ctx, "eewview/marker_cross", CROSS_SVG);
         self.red = load_svg_texture(ctx, "eewview/marker_red", RED_SVG);
         self.green = load_svg_texture(ctx, "eewview/marker_green", GREEN_SVG);
+        for (bytes, level) in SHINDO_INST_SVG {
+            if let Some(tex) =
+                load_svg_texture(ctx, &format!("eewview/map_shindo_inst/{level}"), bytes)
+            {
+                self.shindo_inst.insert(level, tex);
+            }
+        }
         if self.cross.is_none() || self.red.is_none() || self.green.is_none() {
             tracing::warn!("部分地图标记 SVG 未能栅格化，将使用几何回退");
+        }
+        if self.shindo_inst.len() < 10 {
+            tracing::warn!("测站 shindo_inst 未全部加载，有感点将回退色点");
         }
     }
 
@@ -50,6 +87,11 @@ impl MarkerIcons {
 
     pub fn green(&self) -> Option<&TextureHandle> {
         self.green.as_ref()
+    }
+
+    /// 测站实际震度（>=1）用仪器震度图标。
+    pub fn shindo_inst(&self, level: u8) -> Option<&TextureHandle> {
+        self.shindo_inst.get(&level.min(9))
     }
 }
 

@@ -34,7 +34,7 @@ pub fn spawn(tx: NetTx, cfg: WolfxSourceConfig) -> Vec<JoinHandle<()>> {
                     WsLoopOpts {
                         source: "wolfx",
                         url,
-                        on_open_text: Some("ping".into()),
+                        on_open_texts: vec!["ping".into()],
                         backoff_max_secs: 60,
                     },
                     |tx, text| ingest_wolfx_jma_eew(tx, text),
@@ -48,7 +48,7 @@ pub fn spawn(tx: NetTx, cfg: WolfxSourceConfig) -> Vec<JoinHandle<()>> {
 
 async fn cold_start_eqlist(tx: NetTx, url: String) {
     let client = match reqwest::Client::builder()
-        .user_agent("EEWView/0.0.1 (+https://github.com/Jian11323/EEWView)")
+        .user_agent(concat!("EEWView/", env!("CARGO_PKG_VERSION"), " (+https://github.com/Jian11323/EEWView)"))
         .timeout(std::time::Duration::from_secs(20))
         .build()
     {

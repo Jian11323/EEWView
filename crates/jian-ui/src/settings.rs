@@ -1580,7 +1580,10 @@ fn snet_station_src_label(s: &str) -> String {
 fn draw_about(ui: &mut Ui) {
     section(ui, "EEWView \u{00b7} 地震视监器", "\u{24d8}", |ui| {
         ui.label(
-            RichText::new(format!("版本 {}", env!("CARGO_PKG_VERSION")))
+            RichText::new(format!(
+                "版本 Beta {}",
+                env!("CARGO_PKG_VERSION")
+            ))
                 .size(14.0)
                 .color(chrome().text),
         );

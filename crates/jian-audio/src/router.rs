@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::catalog::SoundCatalog;
-use crate::cue::AudioCue;
+use crate::cue::{AudioCue, TsunamiCueKind};
 
 pub struct Router {
     sound_root: PathBuf,
@@ -42,6 +42,19 @@ impl Router {
             ),
             AudioCue::Countdown(sec) => (self.countdown_pack.clone(), format!("{sec}s")),
             AudioCue::CountdownLoop(_) => (self.countdown_pack.clone(), "countdown_loop".into()),
+            AudioCue::Prompt => (self.event_pack_name(catalog).to_string(), "prompt".into()),
+            AudioCue::Tsunami { grade, kind } => {
+                let g = (*grade).clamp(1, 3);
+                let k = match kind {
+                    TsunamiCueKind::Issue => "issue",
+                    TsunamiCueKind::Update => "update",
+                    TsunamiCueKind::Cancel => "cancel",
+                };
+                (
+                    self.event_pack_name(catalog).to_string(),
+                    format!("tsunami{g}_{k}"),
+                )
+            }
             AudioCue::UiConnectOk => ("ui".into(), "connect_ok".into()),
             AudioCue::UiConnectFail => ("ui".into(), "connect_fail".into()),
             AudioCue::UiNotify => ("ui".into(), "notify".into()),

@@ -47,7 +47,7 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
             WsLoopOpts {
                 source: "pancakes",
                 url,
-                on_open_text: None,
+                on_open_texts: Vec::new(),
                 backoff_max_secs: 60,
             },
             move |tx, text| ingest_pancakes_event(tx, text, &filter),
@@ -59,7 +59,7 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
 
 async fn cold_start(tx: NetTx, base: String, cfg: PancakesSourceConfig) {
     let client = match reqwest::Client::builder()
-        .user_agent("EEWView/0.0.1 (+https://github.com/Jian11323/EEWView)")
+        .user_agent(concat!("EEWView/", env!("CARGO_PKG_VERSION"), " (+https://github.com/Jian11323/EEWView)"))
         .timeout(std::time::Duration::from_secs(20))
         .build()
     {
@@ -92,7 +92,8 @@ async fn cold_start(tx: NetTx, base: String, cfg: PancakesSourceConfig) {
             Ok(resp) if resp.status().is_success() => match resp.text().await {
                 Ok(body) => {
                     info!(%path, bytes = body.len(), "pancakes: cold start");
-                    ingest_http_list(&tx, &body, &cfg);
+                    let fallback = source_from_path(path);
+                    ingest_http_list(&tx, &body, &cfg, fallback);
                 }
                 Err(e) => warn!(%path, "pancakes body: {e}"),
             },
@@ -102,19 +103,43 @@ async fn cold_start(tx: NetTx, base: String, cfg: PancakesSourceConfig) {
     }
 }
 
-fn ingest_http_list(tx: &NetTx, body: &str, cfg: &PancakesSourceConfig) {
+fn source_from_path(path: &str) -> &'static str {
+    match path.rsplit('/').next().unwrap_or("") {
+        "gq" => "gq",
+        "usgs" => "usgs",
+        "jma_eew" => "jma_eew",
+        "jma_eqlist" => "jma_eqlist",
+        "nmefc" => "nmefc",
+        "nmefc-wave" => "nmefc-wave",
+        "nmefc-surge" => "nmefc-surge",
+        "jma_tsunami" => "jma_tsunami",
+        "cma" => "cma",
+        "jma" => "jma_volcano",
+        other if other.contains("volcano") => "jma_volcano",
+        _ => "",
+    }
+}
+
+fn ingest_http_list(
+    tx: &NetTx,
+    body: &str,
+    cfg: &PancakesSourceConfig,
+    fallback_source: &str,
+) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
         return;
     };
     let Some(arr) = v.as_array() else {
         return;
     };
+    let mut n = 0u32;
     for item in arr.iter().take(40) {
-        // 摘要项补成 RealtimeEvent 外壳再走统一解析
+        // 摘要项常无 source 字段：用 URL 路径回填，否则整批被跳过
         let source = item
             .get("source")
             .and_then(|x| x.as_str())
-            .unwrap_or("")
+            .filter(|s| !s.is_empty())
+            .unwrap_or(fallback_source)
             .to_string();
         if source.is_empty() {
             continue;
@@ -124,16 +149,22 @@ fn ingest_http_list(tx: &NetTx, body: &str, cfg: &PancakesSourceConfig) {
             .and_then(|x| x.as_str())
             .unwrap_or(default_type_for_source(&source))
             .to_string();
+        // HTTP 列表项本身即 payload；若已包一层 payload 则拆开
+        let payload = item.get("payload").cloned().unwrap_or_else(|| item.clone());
         let envelope = serde_json::json!({
             "source": source,
             "type": typ,
             "action": "update",
             "timestampMs": 0,
-            "payload": item,
+            "payload": payload,
         });
         if let Ok(text) = serde_json::to_string(&envelope) {
             ingest_pancakes_event(tx, &text, cfg);
+            n += 1;
         }
+    }
+    if n > 0 {
+        info!(source = fallback_source, n, "pancakes: cold start ingested");
     }
 }
 

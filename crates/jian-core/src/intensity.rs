@@ -87,6 +87,19 @@ pub fn jma_from_instrumental(v: f64) -> (u8, &'static str) {
 }
 
 /// 测站列表/地图用展示文案：低于 0.5 显示取整計測值（含 -3～0），否则用震度阶级。
+/// 計測震度半档展示（对齐要石 yahooStationShindoStr：-3…7 步长 0.5）。
+pub fn instrumental_half_step_text(v: f64) -> String {
+    if !v.is_finite() || v < -3.0 {
+        return "-".into();
+    }
+    let stepped = (v.clamp(-3.0, 7.0) * 2.0).round() / 2.0;
+    if stepped.fract().abs() < 1e-9 {
+        format!("{}", stepped as i32)
+    } else {
+        format!("{:.1}", stepped)
+    }
+}
+
 pub fn instrumental_display_text(v: f64) -> String {
     if !v.is_finite() || v < -3.0 {
         "—".into()
@@ -97,22 +110,37 @@ pub fn instrumental_display_text(v: f64) -> String {
     }
 }
 
-/// 中国烈度罗马数字或阿拉伯数字 → 1–12
+/// 中国烈度罗马数字或阿拉伯数字 → 1–12（含 MMI 文案，大小写不敏感）
 pub fn cn_intensity_level(text: &str) -> u8 {
     let t = text.trim();
     match t {
-        "1" | "Ⅰ" | "I" => 1,
-        "2" | "Ⅱ" | "II" => 2,
-        "3" | "Ⅲ" | "III" => 3,
-        "4" | "Ⅳ" | "IV" => 4,
-        "5" | "Ⅴ" | "V" => 5,
-        "6" | "Ⅵ" | "VI" => 6,
-        "7" | "Ⅶ" | "VII" => 7,
-        "8" | "Ⅷ" | "VIII" => 8,
-        "9" | "Ⅸ" | "IX" => 9,
-        "10" | "Ⅹ" | "X" => 10,
-        "11" | "Ⅺ" | "XI" => 11,
-        "12" | "Ⅻ" | "XII" => 12,
+        "Ⅰ" => return 1,
+        "Ⅱ" => return 2,
+        "Ⅲ" => return 3,
+        "Ⅳ" => return 4,
+        "Ⅴ" => return 5,
+        "Ⅵ" => return 6,
+        "Ⅶ" => return 7,
+        "Ⅷ" => return 8,
+        "Ⅸ" => return 9,
+        "Ⅹ" => return 10,
+        "Ⅺ" => return 11,
+        "Ⅻ" => return 12,
+        _ => {}
+    }
+    match t.to_ascii_uppercase().as_str() {
+        "1" | "I" => 1,
+        "2" | "II" => 2,
+        "3" | "III" => 3,
+        "4" | "IV" => 4,
+        "5" | "V" => 5,
+        "6" | "VI" => 6,
+        "7" | "VII" => 7,
+        "8" | "VIII" => 8,
+        "9" | "IX" => 9,
+        "10" | "X" => 10,
+        "11" | "XI" => 11,
+        "12" | "XII" => 12,
         _ => {
             if let Ok(f) = t.parse::<f64>() {
                 f.round().clamp(1.0, 12.0) as u8

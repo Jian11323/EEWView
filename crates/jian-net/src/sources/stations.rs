@@ -43,7 +43,7 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
                         WsLoopOpts {
                             source: "kmoni",
                             url,
-                            on_open_text: None,
+                            on_open_texts: Vec::new(),
                             backoff_max_secs: 60,
                         },
                         move |tx, text| ingest_kmoni_frame(&mut state, tx, text),
@@ -80,7 +80,7 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
                 WsLoopOpts {
                     source: "kma-station",
                     url,
-                    on_open_text: None,
+                    on_open_texts: Vec::new(),
                     backoff_max_secs: 60,
                 },
                 move |tx, text| ingest_kma_station_frame(&mut state, tx, text),
@@ -101,7 +101,7 @@ fn spawn_snet_jian(tx: NetTx, url: String) -> JoinHandle<()> {
             WsLoopOpts {
                 source: "s-net",
                 url,
-                on_open_text: None,
+                on_open_texts: Vec::new(),
                 backoff_max_secs: 60,
             },
             move |tx, text| ingest_snet_frame(&mut state, tx, text),

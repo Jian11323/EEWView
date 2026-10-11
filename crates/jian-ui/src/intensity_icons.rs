@@ -1,6 +1,7 @@
-//! 烈度/震度图标：`assets/intensity/csis` 与 `assets/intensity/shindo`（SVG）。
+//! 烈度/震度图标：`assets/intensity/` 下各标度 SVG（观测 / 仪器）。
 //!
 //! JMA：level 0–9 → 0,1,2,3,4,5弱,5强,6弱,6强,7。
+//! CN / MMI：1–12；LPGM：1–4。
 
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
 use jian_core::IntensityKind;
@@ -31,6 +32,19 @@ const SHINDO_SVG: [(&[u8], u8); 10] = [
     (svg!("shindo/Shindo 7.svg"), 9),
 ];
 
+const SHINDO_INST_SVG: [(&[u8], u8); 10] = [
+    (svg!("shindo_inst/Shindo 0.svg"), 0),
+    (svg!("shindo_inst/Shindo 1.svg"), 1),
+    (svg!("shindo_inst/Shindo 2.svg"), 2),
+    (svg!("shindo_inst/Shindo 3.svg"), 3),
+    (svg!("shindo_inst/Shindo 4.svg"), 4),
+    (svg!("shindo_inst/Shindo 5-.svg"), 5),
+    (svg!("shindo_inst/Shindo 5+.svg"), 6),
+    (svg!("shindo_inst/Shindo 6-.svg"), 7),
+    (svg!("shindo_inst/Shindo 6+.svg"), 8),
+    (svg!("shindo_inst/Shindo 7.svg"), 9),
+];
+
 const CSIS_SVG: [(&[u8], u8); 12] = [
     (svg!("csis/CSIS 1.svg"), 1),
     (svg!("csis/CSIS 2.svg"), 2),
@@ -46,10 +60,75 @@ const CSIS_SVG: [(&[u8], u8); 12] = [
     (svg!("csis/CSIS 12.svg"), 12),
 ];
 
+const CSIS_INST_SVG: [(&[u8], u8); 12] = [
+    (svg!("csis_inst/CSIS 1.svg"), 1),
+    (svg!("csis_inst/CSIS 2.svg"), 2),
+    (svg!("csis_inst/CSIS 3.svg"), 3),
+    (svg!("csis_inst/CSIS 4.svg"), 4),
+    (svg!("csis_inst/CSIS 5.svg"), 5),
+    (svg!("csis_inst/CSIS 6.svg"), 6),
+    (svg!("csis_inst/CSIS 7.svg"), 7),
+    (svg!("csis_inst/CSIS 8.svg"), 8),
+    (svg!("csis_inst/CSIS 9.svg"), 9),
+    (svg!("csis_inst/CSIS 10.svg"), 10),
+    (svg!("csis_inst/CSIS 11.svg"), 11),
+    (svg!("csis_inst/CSIS 12.svg"), 12),
+];
+
+const MMI_SVG: [(&[u8], u8); 12] = [
+    (svg!("mmi/MMI 1.svg"), 1),
+    (svg!("mmi/MMI 2.svg"), 2),
+    (svg!("mmi/MMI 3.svg"), 3),
+    (svg!("mmi/MMI 4.svg"), 4),
+    (svg!("mmi/MMI 5.svg"), 5),
+    (svg!("mmi/MMI 6.svg"), 6),
+    (svg!("mmi/MMI 7.svg"), 7),
+    (svg!("mmi/MMI 8.svg"), 8),
+    (svg!("mmi/MMI 9.svg"), 9),
+    (svg!("mmi/MMI 10.svg"), 10),
+    (svg!("mmi/MMI 11.svg"), 11),
+    (svg!("mmi/MMI 12.svg"), 12),
+];
+
+const MMI_INST_SVG: [(&[u8], u8); 12] = [
+    (svg!("mmi_inst/MMI 1.svg"), 1),
+    (svg!("mmi_inst/MMI 2.svg"), 2),
+    (svg!("mmi_inst/MMI 3.svg"), 3),
+    (svg!("mmi_inst/MMI 4.svg"), 4),
+    (svg!("mmi_inst/MMI 5.svg"), 5),
+    (svg!("mmi_inst/MMI 6.svg"), 6),
+    (svg!("mmi_inst/MMI 7.svg"), 7),
+    (svg!("mmi_inst/MMI 8.svg"), 8),
+    (svg!("mmi_inst/MMI 9.svg"), 9),
+    (svg!("mmi_inst/MMI 10.svg"), 10),
+    (svg!("mmi_inst/MMI 11.svg"), 11),
+    (svg!("mmi_inst/MMI 12.svg"), 12),
+];
+
+const LPGM_SVG: [(&[u8], u8); 4] = [
+    (svg!("lpgm/LPGM 1.svg"), 1),
+    (svg!("lpgm/LPGM 2.svg"), 2),
+    (svg!("lpgm/LPGM 3.svg"), 3),
+    (svg!("lpgm/LPGM 4.svg"), 4),
+];
+
+const LPGM_INST_SVG: [(&[u8], u8); 4] = [
+    (svg!("lpgm_inst/LPGM 1.svg"), 1),
+    (svg!("lpgm_inst/LPGM 2.svg"), 2),
+    (svg!("lpgm_inst/LPGM 3.svg"), 3),
+    (svg!("lpgm_inst/LPGM 4.svg"), 4),
+];
+
 #[derive(Default)]
 pub struct IntensityIcons {
     jma: HashMap<u8, TextureHandle>,
+    jma_inst: HashMap<u8, TextureHandle>,
     csis: HashMap<u8, TextureHandle>,
+    csis_inst: HashMap<u8, TextureHandle>,
+    mmi: HashMap<u8, TextureHandle>,
+    mmi_inst: HashMap<u8, TextureHandle>,
+    lpgm: HashMap<u8, TextureHandle>,
+    lpgm_inst: HashMap<u8, TextureHandle>,
     tried: bool,
 }
 
@@ -59,28 +138,70 @@ impl IntensityIcons {
             return;
         }
         self.tried = true;
-        for (bytes, level) in SHINDO_SVG {
-            if let Some(tex) = load_svg(ctx, &format!("eewview/shindo/{level}"), bytes) {
-                self.jma.insert(level, tex);
-            }
-        }
-        for (bytes, level) in CSIS_SVG {
-            if let Some(tex) = load_svg(ctx, &format!("eewview/csis/{level}"), bytes) {
-                self.csis.insert(level, tex);
-            }
-        }
+        load_set(ctx, "eewview/shindo", &SHINDO_SVG, &mut self.jma);
+        load_set(ctx, "eewview/shindo_inst", &SHINDO_INST_SVG, &mut self.jma_inst);
+        load_set(ctx, "eewview/csis", &CSIS_SVG, &mut self.csis);
+        load_set(ctx, "eewview/csis_inst", &CSIS_INST_SVG, &mut self.csis_inst);
+        load_set(ctx, "eewview/mmi", &MMI_SVG, &mut self.mmi);
+        load_set(ctx, "eewview/mmi_inst", &MMI_INST_SVG, &mut self.mmi_inst);
+        load_set(ctx, "eewview/lpgm", &LPGM_SVG, &mut self.lpgm);
+        load_set(ctx, "eewview/lpgm_inst", &LPGM_INST_SVG, &mut self.lpgm_inst);
         if self.jma.len() < 10 || self.csis.len() < 12 {
             tracing::warn!("部分烈度/震度 SVG 未能加载，将回退为色块文字");
         }
     }
 
-    pub fn get(&self, kind: IntensityKind, level: u8) -> Option<&TextureHandle> {
+    pub fn get_ex(&self, kind: IntensityKind, level: u8, instrumental: bool) -> Option<&TextureHandle> {
         match kind {
-            IntensityKind::JmaShindo => self.jma.get(&level.min(9)),
+            IntensityKind::JmaShindo => {
+                let lv = level.min(9);
+                if instrumental {
+                    self.jma_inst.get(&lv).or_else(|| self.jma.get(&lv))
+                } else {
+                    self.jma.get(&lv)
+                }
+            }
             IntensityKind::CnIntensity => {
                 let lv = level.clamp(1, 12);
-                self.csis.get(&lv)
+                if instrumental {
+                    self.csis_inst.get(&lv).or_else(|| self.csis.get(&lv))
+                } else {
+                    self.csis.get(&lv)
+                }
             }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn get_mmi(&self, level: u8, instrumental: bool) -> Option<&TextureHandle> {
+        let lv = level.clamp(1, 12);
+        if instrumental {
+            self.mmi_inst.get(&lv).or_else(|| self.mmi.get(&lv))
+        } else {
+            self.mmi.get(&lv)
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn get_lpgm(&self, level: u8, instrumental: bool) -> Option<&TextureHandle> {
+        let lv = level.clamp(1, 4);
+        if instrumental {
+            self.lpgm_inst.get(&lv).or_else(|| self.lpgm.get(&lv))
+        } else {
+            self.lpgm.get(&lv)
+        }
+    }
+}
+
+fn load_set(
+    ctx: &Context,
+    prefix: &str,
+    items: &[(&[u8], u8)],
+    map: &mut HashMap<u8, TextureHandle>,
+) {
+    for (bytes, level) in items {
+        if let Some(tex) = load_svg(ctx, &format!("{prefix}/{level}"), bytes) {
+            map.insert(*level, tex);
         }
     }
 }

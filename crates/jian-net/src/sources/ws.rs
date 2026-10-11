@@ -12,8 +12,8 @@ use crate::bus::{emit_health, NetTx};
 pub struct WsLoopOpts {
     pub source: &'static str,
     pub url: String,
-    /// 连接成功后立刻发送的文本（鉴权 / query）
-    pub on_open_text: Option<String>,
+    /// 连接成功后立刻发送的文本（鉴权 / query / list）
+    pub on_open_texts: Vec<String>,
     pub backoff_max_secs: u64,
 }
 
@@ -32,7 +32,7 @@ where
                 emit_health(&tx, opts.source, HealthStatus::Normal);
                 backoff = 1;
                 let (mut write, mut read) = ws.split();
-                if let Some(text) = &opts.on_open_text {
+                for text in &opts.on_open_texts {
                     if let Err(e) = write.send(Message::Text(text.clone().into())).await {
                         warn!(source = opts.source, "on_open send failed: {e}");
                     }

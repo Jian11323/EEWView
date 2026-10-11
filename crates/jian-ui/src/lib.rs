@@ -14,7 +14,7 @@ use jian_core::{
     prefer_intensity_scale, AppSnapshot, IntensityKind, ListSelection, OverlayMode,
     SidebarTab,
 };
-use jian_map::{fit_events, zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, MapViewport, VectorStyle, ProjectionMode};
+use jian_map::{zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, MapViewport, VectorStyle, ProjectionMode};
 use jian_travel::{max_s_wave_spread_km, TravelEngine, Wave};
 use std::path::Path;
 use theme::{ThemePalette, UiTheme};
@@ -215,17 +215,18 @@ impl MainShell {
                             } else {
                                 elapsed * 5.0
                             };
+                            // S 波始终入画：只缩小、目标=套住当前 S（fill 0.82）
                             let r = s_km
                                 .min(max_s_wave_spread_km(ev.magnitude))
-                                .max(80.0);
+                                .max(35.0);
                             let z = zoom_to_fit_radius_km(
                                 ev.latitude,
                                 r,
                                 map_rect.width().min(map_rect.height()),
-                                0.55,
+                                0.82,
                             )
-                            .max(5.2);
-                            self.map.apply_linear_zoom_out(z, 0.08);
+                            .clamp(5.2, 10.5);
+                            self.map.apply_linear_zoom_out(z, 0.10);
                             ctx.request_repaint_after(std::time::Duration::from_millis(16));
                         }
                     }
@@ -279,20 +280,19 @@ impl MainShell {
                                                         elapsed * 5.0
                                                     };
                                                     s_km.min(max_s_wave_spread_km(e.magnitude))
-                                                        .min(320.0)
-                                                        .max(55.0)
+                                                        .max(35.0)
                                                 })
                                             } else {
-                                                Some(100.0)
+                                                Some(80.0)
                                             }
-                                            .unwrap_or(100.0);
-                                            let end_z = fit_events(
-                                                &[(lon, lat, r_km)],
-                                                map_rect.width(),
-                                                map_rect.height(),
+                                            .unwrap_or(80.0);
+                                            let end_z = zoom_to_fit_radius_km(
+                                                lat,
+                                                r_km,
+                                                map_rect.width().min(map_rect.height()),
+                                                0.82,
                                             )
-                                            .map(|(_, _, z)| (z + 0.45).clamp(5.5, 10.0))
-                                            .unwrap_or(zoom);
+                                            .clamp(5.2, 10.5);
                                             let dur = if tab == SidebarTab::Eew {
                                                 1.0
                                             } else {
@@ -556,18 +556,20 @@ fn draw_event_header(
         .position(|e| e.agency.0 == ev.agency.0 && e.event_id == ev.event_id)
         .map(|i| (i + 1, live.len()));
 
+    const LEFT_PANEL_X: f32 = 12.0;
+    const LEFT_PANEL_W: f32 = 340.0;
     egui::Area::new(egui::Id::new("event_header"))
-        .fixed_pos(ui.max_rect().left_top() + Vec2::new(12.0, 12.0))
+        .fixed_pos(ui.max_rect().left_top() + Vec2::new(LEFT_PANEL_X, 12.0))
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
             // 图二：大方块烈度 + 地名(源)#报数 / 时刻 / 震级+深度
             Frame::NONE
                 .fill(Color32::from_rgba_unmultiplied(28, 28, 32, 230))
                 .stroke(Stroke::new(1.0_f32, Color32::from_rgb(0x55, 0x55, 0x66)))
-                .inner_margin(Margin::symmetric(8, 8))
-                .corner_radius(4.0)
+                .inner_margin(Margin::symmetric(10, 8))
+                .corner_radius(6.0)
                 .show(ui, |ui| {
-                    ui.set_max_width(315.0);
+                    ui.set_width(LEFT_PANEL_W);
                     ui.horizontal(|ui| {
                         paint_intensity(
                             ui,
@@ -696,17 +698,19 @@ fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
     } else {
         12.0
     };
+    const LEFT_PANEL_X: f32 = 12.0;
+    const LEFT_PANEL_W: f32 = 340.0;
     egui::Area::new(egui::Id::new("tsunami_banner"))
-        .fixed_pos(ui.max_rect().left_top() + Vec2::new(14.0, top_y))
+        .fixed_pos(ui.max_rect().left_top() + Vec2::new(LEFT_PANEL_X, top_y))
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
             Frame::NONE
                 .fill(fill)
                 .stroke(Stroke::new(2.0_f32, border))
                 .corner_radius(6.0)
-                .inner_margin(Margin::symmetric(14, 10))
+                .inner_margin(Margin::symmetric(10, 10))
                 .show(ui, |ui| {
-                    ui.set_max_width(315.0);
+                    ui.set_width(LEFT_PANEL_W);
                     ui.label(
                         RichText::new(format!("{title}生效中"))
                             .color(title_c)

@@ -1,0 +1,166 @@
+# -*- coding: utf-8 -*-
+"""Linux x86_64 便携包：组装目录并打 tar.gz。"""
+from __future__ import annotations
+
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def log(msg: str) -> None:
+    print(msg, flush=True)
+
+
+def workspace_version() -> str:
+    text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    m = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
+    return m.group(1) if m else "0.0.0"
+
+
+def rm_tree(path: Path) -> None:
+    if not path.exists():
+        return
+    for attempt in range(8):
+        try:
+            shutil.rmtree(path)
+            return
+        except OSError as e:
+            log(f"remove retry {attempt + 1}: {e}")
+            time.sleep(0.5)
+    raise SystemExit(f"无法清理 {path}")
+
+
+def copy_tree(src: Path, dst: Path) -> None:
+    log(f"copy {src.name} ...")
+    shutil.copytree(
+        src,
+        dst,
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "*.pyc", ".git", "local.toml", "Thumbs.db", ".DS_Store"
+        ),
+    )
+
+
+def write_usage(out: Path, ver: str) -> None:
+    usage = f"""EEWView 便携测试包（Linux x86_64）
+================================
+
+版本：Beta {ver}
+解压后：chmod +x jian && ./jian
+（勿拆散 assets / geodata / config）
+
+【依赖】Debian/Ubuntu 示例：
+  sudo apt install libasound2 libxcb-render0 libxcb-shape0 libxcb-xfixes0 \\
+    libxkbcommon0 libgtk-3-0
+
+【首次使用】
+1. 设置 → API与数据源，用 lk_ 换票绑定 Jian（可选）
+2. 未配置 Jian 时 Wolfx / P2P / Pancakes 仍可用
+3. 配置写在用户目录，不回写本包
+
+【版本规则】
+- PATCH：修 bug / 微调
+- MINOR：新功能或行为变更
+- MAJOR：不兼容，或结束 Beta 转正
+"""
+    (out / "使用说明.txt").write_bytes(usage.encode("utf-8"))
+    run_sh = out / "run.sh"
+    run_sh.write_text(
+        '#!/bin/sh\ncd "$(dirname "$0")"\nexec ./jian "$@"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    try:
+        run_sh.chmod(0o755)
+    except OSError:
+        pass
+
+
+def find_bin(cli_bin: str | None) -> Path:
+    if cli_bin:
+        p = Path(cli_bin)
+        if not p.is_file():
+            raise SystemExit(f"binary not found: {p}")
+        return p
+    for c in (
+        ROOT / "target" / "x86_64-unknown-linux-gnu" / "release" / "jian",
+        ROOT / "target" / "release" / "jian",
+    ):
+        if c.is_file():
+            return c
+    raise SystemExit(
+        "未找到 Linux 二进制。本机 Linux/WSL: cargo build -p jian-app --release\n"
+        "Windows 交叉: cargo zigbuild -p jian-app --release --target x86_64-unknown-linux-gnu.2.31\n"
+        "然后: python tools/pack_linux.py --skip-build --bin <path>"
+    )
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    skip_build = "--skip-build" in args
+    cli_bin = None
+    if "--bin" in args:
+        cli_bin = args[args.index("--bin") + 1]
+
+    ver = workspace_version()
+    log(f"EEWView Beta {ver} Linux x86_64 portable")
+
+    if not skip_build and cli_bin is None and platform.system() == "Linux":
+        log("cargo build -p jian-app --release")
+        r = subprocess.run(["cargo", "build", "-p", "jian-app", "--release"], cwd=ROOT)
+        if r.returncode != 0:
+            return r.returncode
+
+    bin_src = find_bin(cli_bin)
+    log(f"binary: {bin_src}")
+
+    out = ROOT / "dist" / "EEWView-linux"
+    rm_tree(out)
+    out.mkdir(parents=True)
+
+    dst = out / "jian"
+    shutil.copy2(bin_src, dst)
+    try:
+        dst.chmod(0o755)
+    except OSError:
+        pass
+
+    for name in ("README.md", "LICENSE"):
+        src = ROOT / name
+        if src.is_file():
+            shutil.copy2(src, out / name)
+
+    copy_tree(ROOT / "config", out / "config")
+    local = out / "config" / "local.toml"
+    if local.is_file():
+        local.unlink()
+
+    copy_tree(ROOT / "assets", out / "assets")
+    raw = out / "assets" / "travel" / "raw"
+    if raw.is_dir():
+        shutil.rmtree(raw)
+
+    copy_tree(ROOT / "geodata", out / "geodata")
+    write_usage(out, ver)
+
+    tar_path = ROOT / "dist" / f"EEWView_Beta_{ver}_linux_x86_64.tar.gz"
+    if tar_path.exists():
+        tar_path.unlink()
+    log(f"tar -> {tar_path.name}")
+    with tarfile.open(tar_path, "w:gz") as tf:
+        tf.add(out, arcname="EEWView")
+    mb = tar_path.stat().st_size / (1024 * 1024)
+    log(f"DIR {out}")
+    log(f"TAR {tar_path} ({mb:.1f} MB)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

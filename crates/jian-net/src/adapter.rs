@@ -319,18 +319,14 @@ pub fn ingest_jian_frame(tx: &NetTx, text: &str) {
         return;
     }
 
-    // /all 快照：键形如 "source：cenc"
-    if v.get("type").and_then(|t| t.as_str()) == Some("all")
-        || v.as_object()
-            .map(|o| o.keys().any(|k| k.starts_with("source")))
-            .unwrap_or(false)
-    {
+    // /all 快照：键形如 "source：cenc"（仅 type=all；勿用 source 前缀误伤其它帧）
+    if v.get("type").and_then(|t| t.as_str()) == Some("all") {
         if let Some(obj) = v.as_object() {
             for (k, entry) in obj {
                 if !k.starts_with("source") {
                     continue;
                 }
-                let agency = k.split('：').nth(1).or_else(|| k.split(':').nth(1)).unwrap_or(k);
+                let agency = agency_from_source_key(k);
                 let data = entry.get("Data").cloned().unwrap_or_else(|| entry.clone());
                 dispatch_jian_data(tx, agency, &data);
             }
@@ -340,8 +336,8 @@ pub fn ingest_jian_frame(tx: &NetTx, text: &str) {
 
     let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
     if typ.ends_with("list_response") {
-        // alllist 历史：按机构路由到预警或速报（勿一律进 Record）
-        let agency = typ.trim_end_matches("list_response");
+        // strip_suffix：trim_end_matches 按字符集剥离，会把 early-est 裁成 early-
+        let agency = agency_from_list_response(typ);
         if let Some(arr) = v.get("Data").and_then(|d| d.as_array()) {
             for item in arr {
                 dispatch_jian_data(tx, agency, item);
@@ -352,6 +348,14 @@ pub fn ingest_jian_frame(tx: &NetTx, text: &str) {
 
     let data = v.get("Data").cloned().unwrap_or(v.clone());
     dispatch_jian_data(tx, typ, &data);
+}
+
+fn agency_from_source_key(k: &str) -> &str {
+    // source：jma-eew / source:jma-eew / source：cea-pr:四川
+    if let Some(rest) = k.strip_prefix("source：").or_else(|| k.strip_prefix("source:")) {
+        return rest;
+    }
+    k.split('：').nth(1).or_else(|| k.split(':').nth(1)).unwrap_or(k)
 }
 
 fn dispatch_jian_data(tx: &NetTx, agency: &str, data: &Value) {
@@ -368,12 +372,20 @@ fn dispatch_jian_data(tx: &NetTx, agency: &str, data: &Value) {
     if is_eew_agency(agency) {
         if let Some(eew) = parse_jian_eew(agency, data) {
             let _ = tx.send(NetEvent::Eew(eew));
+        } else {
+            tracing::warn!(agency, "jian: EEW 帧未能归一化（缺 placeName/经纬/震级？）");
         }
     } else if let Some(rec) = parse_jian_record(agency, data) {
         let _ = tx.send(NetEvent::Record(rec));
     } else {
         debug!(agency, "jian: 未能归一化帧");
     }
+}
+
+fn agency_from_list_response(typ: &str) -> &str {
+    typ.strip_suffix("list_response")
+        .map(|s| s.strip_suffix('_').unwrap_or(s))
+        .unwrap_or(typ)
 }
 
 fn is_tsunami_agency(agency: &str) -> bool {
@@ -536,8 +548,12 @@ fn parse_jian_eew(agency: &str, data: &Value) -> Option<EewReport> {
     let place = data
         .get("placeName")
         .or_else(|| data.get("Hypocenter"))
-        .and_then(|v| v.as_str())?
-        .to_string();
+        .or_else(|| data.get("place"))
+        .or_else(|| data.get("epicenter"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "—".into());
     let event_id = json_id_string(data, &["id", "EventID", "eventId"]).unwrap_or_else(|| {
         let lat = field_f64(data, &["latitude", "Latitude"]).unwrap_or(0.0);
         let lon = field_f64(data, &["longitude", "Longitude"]).unwrap_or(0.0);
@@ -1316,11 +1332,20 @@ fn ingest_pancakes_jma_eew(tx: &NetTx, action: &str, payload: &Value) {
     let serial = payload
         .get("Serial")
         .or_else(|| payload.get("serial"))
-        .and_then(|x| x.as_u64())
+        .or_else(|| payload.get("revision"))
+        .or_else(|| payload.get("number"))
+        .and_then(|x| x.as_u64().or_else(|| x.as_i64().map(|i| i as u64)))
         .unwrap_or(1) as u32;
     let raw = json_intensity_raw(payload, &["MaxIntensity", "maxIntensity", "intensity"]);
     let (max_intensity_text, intensity_level) =
         fill_intensity(IntensityKind::JmaShindo, magnitude, depth_km, raw.as_deref());
+    let status = payload
+        .get("status")
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    let is_cancel = status.eq_ignore_ascii_case("cancelled")
+        || status.eq_ignore_ascii_case("canceled")
+        || flag_true(payload, &["isCancel", "isCanceled", "isCancelled"]);
     let _ = tx.send(NetEvent::Eew(EewReport {
         agency: AgencyId("jma-eew".into()),
         event_id,
@@ -1334,8 +1359,9 @@ fn ingest_pancakes_jma_eew(tx: &NetTx, action: &str, payload: &Value) {
         max_intensity_text,
         intensity_kind: IntensityKind::JmaShindo,
         intensity_level,
-        is_final: flag_true(payload, &["isFinal", "is_final"]),
-        is_cancel: false,
+        is_final: flag_true(payload, &["isFinal", "is_final"])
+            || status.eq_ignore_ascii_case("final"),
+        is_cancel,
     }));
 }
 
@@ -1615,6 +1641,15 @@ fn ingest_pancakes_volcano(tx: &NetTx, payload: &Value) {
 mod tests {
     use super::*;
     use crate::bus::channel;
+
+    #[test]
+    fn list_response_agency_keeps_early_est() {
+        assert_eq!(agency_from_list_response("early-estlist_response"), "early-est");
+        assert_eq!(agency_from_list_response("jma-eewlist_response"), "jma-eew");
+        assert_eq!(agency_from_list_response("cea-prlist_response"), "cea-pr");
+        assert_eq!(agency_from_list_response("cenclist_response"), "cenc");
+        assert_eq!(agency_from_list_response("jma_eew_list_response"), "jma_eew");
+    }
 
     #[test]
     fn wolfx_cenc_parses_string_numbers() {

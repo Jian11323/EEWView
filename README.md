@@ -61,6 +61,20 @@
 
 ---
 
+## 版本
+
+当前通道：**Beta**，版本号与 Cargo workspace 一致（现为 **1.0.0**）。界面展示为 `Beta x.y.z`。
+
+| 变更性质 | 递增位 | 示例 |
+|----------|--------|------|
+| 缺陷修复、文案/样式微调、性能小修、无对外行为变化 | **PATCH**（第三位） | 1.0.0 → 1.0.1 |
+| 新功能、新数据源/设置项、交互或展示行为有意变更 | **MINOR**（第二位） | 1.0.1 → 1.1.0 |
+| 配置/协议不兼容，或结束 Beta 转正式版 | **MAJOR**（第一位） | 1.x → 2.0.0；正式版可去掉 Beta 标 |
+
+改版本时同步：`Cargo.toml` → `[workspace.package].version`，并重新打包便携包。
+
+---
+
 ## 构建运行
 
 需要：Rust（edition 2021）；Windows 建议安装 VS Build Tools（编译 eframe）。
@@ -93,9 +107,10 @@ cargo run -p jian-app
 
 Windows 预览目录（`jian.exe` 与 `assets/` `geodata/` `config/` 同级）：
 
-```powershell
-.\tools\pack_windows.ps1
-.\dist\EEWView\jian.exe
+```bash
+python tools/pack_windows.py
+# 或 .\tools\pack_windows.ps1
+# 产出 dist/EEWView/ 与 dist/EEWView_Beta_x.y.z_portable.zip
 ```
 
 资源根默认是可执行文件所在目录（或其上级仓库根）；也可用环境变量 `EEWVIEW_ROOT` 指定。

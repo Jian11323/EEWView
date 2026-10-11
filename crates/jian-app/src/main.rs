@@ -259,7 +259,7 @@ fn main() -> Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1280.0, 720.0])
         .with_title(format!(
-            "EEWView · 地震视监器  v{}",
+            "EEWView · 地震视监器  [Beta] v{}",
             env!("CARGO_PKG_VERSION")
         ));
     if cfg.ui.always_on_top {
@@ -421,11 +421,11 @@ impl eframe::App for JianApp {
                             .max(80.0);
                         zoom_to_fit_radius_km(
                             ev.latitude,
-                            r.min(320.0).max(55.0),
+                            r.max(35.0),
                             self.shell.map.last_viewport_min_px,
-                            0.52,
+                            0.82,
                         )
-                        .max(5.4)
+                        .clamp(5.2, 10.5)
                     } else {
                         6.0
                     };
@@ -473,6 +473,8 @@ impl eframe::App for JianApp {
                         self.cinema_idx = 0;
                         self.cinema_seen_key = seen_key;
                         self.snap.active = Some(ev.clone());
+                        self.snap.tab = jian_core::SidebarTab::Eew;
+                        self.snap.overlay_mode = jian_core::OverlayMode::Wave;
                     }
                 } else {
                     let mut jump_idx: Option<usize> = None;
@@ -518,16 +520,8 @@ impl eframe::App for JianApp {
                         self.cinema_next_at =
                             Instant::now() + std::time::Duration::from_secs_f64(hold);
                         self.snap.active = Some(ev.clone());
-                        if let Some(pos) = self.snap.eew_list.iter().position(|e| {
-                            e.agency.0 == ev.agency.0 && e.event_id == ev.event_id
-                        }) {
-                            self.snap.selection = Some(jian_core::ListSelection {
-                                tab: jian_core::SidebarTab::Eew,
-                                index: pos,
-                            });
-                            self.snap.tab = jian_core::SidebarTab::Eew;
-                            self.snap.overlay_mode = jian_core::OverlayMode::Wave;
-                        }
+                        self.snap.tab = jian_core::SidebarTab::Eew;
+                        self.snap.overlay_mode = jian_core::OverlayMode::Wave;
                     }
                 }
             }
@@ -807,14 +801,6 @@ fn gq_jump_zoom(
     travel: Option<&TravelEngine>,
     viewport_min_px: f32,
 ) -> f64 {
-    let age_min = if ev.origin_ms > 0 {
-        ((now_ms - ev.origin_ms) as f64 / 60_000.0).max(0.0)
-    } else {
-        0.0
-    };
-    // CinemaHandler: scroll = clamp(ageMin/5, 0.1, 1.6)；映射到平面 zoom
-    let scroll = (age_min / 5.0).clamp(0.1, 1.6);
-    let age_z = (11.6 - scroll * 3.4).clamp(5.0, 10.8);
     let elapsed = if ev.origin_ms > 0 {
         ((now_ms - ev.origin_ms) as f64 / 1000.0).max(0.0)
     } else {
@@ -825,13 +811,20 @@ fn gq_jump_zoom(
     } else {
         elapsed * 5.0
     };
+    // GlobalQuake：视野以当前 S 半径为准，S 圈始终落在视口内（fill≈0.82）
     let r = s_km
         .min(max_s_wave_spread_km(ev.magnitude))
-        .min(320.0)
-        .max(55.0);
-    let fit_z = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.52);
-    // 取较近视野，地板略抬高
-    (age_z.min(fit_z) + 0.35).clamp(5.4, 10.8)
+        .max(35.0);
+    let fit_s = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.82);
+    // 允许略近，但不得超过 fit_s（更大 zoom=更近，会把 S 挤出窗外）
+    let age_min = if ev.origin_ms > 0 {
+        ((now_ms - ev.origin_ms) as f64 / 60_000.0).max(0.0)
+    } else {
+        0.0
+    };
+    let scroll = (age_min / 5.0).clamp(0.1, 1.6);
+    let prefer = (12.0 - scroll * 2.6).clamp(5.8, 10.5);
+    prefer.min(fit_s).clamp(5.2, 10.5)
 }
 
 fn tsunami_audio_grade(grade: &str) -> u8 {

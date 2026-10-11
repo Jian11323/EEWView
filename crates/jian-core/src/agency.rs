@@ -10,6 +10,7 @@ pub const EEW_FILTER_FAMILIES: &[AgencyFamily] = &[
     AgencyFamily::Kma,
     AgencyFamily::Sa,
     AgencyFamily::EarlyEst,
+    AgencyFamily::Gq,
 ];
 
 /// 信息事件震级过滤（Jian `/all` 内各地震速报源，对齐 RhythmQuake）。
@@ -71,6 +72,7 @@ pub fn agency_bracket(agency: &str) -> String {
         AgencyFamily::Jma => "JMA".into(),
         AgencyFamily::Cea => "CN".into(),
         AgencyFamily::Cenc => "CENC".into(),
+        AgencyFamily::Gq => "GQ".into(),
         AgencyFamily::Usgs => "USGS".into(),
         AgencyFamily::Cwa => "CWA".into(),
         AgencyFamily::Kma => "KMA".into(),
@@ -147,6 +149,8 @@ pub enum AgencyFamily {
     Cea,
     /// 中国地震台网中心速报（cenc），括号标签 `CENC`
     Cenc,
+    /// GlobalQuake（Pancakes gq）
+    Gq,
     Usgs,
     Cwa,
     Kma,
@@ -195,6 +199,7 @@ impl AgencyFamily {
             Self::Jma => "jma",
             Self::Cea => "cea",
             Self::Cenc => "cenc",
+            Self::Gq => "gq",
             Self::Usgs => "usgs",
             Self::Cwa => "cwa",
             Self::Kma => "kma",
@@ -244,6 +249,7 @@ impl AgencyFamily {
             Self::Jma => "JMA",
             Self::Cea => "CN",
             Self::Cenc => "CENC",
+            Self::Gq => "GQ",
             Self::Usgs => "USGS",
             Self::Cwa => "CWA",
             Self::Kma => "KMA",
@@ -292,6 +298,7 @@ impl AgencyFamily {
             Self::Jma => "日本气象厅 (JMA) / P2PQuake",
             Self::Cea => "中国地震预警网",
             Self::Cenc => "中国地震台网 (CENC)",
+            Self::Gq => "GlobalQuake 全球预警",
             Self::Usgs => "美国地质调查局 (USGS)",
             Self::Cwa => "中央气象署 (CWA)",
             Self::Kma => "韩国气象厅 (KMA)",
@@ -341,6 +348,9 @@ pub fn agency_family(agency: &str) -> AgencyFamily {
 
     if a.contains("early-est") || a.contains("earlyest") {
         return AgencyFamily::EarlyEst;
+    }
+    if a == "gq" || a.contains("globalquake") || a.starts_with("gq-") {
+        return AgencyFamily::Gq;
     }
     if a.contains("usgs") {
         return AgencyFamily::Usgs;

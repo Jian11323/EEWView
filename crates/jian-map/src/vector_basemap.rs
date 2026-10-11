@@ -28,10 +28,10 @@ pub struct VectorStyle {
 impl VectorStyle {
     pub fn dark() -> Self {
         Self {
-            // KA / RhythmQuake：land #393939，border #BBBBBB
-            land_fill: Color32::from_rgb(0x39, 0x39, 0x39),
-            world_border: Color32::from_rgb(0xBB, 0xBB, 0xBB),
-            admin_border: Color32::from_rgb(0xBB, 0xBB, 0xBB),
+            // 陆地灰 / 边界略亮，便于在黑海上分清区划
+            land_fill: Color32::from_rgb(0x4A, 0x4A, 0x4E),
+            world_border: Color32::from_rgb(0xC8, 0xC8, 0xCC),
+            admin_border: Color32::from_rgb(0xA8, 0xA8, 0xB0),
         }
     }
 
@@ -337,9 +337,13 @@ impl VectorBasemap {
                     return;
                 }
 
-                let (regional_fine, r_files, r_skip) = load_regional_rings(&dir);
+                let (mut regional_fine, r_files, r_skip) = load_regional_rings(&dir);
+                // 藏南等补丁并入中日外轮廓与区划，避免麦克马洪线把藏南画在境外
+                let patches = load_cn_boundary_patch_rings(&dir);
+                regional_fine.extend(patches.iter().cloned());
+                let mut national_fine = dissolve_national_outlines(&regional_fine);
+                national_fine.extend(patches);
                 let regional_n = regional_fine.len();
-                let national_fine = dissolve_national_outlines(&regional_fine);
                 let national_lods = LayerLods::from_fine(national_fine, 0.25, 0.08);
                 let regional_lods = LayerLods::from_fine(regional_fine, 0.05, 0.012);
                 let _ = tx.send((
@@ -467,7 +471,7 @@ impl VectorBasemap {
                     min_seg,
                     max_jump_px,
                     Stroke::new(0.9_f32, style.world_border),
-                    false,
+                    fill_land,
                     false,
                     style.land_fill,
                     0.0,
@@ -487,7 +491,7 @@ impl VectorBasemap {
                         2.2,
                         max_jump_px,
                         Stroke::new(0.95_f32, style.world_border),
-                        false,
+                        fill_land,
                         false,
                         style.land_fill,
                         0.0,
@@ -522,13 +526,12 @@ impl VectorBasemap {
                         },
                         style.admin_border,
                     ),
-                    false,
+                    fill_land,
                     zoom >= ZOOM_REGIONAL_FINE,
                     style.land_fill,
                     0.0,
                 );
             }
-            let _ = fill_land;
             painter.extend(shapes);
             return;
         }
@@ -562,7 +565,7 @@ impl VectorBasemap {
                     min_seg,
                     max_jump_px,
                     stroke,
-                    false,
+                    fill_land,
                     false,
                     style.land_fill,
                     lon_shift,
@@ -584,7 +587,7 @@ impl VectorBasemap {
                         2.2,
                         max_jump_px,
                         stroke,
-                        false,
+                        fill_land,
                         false,
                         style.land_fill,
                         lon_shift,
@@ -620,7 +623,7 @@ impl VectorBasemap {
                     min_seg,
                     max_jump_px,
                     stroke,
-                    false,
+                    fill_land,
                     zoom >= ZOOM_REGIONAL_FINE,
                     style.land_fill,
                     lon_shift,
@@ -628,7 +631,6 @@ impl VectorBasemap {
             }
         }
 
-        let _ = fill_land;
         painter.extend(shapes);
     }
 }
@@ -668,34 +670,17 @@ fn paint_rings(
             max_jump_px,
             lon_shift,
         );
-        let nseg = segments.len();
-        let do_fill = fill
-            && ring.may_fill()
-            && nseg == 1
-            && segments.first().is_some_and(|s| s.len() >= 3);
-        for mut pts in segments {
+        let _ = (fill, land_fill, ring.may_fill());
+        for pts in segments {
             if pts.len() < 2 {
                 continue;
             }
-            // 绝不使用 closed=true（首尾跨屏时会拉出射线）；需要闭合时只短距补点
-            if do_fill && pts.len() >= 3 {
-                let a = pts[0];
-                let b = pts[pts.len() - 1];
-                let dx = a.x - b.x;
-                let dy = a.y - b.y;
-                if dx * dx + dy * dy < max_jump_px * max_jump_px * 0.25 {
-                    pts.push(a);
-                }
-            }
+            // 只描边：egui PathShape 填色对凹多边形会扇出射线，勿再 fill
             shapes.push(
                 egui::epaint::PathShape {
                     points: pts,
                     closed: false,
-                    fill: if do_fill {
-                        land_fill
-                    } else {
-                        Color32::TRANSPARENT
-                    },
+                    fill: Color32::TRANSPARENT,
                     stroke: egui::epaint::PathStroke::new(stroke.width, stroke.color),
                 }
                 .into(),
@@ -910,6 +895,30 @@ fn load_world_rings(dir: &Path) -> (Vec<RingSet>, usize, usize) {
     }
 
     (world_fine, files, skipped)
+}
+
+
+/// 仅加载藏南 / 钓鱼岛补丁环（供并入国家外轮廓与区划层）。
+fn load_cn_boundary_patch_rings(dir: &Path) -> Vec<RingSet> {
+    let mut out = Vec::new();
+    let world_dir = dir.join("world");
+    let mut saw = false;
+    if world_dir.is_dir() {
+        for entry in walk_geojson(&world_dir) {
+            if !is_cn_boundary_patch(&entry) {
+                continue;
+            }
+            saw = true;
+            match load_file(&entry) {
+                Ok(rings) => out.extend(rings),
+                Err(e) => warn!(path = %entry.display(), error = %e, "跳过边界补丁"),
+            }
+        }
+    }
+    if !saw {
+        out.extend(builtin_cn_boundary_patches());
+    }
+    out
 }
 
 /// 加载 `world/cn_boundary_patches`；若无文件则用内置藏南 / 钓鱼岛补丁。

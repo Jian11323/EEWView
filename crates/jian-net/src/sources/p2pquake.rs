@@ -22,7 +22,7 @@ pub fn spawn(tx: NetTx, cfg: P2pSourceConfig) -> Vec<JoinHandle<()>> {
 
     vec![tokio::spawn(async move {
         let client = match reqwest::Client::builder()
-            .user_agent("EEWView/0.0.1 (+https://github.com/Jian11323/EEWView)")
+            .user_agent(concat!("EEWView/", env!("CARGO_PKG_VERSION"), " (+https://github.com/Jian11323/EEWView)"))
             .timeout(Duration::from_secs(25))
             .build()
         {

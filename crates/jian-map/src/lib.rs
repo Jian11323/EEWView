@@ -111,7 +111,7 @@ impl MapViewport {
     /// 列表/图例联动：瞬时居中到经纬，可选改缩放
     pub fn center_on(&mut self, lon: f64, lat: f64, zoom: Option<f64>) {
         self.flight = None;
-        self.post_flight_cooldown = 0.0;
+        self.post_flight_cooldown = 1.2;
         self.center_lon = projection::normalize_lon(lon);
         self.center_lat = projection::clamp_lat(lat);
         if let Some(z) = zoom {
@@ -158,7 +158,8 @@ impl MapViewport {
             self.center_lat = elat;
             self.zoom = ez;
             self.flight = None;
-            self.post_flight_cooldown = 0.0;
+            // 抑制落地瞬间波圈 auto_zoom 二次改 zoom（弹簧感）
+            self.post_flight_cooldown = 2.8;
         }
         !done
     }

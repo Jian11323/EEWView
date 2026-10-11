@@ -13,7 +13,7 @@ use tracing::{info, warn};
 
 pub use catalog::SoundCatalog;
 pub use countdown::CountdownMachine;
-pub use cue::AudioCue;
+pub use cue::{AudioCue, TsunamiCueKind};
 pub use router::Router;
 
 use player::Player;
@@ -113,6 +113,7 @@ impl AudioEngine {
         let prev = self.eew_seen.get(&key).copied();
         match prev {
             None => {
+                self.play(AudioCue::Prompt);
                 self.play(AudioCue::Issue);
                 if let Some(n) = shindo_level {
                     self.play(AudioCue::Shindo(n));

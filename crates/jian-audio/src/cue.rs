@@ -16,8 +16,19 @@ pub enum AudioCue {
     Countdown(i32),
     /// 倒计时循环底噪开/关
     CountdownLoop(bool),
+    /// 检出提示（SREV prompt）
+    Prompt,
+    /// 海啸播报：grade 1=预报 2=注意报 3=警报/大海啸；kind=issue|update|cancel
+    Tsunami { grade: u8, kind: TsunamiCueKind },
     /// UI：连接成功 / 失败 / 通知
     UiConnectOk,
     UiConnectFail,
     UiNotify,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TsunamiCueKind {
+    Issue,
+    Update,
+    Cancel,
 }

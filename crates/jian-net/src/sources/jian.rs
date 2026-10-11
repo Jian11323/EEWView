@@ -66,7 +66,8 @@ pub fn spawn(tx: NetTx, cfg: JianSourceConfig) -> Vec<JoinHandle<()>> {
                 WsLoopOpts {
                     source: "jian",
                     url,
-                    on_open_text: Some("alllist".into()),
+                    // 官方仅 cenc/cwa/jma/hko 支持 *list；预警靠 /all 快照最新一报
+                    on_open_texts: vec!["alllist".into()],
                     backoff_max_secs: 60,
                 },
                 |tx, text| ingest_jian_frame(tx, text),
@@ -100,7 +101,7 @@ fn spawn_kmoni_if(tx: &NetTx, cfg: &JianSourceConfig) -> Vec<JoinHandle<()>> {
             WsLoopOpts {
                 source: "kmoni",
                 url,
-                on_open_text: None,
+                on_open_texts: Vec::new(),
                 backoff_max_secs: 60,
             },
             move |tx, text| ingest_kmoni_frame(&mut state, tx, text),

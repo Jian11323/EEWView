@@ -80,7 +80,7 @@ impl ThemePalette {
     /// 暗色监视器：对齐 RhythmQuake desktop-ui-reference（强调色 #82B1FF、玻璃边框）。
     pub fn dark() -> Self {
         Self {
-            map_bg: Color32::from_rgb(0x20, 0x21, 0x24),
+            map_bg: Color32::from_rgb(0x12, 0x12, 0x14),
             sidebar_bg: Color32::from_rgb(0x0A, 0x0A, 0x0A),
             panel_glass: Color32::from_rgba_unmultiplied(0, 0, 0, 120),
             panel_glass_soft: Color32::from_rgba_unmultiplied(0, 0, 0, 90),

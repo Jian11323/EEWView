@@ -565,13 +565,13 @@ impl AppSnapshot {
 
     /// 列表按龄裁剪（供回看）；不因波走完删记录。地图叉标另按 `eew_wave_active`。
     pub fn prune_finished_eews(&mut self) {
-        // 约 6 小时内每预警一条，便于对照 eewcn 回看
-        prune_eew_list(&mut self.eew_list, 6 * 60 * 60 * 1000, 64);
+        // 每源最新一条常驻；其余按 14 天裁剪
+        prune_eew_list(&mut self.eew_list, 14 * 24 * 60 * 60 * 1000, 80);
     }
 
     /// 插入/更新 EEW：同 agency+event_id 取更高 serial；不同 event_id 各留一条（eewcn 回看）。
     /// 地图波圈/叉标仅画仍在传播的；侧栏展示全部保留记录。
-    /// 新预警/报数更新始终抢占左上角与侧栏选中（优先于速报/测站浏览），供自动跟焦。
+    /// 新预警：刷新左上角 + 切到预警 Tab；不改列表选中（与跟焦解绑，对齐 eewcn）。
     pub fn upsert_eew(&mut self, report: EewReport) {
         let key = (report.agency.0.clone(), report.event_id.clone());
         if let Some(pos) = self
@@ -588,8 +588,7 @@ impl AppSnapshot {
             self.eew_list.push(report.clone());
         }
         sort_eew_newest_first(&mut self.eew_list);
-        prune_eew_list(&mut self.eew_list, 6 * 60 * 60 * 1000, 64);
-        // 预警优先：始终刷新 Header / 选中，不因当前在速报、测站页而丢弃
+        prune_eew_list(&mut self.eew_list, 14 * 24 * 60 * 60 * 1000, 80);
         if let Some(pos) = self
             .eew_list
             .iter()
@@ -598,10 +597,6 @@ impl AppSnapshot {
             self.active = Some(self.eew_list[pos].clone());
             self.overlay_mode = OverlayMode::Wave;
             self.tab = SidebarTab::Eew;
-            self.selection = Some(ListSelection {
-                tab: SidebarTab::Eew,
-                index: pos,
-            });
             // 取消尚未执行的速报飞跃，避免盖过预警跟焦
             self.pending_record_fly = None;
         }
@@ -681,7 +676,7 @@ impl AppSnapshot {
         }
     }
 
-    /// 启动/空闲时选中最新预警；速报不进左上角，故不回退到速报。
+    /// 启动/空闲时跟焦最新预警；切 Tab + 刷新左上角，不锁列表选中。
     /// 返回 `(lon, lat, zoom)`。
     pub fn focus_latest_event(&mut self) -> Option<(f64, f64, f64)> {
         let idx = self.eew_list.iter().position(|e| {
@@ -693,10 +688,6 @@ impl AppSnapshot {
         self.active = Some(ev);
         self.overlay_mode = OverlayMode::Wave;
         self.tab = SidebarTab::Eew;
-        self.selection = Some(ListSelection {
-            tab: SidebarTab::Eew,
-            index: idx,
-        });
         Some((lon, lat, 6.0))
     }
 
@@ -893,7 +884,7 @@ fn recency_ms(origin_ms: i64) -> i64 {
     }
 }
 
-/// 列表回看：按龄与条数裁剪；波走完不删（地图另用 eew_wave_active）。
+/// 列表回看：每 agency 保留最新非取消一条（对齐 eewcn）；其余按龄/条数裁剪。
 fn prune_eew_list(list: &mut Vec<EewReport>, max_age_ms: i64, max_len: usize) {
     if list.is_empty() {
         return;
@@ -902,9 +893,44 @@ fn prune_eew_list(list: &mut Vec<EewReport>, max_age_ms: i64, max_len: usize) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
+
+    // 每源最新（非取消、有坐标）必须保留，否则冷启动历史会被 6h 窗清空
+    let mut keep_ids: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
+    let mut best_by_agency: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for (i, e) in list.iter().enumerate() {
+        if e.is_cancel
+            || e.event_id.starts_with("station:")
+            || e.event_id.starts_with("record:")
+            || (e.latitude.abs() <= 0.01 && e.longitude.abs() <= 0.01)
+        {
+            continue;
+        }
+        match best_by_agency.get(&e.agency.0) {
+            None => {
+                best_by_agency.insert(e.agency.0.clone(), i);
+            }
+            Some(&j) => {
+                let cur = &list[j];
+                let newer = recency_ms(e.origin_ms) > recency_ms(cur.origin_ms)
+                    || (e.origin_ms == cur.origin_ms && e.serial > cur.serial);
+                if newer {
+                    best_by_agency.insert(e.agency.0.clone(), i);
+                }
+            }
+        }
+    }
+    for &i in best_by_agency.values() {
+        keep_ids.insert((list[i].agency.0.clone(), list[i].event_id.clone()));
+    }
+
     list.retain(|e| {
         if e.event_id.starts_with("station:") || e.event_id.starts_with("record:") {
             return false;
+        }
+        if keep_ids.contains(&(e.agency.0.clone(), e.event_id.clone())) {
+            return true;
         }
         if e.origin_ms <= 0 {
             return true;
@@ -913,8 +939,38 @@ fn prune_eew_list(list: &mut Vec<EewReport>, max_age_ms: i64, max_len: usize) {
         age >= -60_000 && age <= max_age_ms
     });
     if list.len() > max_len {
+        // 先保住每源最新，再按新→旧截断
+        let protected: std::collections::HashSet<(String, String)> = keep_ids;
         sort_eew_newest_first(list);
-        list.truncate(max_len);
+        let mut out = Vec::with_capacity(max_len);
+        for e in list.drain(..) {
+            let key = (e.agency.0.clone(), e.event_id.clone());
+            if protected.contains(&key) || out.len() < max_len {
+                if out.len() < max_len || protected.contains(&key) {
+                    out.push(e);
+                }
+            }
+        }
+        // 若 protected 把长度顶破，再按新→旧截到 max_len（仍尽量留 protected）
+        if out.len() > max_len {
+            let mut keep_p: Vec<EewReport> = Vec::new();
+            let mut rest: Vec<EewReport> = Vec::new();
+            for e in out {
+                let key = (e.agency.0.clone(), e.event_id.clone());
+                if protected.contains(&key) {
+                    keep_p.push(e);
+                } else {
+                    rest.push(e);
+                }
+            }
+            sort_eew_newest_first(&mut rest);
+            let room = max_len.saturating_sub(keep_p.len());
+            rest.truncate(room);
+            out = keep_p;
+            out.extend(rest);
+            sort_eew_newest_first(&mut out);
+        }
+        *list = out;
     }
 }
 
