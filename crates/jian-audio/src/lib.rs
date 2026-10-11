@@ -7,7 +7,7 @@ mod player;
 mod router;
 
 use anyhow::{Context, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
@@ -25,6 +25,9 @@ pub struct AudioEngine {
     countdown: CountdownMachine,
     /// 已播过的 EEW 键 → 上次 serial（避免同报重复）
     eew_seen: HashMap<String, u32>,
+    /// 本事件已播 caution / warn（对齐要石：各最多一次）
+    caution_played: HashSet<String>,
+    warn_played: HashSet<String>,
 }
 
 impl AudioEngine {
@@ -59,6 +62,8 @@ impl AudioEngine {
             player,
             countdown: CountdownMachine::default(),
             eew_seen: HashMap::new(),
+            caution_played: HashSet::new(),
+            warn_played: HashSet::new(),
         })
     }
 
@@ -94,7 +99,8 @@ impl AudioEngine {
         }
     }
 
-    /// 新/更新 EEW 时调用：首报 Issue，serial 升高 Update，可附带震度档。
+    /// JMA EEW（对齐要石）：issue / update / final / cancel，另附 caution / warn。
+    /// `is_warn`：警报；`play_caution`：震度≥3 且非警报附加 caution。
     pub fn on_eew(
         &mut self,
         agency: &str,
@@ -102,7 +108,8 @@ impl AudioEngine {
         serial: u32,
         is_final: bool,
         is_cancel: bool,
-        shindo_level: Option<u8>,
+        is_warn: bool,
+        play_caution: bool,
     ) {
         let key = format!("{agency}|{event_id}");
         if is_cancel {
@@ -111,13 +118,10 @@ impl AudioEngine {
             return;
         }
         let prev = self.eew_seen.get(&key).copied();
-        match prev {
+        let advanced = match prev {
             None => {
-                self.play(AudioCue::Prompt);
                 self.play(AudioCue::Issue);
-                if let Some(n) = shindo_level {
-                    self.play(AudioCue::Shindo(n));
-                }
+                true
             }
             Some(p) if serial > p => {
                 if is_final {
@@ -125,8 +129,23 @@ impl AudioEngine {
                 } else {
                     self.play(AudioCue::Update);
                 }
+                true
             }
-            _ => return, // 同 serial 或更旧
+            _ => false, // 同 serial 或更旧
+        };
+        if !advanced {
+            return;
+        }
+        // 要石：警报播 warn（并吞掉 caution）；否则震度≥3 播 caution；各事件最多一次
+        if is_warn {
+            if !self.warn_played.contains(&key) {
+                self.play(AudioCue::Warn);
+                self.warn_played.insert(key.clone());
+                self.caution_played.insert(key.clone());
+            }
+        } else if play_caution && !self.caution_played.contains(&key) {
+            self.play(AudioCue::Caution);
+            self.caution_played.insert(key.clone());
         }
         self.eew_seen.insert(key, serial);
     }

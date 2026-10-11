@@ -9,7 +9,9 @@ use anyhow::Result;
 use eframe::egui;
 use jian_audio::{AudioCue, AudioEngine, TsunamiCueKind};
 use jian_config::AppConfig;
-use jian_core::{live_wave_eews, AppSnapshot, HealthStatus, IntensityKind};
+use jian_core::{
+    agency_family, live_wave_eews, AgencyFamily, AppSnapshot, HealthStatus, IntensityKind,
+};
 use jian_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
 use jian_travel::{max_s_wave_spread_km, s_wave_still_spreading, TravelEngine, Wave};
 use jian_map::{zoom_to_fit_radius_km, BasemapMode, ProjectionMode};
@@ -85,16 +87,6 @@ fn install_cjk_fonts(ctx: &egui::Context) {
     }
     ctx.set_fonts(fonts);
     tracing::info!(bytes = LXGW_WENKAI.len(), "embedded LXGW WenKai");
-}
-
-/// JMA intensity_level 0–9 → catalog shindo_0…7
-fn shindo_file_level(level: u8) -> u8 {
-    match level {
-        0..=4 => level,
-        5 | 6 => 5,
-        7 | 8 => 6,
-        _ => 7,
-    }
 }
 
 fn main() -> Result<()> {
@@ -295,7 +287,8 @@ fn refresh_countdown(
         }
         return;
     };
-    if ev.is_cancel || (ev.origin_ms <= 0 && elapsed.is_none()) {
+    // 调查中（仮定震源）：对齐要石，不播/不显本地倒计时
+    if ev.is_cancel || ev.is_assumption || (ev.origin_ms <= 0 && elapsed.is_none()) {
         clear_countdown(snap);
         return;
     }
@@ -313,6 +306,7 @@ fn refresh_countdown(
         return;
     }
     let total = eng.eta_s_to_site(ev.longitude, ev.latitude, ev.depth_km, lon, lat);
+    // 用 ceil：显示/语音与「还剩整秒」一致；音效侧按秒边界重启滴滴
     let remain = (total - elapsed_s).ceil() as i32;
     // EEWCN：到达本机后倒计时隐藏（不再挂 0 秒）
     if remain <= 0 {
@@ -367,22 +361,22 @@ impl eframe::App for JianApp {
         if let Some(rx) = self.net_rx.as_mut() {
             while let Ok(ev) = rx.try_recv() {
                 if let NetEvent::Eew(ref report) = ev {
-                    if let Some(audio) = self.audio.as_mut() {
-                        let shindo = if report.intensity_kind == IntensityKind::JmaShindo
-                            && report.intensity_level > 0
-                        {
-                            Some(shindo_file_level(report.intensity_level))
-                        } else {
-                            None
-                        };
-                        audio.on_eew(
-                            &report.agency.0,
-                            &report.event_id,
-                            report.serial,
-                            report.is_final,
-                            report.is_cancel,
-                            shindo,
-                        );
+                    // SREV 仅 JMA（对齐要石：issue/update/final/cancel + caution/warn）
+                    if agency_family(&report.agency.0) == AgencyFamily::Jma {
+                        if let Some(audio) = self.audio.as_mut() {
+                            let play_caution = report.intensity_kind == IntensityKind::JmaShindo
+                                && report.intensity_level >= 3
+                                && !report.is_assumption;
+                            audio.on_eew(
+                                &report.agency.0,
+                                &report.event_id,
+                                report.serial,
+                                report.is_final,
+                                report.is_cancel,
+                                report.is_warn,
+                                play_caution,
+                            );
+                        }
                     }
                 }
                 jian_net::apply_event_filtered(
@@ -420,11 +414,11 @@ impl eframe::App for JianApp {
                             ev.latitude,
                             r.max(35.0),
                             self.shell.map.last_viewport_min_px,
-                            0.82,
+                            0.58,
                         )
-                        .clamp(5.2, 10.5)
+                        .clamp(6.8, 11.2)
                     } else {
-                        6.0
+                        7.2
                     };
                     self.shell.map.fly_to(lon, lat, Some(z), 1.0);
                     self.auto_center_pending = false;
@@ -444,10 +438,13 @@ impl eframe::App for JianApp {
             }
         } else if self.cfg.ui.auto_follow_eew {
             // 多震轮播：新震立刻跳；到点切换；更新报只刷数据，不打断停留计时
-            let browsing_other = self.snap.active.as_ref().is_some_and(|e| {
-                e.event_id.starts_with("record:") || e.event_id.starts_with("station:")
-            });
-            if !browsing_other && !self.shell.map.user_camera_override {
+            // 注意：upsert_eew 已先写入 active，不能用 active==live 判断「是否新震」
+            let browsing_station = self
+                .snap
+                .active
+                .as_ref()
+                .is_some_and(|e| e.event_id.starts_with("station:"));
+            if !browsing_station {
                 let now = chrono::Utc::now().timestamp_millis();
                 let live = live_wave_eews(&self.snap.eew_list, now, 30 * 60 * 1000);
                 let seen_key = live
@@ -460,10 +457,10 @@ impl eframe::App for JianApp {
                 } else if live.len() == 1 {
                     let ev = live[0];
                     let key = (ev.event_id.clone(), ev.serial);
-                    let same_event = self.snap.active.as_ref().is_some_and(|a| {
-                        a.event_id == ev.event_id && a.agency == ev.agency
-                    });
-                    if !same_event {
+                    let prev_id = self.last_follow_key.as_ref().map(|(id, _)| id.as_str());
+                    let is_new_event = prev_id != Some(ev.event_id.as_str());
+                    if is_new_event {
+                        // 新预警：强制飞跃（无视用户拖拽锁定）
                         let z = gq_jump_zoom(
                             ev,
                             now,
@@ -484,6 +481,7 @@ impl eframe::App for JianApp {
                     }
                 } else {
                     let mut jump_idx: Option<usize> = None;
+                    let mut is_new_arrival = false;
                     if seen_key != self.cinema_seen_key {
                         let old: std::collections::HashSet<&str> = self
                             .cinema_seen_key
@@ -494,6 +492,7 @@ impl eframe::App for JianApp {
                             let id = format!("{}|{}", e.agency.0, e.event_id);
                             if !old.contains(id.as_str()) {
                                 jump_idx = Some(i);
+                                is_new_arrival = true;
                                 break;
                             }
                         }
@@ -503,31 +502,36 @@ impl eframe::App for JianApp {
                             let cur_id = format!("{}|{}", live[idx].agency.0, live[idx].event_id);
                             if self.cinema_seen_key.is_empty() || !seen_key.contains(&cur_id) {
                                 jump_idx = Some(idx);
+                                is_new_arrival = true;
                             } else {
                                 self.cinema_idx = idx;
                             }
                         }
                         self.cinema_seen_key = seen_key;
-                    } else if Instant::now() >= self.cinema_next_at {
+                    } else if !self.shell.map.user_camera_override
+                        && Instant::now() >= self.cinema_next_at
+                    {
                         jump_idx = Some((self.cinema_idx + 1) % live.len());
                     }
                     if let Some(idx) = jump_idx {
-                        let ev = live[idx];
-                        let z = gq_jump_zoom(
-                            ev,
-                            now,
-                            self.travel.as_ref(),
-                            self.shell.map.last_viewport_min_px,
-                        );
-                        self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 1.6);
-                        self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
-                        self.cinema_idx = idx;
-                        let hold = (2.5 + ev.magnitude * 0.8).clamp(5.0, 8.0);
-                        self.cinema_next_at =
-                            Instant::now() + std::time::Duration::from_secs_f64(hold);
-                        self.snap.active = Some(ev.clone());
-                        self.snap.tab = jian_core::SidebarTab::Eew;
-                        self.snap.overlay_mode = jian_core::OverlayMode::Wave;
+                        if is_new_arrival || !self.shell.map.user_camera_override {
+                            let ev = live[idx];
+                            let z = gq_jump_zoom(
+                                ev,
+                                now,
+                                self.travel.as_ref(),
+                                self.shell.map.last_viewport_min_px,
+                            );
+                            self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 1.6);
+                            self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
+                            self.cinema_idx = idx;
+                            let hold = (2.5 + ev.magnitude * 0.8).clamp(5.0, 8.0);
+                            self.cinema_next_at =
+                                Instant::now() + std::time::Duration::from_secs_f64(hold);
+                            self.snap.active = Some(ev.clone());
+                            self.snap.tab = jian_core::SidebarTab::Eew;
+                            self.snap.overlay_mode = jian_core::OverlayMode::Wave;
+                        }
                     } else {
                         // 停留中：同步当前震中最新报文，绝不因 serial 重置计时或跳转
                         let idx = self.cinema_idx.min(live.len() - 1);
@@ -863,20 +867,19 @@ fn gq_jump_zoom(
     } else {
         elapsed * 5.0
     };
-    // GlobalQuake：视野以当前 S 半径为准，S 圈始终落在视口内（fill≈0.82）
+    // 视野略收：S 圈约占短边 58%，默认更靠近震中
     let r = s_km
         .min(max_s_wave_spread_km(ev.magnitude))
-        .max(35.0);
-    let fit_s = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.82);
-    // 允许略近，但不得超过 fit_s（更大 zoom=更近，会把 S 挤出窗外）
+        .max(28.0);
+    let fit_s = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.58);
     let age_min = if ev.origin_ms > 0 {
         ((now_ms - ev.origin_ms) as f64 / 60_000.0).max(0.0)
     } else {
         0.0
     };
-    let scroll = (age_min / 5.0).clamp(0.1, 1.6);
-    let prefer = (12.0 - scroll * 2.6).clamp(5.8, 10.5);
-    prefer.min(fit_s).clamp(5.2, 10.5)
+    let scroll = (age_min / 5.0).clamp(0.05, 1.2);
+    let prefer = (12.2 - scroll * 2.0).clamp(7.0, 11.2);
+    prefer.min(fit_s).clamp(6.8, 11.2)
 }
 
 fn tsunami_audio_grade(grade: &str) -> u8 {

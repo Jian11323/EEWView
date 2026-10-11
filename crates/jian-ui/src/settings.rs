@@ -146,7 +146,7 @@ impl SettingsTab {
             Self::General => "主题、底图、窗口与定位",
             Self::Audio => "音量、静音与音效包",
             Self::Advanced => "走时表、缓存与配置·径",
-            Self::About => "版本、许可与署名",
+            Self::About => "版本、致谢与版权",
         }
     }
 
@@ -1674,14 +1674,42 @@ fn draw_about(ui: &mut Ui) {
         );
         ui.add_space(10.0);
         ui.label(
-            RichText::new("致谢与授权")
+            RichText::new("致谢")
                 .size(13.0)
                 .strong()
                 .color(chrome().text),
         );
         ui.label(
             RichText::new(
-                "图标提供：平平无奇的4。界面布局参考 RhythmQuake（已获授权）。地图标记 SVG 与部分交互参考 eewcn（已获授权）。音效包 srev 采用 CC BY-SA 2.0。底图与走时表等第三方数据按其各自许可使用。",
+                "图标提供：平平无奇的4\n音效来源：SREV\n授权参考：悦琳雅韵☆Rhythm(Stille)\n图标提供：lxFLY2000\n以及各位给与帮助的EEW爱好者",
+            )
+            .size(12.0)
+            .color(chrome().muted),
+        );
+        ui.add_space(10.0);
+        ui.label(
+            RichText::new("参考软件")
+                .size(13.0)
+                .strong()
+                .color(chrome().text),
+        );
+        ui.label(
+            RichText::new(
+                "\u{00b7} EEW CN\n\u{00b7} GlobalQuake 0.11开源版\n\u{00b7} Kanameishi\n\u{00b7} RhythmQuake\n\u{00b7} Scratch-Realtime-Earthquake-Viewer-Page",
+            )
+            .size(12.0)
+            .color(chrome().muted),
+        );
+        ui.add_space(10.0);
+        ui.label(
+            RichText::new("版权声明")
+                .size(13.0)
+                .strong()
+                .color(chrome().text),
+        );
+        ui.label(
+            RichText::new(
+                "本项目参考以下软件的源代码。\n\u{00b7} RhythmQuake\n\u{00b7} Kanameishi\n\u{00b7} OPEN EEWCN\n\u{00b7} GlobalQuake 0.11开源版",
             )
             .size(12.0)
             .color(chrome().muted),

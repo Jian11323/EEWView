@@ -43,6 +43,8 @@ impl Router {
             AudioCue::Countdown(sec) => (self.countdown_pack.clone(), format!("{sec}s")),
             AudioCue::CountdownLoop(_) => (self.countdown_pack.clone(), "countdown_loop".into()),
             AudioCue::Prompt => (self.event_pack_name(catalog).to_string(), "prompt".into()),
+            AudioCue::Caution => (self.event_pack_name(catalog).to_string(), "caution".into()),
+            AudioCue::Warn => (self.event_pack_name(catalog).to_string(), "warn".into()),
             AudioCue::Tsunami { grade, kind } => {
                 let g = (*grade).clamp(1, 3);
                 let k = match kind {

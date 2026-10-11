@@ -206,14 +206,14 @@ pub fn ingest_kma_station_frame(state: &mut KmoniState, tx: &NetTx, text: &str) 
 fn load_station_meta(state: &mut KmoniState, arr: &[Value]) {
     state.meta.clear();
     state.meta.reserve(arr.len());
-    for s in arr {
-        let code = s
+    for (i, s) in arr.iter().enumerate() {
+        let mut code = s
             .get("code")
             .and_then(|x| x.as_str())
             .unwrap_or("")
             .to_string();
         if code.is_empty() {
-            continue;
+            code = format!("{i}");
         }
         let name = s
             .get("name")
@@ -443,6 +443,7 @@ fn parse_jian_tsunami(agency: &str, data: &Value) -> Option<TsunamiInfo> {
             .join("\u{3001}")
     };
     let issued_ms = data.get("originTime").map(parse_origin_ms).unwrap_or(0);
+    let expire_ms = parse_tsunami_expire_ms(data);
     Some(TsunamiInfo {
         title: zh_title,
         grade,
@@ -452,8 +453,76 @@ fn parse_jian_tsunami(agency: &str, data: &Value) -> Option<TsunamiInfo> {
         issued_ms,
         source: "jian".into(),
         source_priority: 3,
+        expire_ms,
     })
 }
+
+fn normalize_epoch_ms(n: i64) -> i64 {
+    if n <= 0 {
+        0
+    } else if n > 1_000_000_000_000 {
+        n // already ms
+    } else if n > 1_000_000_000 {
+        n * 1000 // seconds
+    } else {
+        0
+    }
+}
+
+fn parse_tsunami_expire_ms(data: &Value) -> i64 {
+    for key in [
+        "endTime",
+        "expireTime",
+        "expire_ms",
+        "validUntil",
+        "until",
+        "cancelTime",
+    ] {
+        if let Some(v) = data.get(key) {
+            if let Some(n) = v.as_i64().or_else(|| v.as_u64().map(|u| u as i64)) {
+                let ms = normalize_epoch_ms(n);
+                if ms > 0 {
+                    return ms;
+                }
+            }
+            if let Some(n) = v.as_f64() {
+                let ms = normalize_epoch_ms(n as i64);
+                if ms > 0 {
+                    return ms;
+                }
+            }
+            if let Some(s) = v.as_str() {
+                if let Some(ms) = parse_time_str(s) {
+                    return ms;
+                }
+            }
+        }
+    }
+    if let Some(desc) = data
+        .get("description")
+        .or_else(|| data.get("text"))
+        .or_else(|| data.get("content"))
+        .and_then(|x| x.as_str())
+    {
+        for marker in ["有效期至", "解除予定", "解除予定時刻", "まで有効"] {
+            if let Some(idx) = desc.find(marker) {
+                let digits: String = desc[idx..]
+                    .chars()
+                    .filter(|c| c.is_ascii_digit())
+                    .take(14)
+                    .collect();
+                if digits.len() >= 12 {
+                    let padded = format!("{:0<14}", &digits[..digits.len().min(14)]);
+                    if let Some(ms) = parse_time_str(&padded) {
+                        return ms;
+                    }
+                }
+            }
+        }
+    }
+    0
+}
+
 
 fn jian_tsunami_grade(_agency: &str, level: &str, title: &str) -> String {
     let s = format!("{level} {title}");
@@ -588,6 +657,8 @@ fn parse_jian_eew(agency: &str, data: &Value) -> Option<EewReport> {
     );
     let (max_intensity_text, intensity_level) =
         fill_intensity(kind, magnitude, depth_km, raw.as_deref());
+    let is_assumption = eew_is_assumption(data, &place);
+    let is_warn = eew_is_warn(data, intensity_level, kind);
 
     Some(EewReport {
         agency: AgencyId(agency.clone()),
@@ -607,7 +678,46 @@ fn parse_jian_eew(agency: &str, data: &Value) -> Option<EewReport> {
             data,
             &["isCancel", "isCanceled", "isCancelled", "canceled", "cancelled", "is_cancel"],
         ),
+        is_assumption,
+        is_warn,
     })
+}
+
+/// Wolfx/JMA：仮定震源（调查中）。
+fn eew_is_assumption(data: &Value, place: &str) -> bool {
+    if flag_true(
+        data,
+        &["isAssumption", "is_assumption", "assumption", "isAssumed"],
+    ) {
+        return true;
+    }
+    let hypo = data
+        .get("Hypocenter")
+        .or_else(|| data.get("hypocenter"))
+        .or_else(|| data.get("placeName"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    [place, hypo]
+        .iter()
+        .any(|s| s.contains("調査中") || s.contains("调查中") || s.contains("仮定"))
+}
+
+/// 警报：显式 isWarn，或标题含「警報」，或 JMA 震度≥5弱。
+fn eew_is_warn(data: &Value, intensity_level: u8, intensity_kind: IntensityKind) -> bool {
+    if flag_true(data, &["isWarn", "is_warn", "warn"]) {
+        return true;
+    }
+    let title = data
+        .get("Title")
+        .or_else(|| data.get("title"))
+        .or_else(|| data.get("infoTypeName"))
+        .or_else(|| data.get("alertflg"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if title.contains("警報") || title.eq_ignore_ascii_case("Warning") {
+        return true;
+    }
+    intensity_kind == IntensityKind::JmaShindo && intensity_level >= 5
 }
 
 fn flag_true(data: &Value, keys: &[&str]) -> bool {
@@ -652,6 +762,7 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
     let place = data
         .get("placeName")
         .or_else(|| data.get("location"))
+        .or_else(|| data.get("place"))
         .or_else(|| data.get("Place"))
         .and_then(|v| v.as_str())?
         .to_string();
@@ -661,6 +772,9 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
     let depth_km = field_f64(data, &["depth", "Depth"]).unwrap_or(10.0);
     let origin_ms = data
         .get("originTime")
+        .or_else(|| data.get("shockTime"))
+        .or_else(|| data.get("time"))
+        .or_else(|| data.get("Time"))
         .map(parse_origin_ms)
         .unwrap_or(0);
     let kind = intensity_kind_for_agency(agency);
@@ -708,114 +822,203 @@ fn cenc_is_auto(agency: &str, data: &Value) -> bool {
     false
 }
 
-/// Wolfx `jma_eew` 扁平 JSON
+/// Wolfx `all_eew` / 单源 WS：按 `type` 分发；`eew_enabled` / `eqlist_enabled` 控制接入。
+pub fn ingest_wolfx_frame(tx: &NetTx, text: &str, eew_enabled: bool, eqlist_enabled: bool) {
+    let Ok(v) = serde_json::from_str::<Value>(text) else {
+        return;
+    };
+    let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    match typ {
+        "heartbeat" | "pong" => {}
+        "jma_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-jma-eew"),
+        "sc_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-cea-pr:四川"),
+        "fj_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-cea-pr:福建"),
+        "cq_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-cea-pr:重庆"),
+        "cenc_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-cea"),
+        "cwa_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-cwa-eew"),
+        "cenc_eqlist" if eqlist_enabled => ingest_wolfx_cenc_eqlist_value(tx, &v),
+        "jma_eqlist" if eqlist_enabled => ingest_wolfx_jma_eqlist_value(tx, &v),
+        // 专用 `cwa_eew` 通道可能无 type：HypoCenter + ReportNum（区别于 JMA 的 Hypocenter + Serial）
+        // 专用 `cwa_eew` 通道可能无 type：HypoCenter + ReportNum（区别于 JMA 的 Hypocenter + Serial）
+        "" if eew_enabled && v.get("HypoCenter").is_some() && v.get("ReportNum").is_some() => {
+            emit_wolfx_eew(tx, &v, "wolfx-cwa-eew");
+        }
+        // 旧版单通道 jma_eew 可能省略 type
+        "" if eew_enabled && v.get("Hypocenter").is_some() && v.get("Serial").is_some() => {
+            emit_wolfx_eew(tx, &v, "wolfx-jma-eew");
+        }
+
+        _ => {}
+    }
+}
+
+/// 兼容旧调用：仅解析 `jma_eew`（或无 type 的 JMA 形扁平包）。
 pub fn ingest_wolfx_jma_eew(tx: &NetTx, text: &str) {
     let Ok(v) = serde_json::from_str::<Value>(text) else {
         return;
     };
-    if v.get("type").and_then(|t| t.as_str()) == Some("heartbeat")
-        || v.get("type").and_then(|t| t.as_str()) == Some("pong")
-    {
+    let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    if typ == "heartbeat" || typ == "pong" {
         return;
     }
+    if typ == "jma_eew" || typ.is_empty() {
+        emit_wolfx_eew(tx, &v, "wolfx-jma-eew");
+    }
+}
+
+/// 专用 `cwa_eew` WebSocket 文本帧。
+pub fn ingest_wolfx_cwa_eew(tx: &NetTx, text: &str) {
+    let Ok(v) = serde_json::from_str::<Value>(text) else {
+        return;
+    };
+    let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    if typ == "heartbeat" || typ == "pong" {
+        return;
+    }
+    emit_wolfx_eew(tx, &v, "wolfx-cwa-eew");
+}
+
+fn emit_wolfx_eew(tx: &NetTx, v: &Value, agency: &str) {
     // 心跳有时只有简短对象
-    if v.get("EventID").is_none() && v.get("Hypocenter").is_none() {
+    if v.get("EventID").is_none()
+        && v.get("Hypocenter").is_none()
+        && v.get("HypoCenter").is_none()
+    {
         return;
     }
     let place = v
         .get("Hypocenter")
+        .or_else(|| v.get("HypoCenter"))
         .and_then(|x| x.as_str())
-        .unwrap_or("—")
-        .to_string();
-    let event_id = v
-        .get("EventID")
-        .and_then(|x| x.as_str())
-        .unwrap_or("wolfx-unknown")
-        .to_string();
-    let serial = v.get("Serial").and_then(|x| x.as_u64()).unwrap_or(1) as u32;
-    let magnitude = field_f64(&v, &["Magunitude", "Magnitude", "magnitude"]).unwrap_or(0.0);
-    let depth_km = field_f64(&v, &["Depth", "depth"]).unwrap_or(10.0);
-    let latitude = field_f64(&v, &["Latitude", "latitude"]).unwrap_or(0.0);
-    let longitude = field_f64(&v, &["Longitude", "longitude"]).unwrap_or(0.0);
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "—".into());
+    let event_id =
+        json_id_string(v, &["EventID", "ID", "id"]).unwrap_or_else(|| "wolfx-unknown".into());
+    let serial = v
+        .get("Serial")
+        .or_else(|| v.get("ReportNum"))
+        .and_then(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or(1) as u32;
+    // Magnitude 优先；Magunitude 仅为兼容旧拼写
+    let Some(magnitude) = field_f64(v, &["Magnitude", "magnitude", "Magunitude"]) else {
+        return;
+    };
+    let depth_km = field_f64(v, &["Depth", "depth"]).unwrap_or(10.0);
+    let Some(latitude) = field_f64(v, &["Latitude", "latitude"]) else {
+        return;
+    };
+    let Some(longitude) = field_f64(v, &["Longitude", "longitude"]) else {
+        return;
+    };
     let origin_ms = v
         .get("OriginTime")
-        .and_then(|x| x.as_str())
-        .and_then(parse_time_str)
+        .or_else(|| v.get("originTime"))
+        .and_then(|x| match x {
+            Value::String(s) => parse_time_str(s),
+            other => {
+                let ms = parse_origin_ms(other);
+                if ms > 0 {
+                    Some(ms)
+                } else {
+                    None
+                }
+            }
+        })
         .unwrap_or(0);
-    let max_t = v
-        .get("MaxIntensity")
-        .and_then(|x| x.as_str())
-        .unwrap_or("—");
-    let (max_intensity_text, level) = fill_intensity(
-        IntensityKind::JmaShindo,
-        magnitude,
-        depth_km,
-        Some(max_t),
-    );
-    let is_cancel = flag_true(&v, &["isCancel", "isCanceled", "is_cancel"])
+
+    let kind = intensity_kind_for_agency(agency);
+    let raw = json_intensity_raw(v, &["MaxIntensity", "maxIntensity", "intensity"]);
+    let (max_intensity_text, intensity_level) =
+        fill_intensity(kind, magnitude, depth_km, raw.as_deref());
+
+    let is_cancel = flag_true(v, &["isCancel", "isCanceled", "is_cancel"])
         || v.get("Type")
             .and_then(|x| x.as_str())
             .is_some_and(|s| s.contains("取消"));
     let is_final = !is_cancel
-        && (flag_true(&v, &["isFinal", "is_final", "Final"])
+        && (flag_true(v, &["isFinal", "is_final", "Final"])
             || v.get("Type")
                 .and_then(|x| x.as_str())
                 .is_some_and(|s| s.contains("最終") || s.contains("最终")));
 
+    let is_assumption = eew_is_assumption(v, &place);
+    let is_warn = eew_is_warn(v, intensity_level, kind);
     let _ = tx.send(NetEvent::Eew(EewReport {
-        agency: AgencyId("wolfx-jma-eew".into()),
+        agency: AgencyId(agency.into()),
         event_id,
         serial,
-        place: crate::place::fix_place("wolfx-jma-eew", &place, latitude, longitude),
+        place: crate::place::fix_place(agency, &place, latitude, longitude),
         magnitude,
         depth_km,
         latitude,
         longitude,
         origin_ms,
         max_intensity_text,
-        intensity_kind: IntensityKind::JmaShindo,
-        intensity_level: level,
+        intensity_kind: kind,
+        intensity_level,
         is_final,
         is_cancel,
+        is_assumption,
+        is_warn,
     }));
 }
 
-/// Wolfx `cenc_eqlist.json`：对象键为 No1..NoN 或数组。
+/// Wolfx `cenc_eqlist`（HTTP JSON 或 WS）：对象键为 No1..NoN 或数组。
 /// 注意：官方字段 `magnitude` / `latitude` / `longitude` / `depth` / `intensity` 多为**字符串**。
 pub fn ingest_wolfx_eqlist(tx: &NetTx, text: &str) {
     let Ok(v) = serde_json::from_str::<Value>(text) else {
         return;
     };
-    let items: Vec<&Value> = if let Some(arr) = v.as_array() {
-        arr.iter().collect()
-    } else if let Some(obj) = v.as_object() {
-        let mut pairs: Vec<_> = obj
-            .iter()
-            .filter(|(k, _)| k.starts_with("No") || k.starts_with("no"))
-            .collect();
-        // No10 须排在 No2 之后：按数字后缀排序
-        pairs.sort_by(|(a, _), (b, _)| {
-            let na = a.trim_start_matches(['N', 'n', 'O', 'o']).parse::<u32>().unwrap_or(0);
-            let nb = b.trim_start_matches(['N', 'n', 'O', 'o']).parse::<u32>().unwrap_or(0);
-            na.cmp(&nb)
-        });
-        pairs.into_iter().map(|(_, val)| val).collect()
-    } else {
-        return;
-    };
+    ingest_wolfx_cenc_eqlist_value(tx, &v);
+}
 
-    for item in items.into_iter().take(30) {
+fn wolfx_eqlist_items(v: &Value) -> Vec<&Value> {
+    if let Some(arr) = v.as_array() {
+        return arr.iter().collect();
+    }
+    let Some(obj) = v.as_object() else {
+        return Vec::new();
+    };
+    let mut pairs: Vec<_> = obj
+        .iter()
+        .filter(|(k, _)| k.starts_with("No") || k.starts_with("no"))
+        .collect();
+    // No10 须排在 No2 之后：按数字后缀排序
+    pairs.sort_by(|(a, _), (b, _)| {
+        let na = a
+            .trim_start_matches(['N', 'n', 'O', 'o'])
+            .parse::<u32>()
+            .unwrap_or(0);
+        let nb = b
+            .trim_start_matches(['N', 'n', 'O', 'o'])
+            .parse::<u32>()
+            .unwrap_or(0);
+        na.cmp(&nb)
+    });
+    pairs.into_iter().map(|(_, val)| val).collect()
+}
+
+fn ingest_wolfx_cenc_eqlist_value(tx: &NetTx, v: &Value) {
+    for item in wolfx_eqlist_items(v).into_iter().take(50) {
         let place = item
             .get("placeName")
             .or_else(|| item.get("location"))
             .or_else(|| item.get("place"))
             .or_else(|| item.get("Place"))
             .and_then(|x| x.as_str())
-            .unwrap_or("—")
-            .to_string();
-        let magnitude = field_f64(item, &["magnitude", "Magnitude"]).unwrap_or(0.0);
-        let latitude = field_f64(item, &["latitude", "Latitude"]).unwrap_or(0.0);
-        let longitude = field_f64(item, &["longitude", "Longitude"]).unwrap_or(0.0);
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "—".into());
+        let Some(magnitude) = field_f64(item, &["magnitude", "Magnitude"]) else {
+            continue;
+        };
+        let Some(latitude) = field_f64(item, &["latitude", "Latitude"]) else {
+            continue;
+        };
+        let Some(longitude) = field_f64(item, &["longitude", "Longitude"]) else {
+            continue;
+        };
         let depth_km = field_f64(item, &["depth", "Depth"]).unwrap_or(10.0);
         let origin_ms = item
             .get("time")
@@ -834,7 +1037,7 @@ pub fn ingest_wolfx_eqlist(tx: &NetTx, text: &str) {
             })
             .unwrap_or_else(|| "—".into());
 
-        let raw = json_intensity_raw(item, &["intensity", "maxIntensity"]);
+        let raw = json_intensity_raw(item, &["intensity", "maxIntensity", "MaxIntensity"]);
         let (intensity_text, intensity_level) = fill_intensity(
             IntensityKind::CnIntensity,
             magnitude,
@@ -856,6 +1059,68 @@ pub fn ingest_wolfx_eqlist(tx: &NetTx, text: &str) {
             depth_km,
             origin_ms,
             is_auto,
+        }));
+    }
+}
+
+fn ingest_wolfx_jma_eqlist_value(tx: &NetTx, v: &Value) {
+    for item in wolfx_eqlist_items(v).into_iter().take(50) {
+        let place = item
+            .get("location")
+            .or_else(|| item.get("place"))
+            .or_else(|| item.get("Hypocenter"))
+            .and_then(|x| x.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "\u{2014}".into());
+        let Some(magnitude) = field_f64(item, &["magnitude", "Magnitude"]) else {
+            continue;
+        };
+        let Some(latitude) = field_f64(item, &["latitude", "Latitude"]) else {
+            continue;
+        };
+        let Some(longitude) = field_f64(item, &["longitude", "Longitude"]) else {
+            continue;
+        };
+        let depth_km = field_f64(item, &["depth", "Depth"]).unwrap_or(10.0);
+        let origin_ms = item
+            .get("time")
+            .or_else(|| item.get("Time"))
+            .and_then(|x| x.as_str())
+            .and_then(parse_time_str)
+            .unwrap_or(0);
+        let time_text = item
+            .get("time")
+            .or_else(|| item.get("Time"))
+            .and_then(|x| x.as_str())
+            .map(|s| {
+                parse_time_str(s)
+                    .map(format_time_text)
+                    .unwrap_or_else(|| s.to_string())
+            })
+            .unwrap_or_else(|| "\u{2014}".into());
+
+        let raw = json_intensity_raw(item, &["shindo", "MaxIntensity", "intensity"]);
+        let (intensity_text, intensity_level) = fill_intensity(
+            IntensityKind::JmaShindo,
+            magnitude,
+            depth_km,
+            raw.as_deref(),
+        );
+
+        let _ = tx.send(NetEvent::Record(EqRecord {
+            agency: AgencyId("wolfx-jma".into()),
+            place: crate::place::fix_place("wolfx-jma", &place, latitude, longitude),
+            time_text,
+            magnitude,
+            intensity_text,
+            intensity_kind: IntensityKind::JmaShindo,
+            intensity_level,
+            latitude,
+            longitude,
+            depth_km,
+            origin_ms,
+            is_auto: false,
         }));
     }
 }
@@ -893,6 +1158,10 @@ pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
         let longitude = field_f64(hypo, &["longitude", "Longitude"]).unwrap_or(0.0);
         let magnitude = field_f64(hypo, &["magnitude", "Magnitude"]).unwrap_or(0.0);
         let depth_km = field_f64(hypo, &["depth", "Depth"]).unwrap_or(10.0);
+        // 无坐标且无震级：跳过（避免空壳进列表）
+        if magnitude <= 0.0 && latitude.abs() < 0.01 && longitude.abs() < 0.01 {
+            continue;
+        }
         let max_scale = eq.get("maxScale").and_then(|x| x.as_i64());
         let (intensity_text, level) = if let Some(scale) = max_scale {
             let t = jian_core::jma_shindo_text(jma_shindo_level(&scale.to_string()));
@@ -1023,6 +1292,7 @@ fn parse_p2p_tsunami(item: &Value) -> Option<TsunamiInfo> {
         issued_ms,
         source: "p2p".into(),
         source_priority: 1,
+        expire_ms: 0,
     })
 }
 
@@ -1159,6 +1429,8 @@ fn pancakes_origin_ms(payload: &Value) -> i64 {
         .get("originTimeIso")
         .or_else(|| payload.get("originTime"))
         .or_else(|| payload.get("OriginTime"))
+        .or_else(|| payload.get("time"))
+        .or_else(|| payload.get("Time"))
         .or_else(|| payload.get("issuedAt"))
         .or_else(|| payload.get("issueTime"))
         .or_else(|| payload.get("effective"))
@@ -1193,6 +1465,8 @@ fn ingest_pancakes_gq(tx: &NetTx, action: &str, payload: &Value, min_mag: f64) {
             intensity_level: 0,
             is_final: true,
             is_cancel: true,
+            is_assumption: false,
+            is_warn: false,
         }));
         return;
     }
@@ -1247,6 +1521,8 @@ fn ingest_pancakes_gq(tx: &NetTx, action: &str, payload: &Value, min_mag: f64) {
         intensity_level,
         is_final: archived,
         is_cancel: false,
+        is_assumption: false,
+        is_warn: false,
     }));
 }
 
@@ -1257,22 +1533,35 @@ fn ingest_pancakes_usgs(tx: &NetTx, action: &str, payload: &Value) {
     let place = payload
         .get("placeName")
         .or_else(|| payload.get("place"))
+        .or_else(|| payload.get("title"))
+        .or_else(|| payload.get("region"))
         .and_then(|x| x.as_str())
         .unwrap_or("—")
         .to_string();
-    let magnitude = field_f64(payload, &["magnitude"]).unwrap_or(0.0);
-    let latitude = field_f64(payload, &["latitude"]).unwrap_or(0.0);
-    let longitude = field_f64(payload, &["longitude"]).unwrap_or(0.0);
-    let depth_km = field_f64(payload, &["depth", "depthKm"]).unwrap_or(10.0);
+    let magnitude = field_f64(payload, &["magnitude", "Magnitude", "mag"]).unwrap_or(0.0);
+    let latitude = field_f64(payload, &["latitude", "Latitude"]).unwrap_or(0.0);
+    let longitude = field_f64(payload, &["longitude", "Longitude"]).unwrap_or(0.0);
+    let depth_km = field_f64(payload, &["depthKm", "depth", "Depth"]).unwrap_or(10.0);
     let origin_ms = pancakes_origin_ms(payload);
-    let raw = json_intensity_raw(payload, &["maxIntensity", "intensity"]);
-    let (intensity_text, intensity_level) =
-        fill_intensity(IntensityKind::CnIntensity, magnitude, depth_km, raw.as_deref());
+    // USGS 常无烈度：缺测不估算，避免小震被估出假烈度
+    let raw = json_intensity_raw(payload, &["maxIntensity", "intensity", "mmi"]);
+    let (intensity_text, intensity_level) = match raw.as_deref() {
+        Some(s) if !s.is_empty() && s != "—" && s != "-" && s != "null" => {
+            fill_intensity(IntensityKind::CnIntensity, magnitude, depth_km, Some(s))
+        }
+        _ => ("—".into(), 0),
+    };
     let info = payload
         .get("infoType")
+        .or_else(|| payload.get("status"))
         .and_then(|x| x.as_str())
         .unwrap_or("");
-    let is_auto = info.eq_ignore_ascii_case("Automatic") || info.eq_ignore_ascii_case("auto");
+    let is_auto = info.eq_ignore_ascii_case("Automatic")
+        || info.eq_ignore_ascii_case("auto")
+        || info.eq_ignore_ascii_case("automatic");
+    if magnitude <= 0.0 && latitude.abs() < 0.01 && longitude.abs() < 0.01 {
+        return;
+    }
     let _ = tx.send(NetEvent::Record(EqRecord {
         agency: AgencyId("usgs".into()),
         place: crate::place::fix_place("usgs", &place, latitude, longitude),
@@ -1310,6 +1599,8 @@ fn ingest_pancakes_jma_eew(tx: &NetTx, action: &str, payload: &Value) {
             intensity_level: 0,
             is_final: true,
             is_cancel: true,
+            is_assumption: false,
+            is_warn: false,
         }));
         return;
     }
@@ -1362,6 +1653,8 @@ fn ingest_pancakes_jma_eew(tx: &NetTx, action: &str, payload: &Value) {
         is_final: flag_true(payload, &["isFinal", "is_final"])
             || status.eq_ignore_ascii_case("final"),
         is_cancel,
+        is_assumption: eew_is_assumption(payload, &place),
+        is_warn: eew_is_warn(payload, intensity_level, IntensityKind::JmaShindo),
     }));
 }
 
@@ -1372,17 +1665,22 @@ fn ingest_pancakes_jma_eqlist(tx: &NetTx, action: &str, payload: &Value) {
     let place = payload
         .get("placeName")
         .or_else(|| payload.get("place"))
+        .or_else(|| payload.get("Hypocenter"))
+        .or_else(|| payload.get("location"))
         .and_then(|x| x.as_str())
         .unwrap_or("—")
         .to_string();
-    let magnitude = field_f64(payload, &["magnitude"]).unwrap_or(0.0);
-    let latitude = field_f64(payload, &["latitude"]).unwrap_or(0.0);
-    let longitude = field_f64(payload, &["longitude"]).unwrap_or(0.0);
-    let depth_km = field_f64(payload, &["depth", "depthKm"]).unwrap_or(10.0);
+    let magnitude = field_f64(payload, &["magnitude", "Magnitude", "Magunitude"]).unwrap_or(0.0);
+    let latitude = field_f64(payload, &["latitude", "Latitude"]).unwrap_or(0.0);
+    let longitude = field_f64(payload, &["longitude", "Longitude"]).unwrap_or(0.0);
+    let depth_km = field_f64(payload, &["depthKm", "depth", "Depth"]).unwrap_or(10.0);
     let origin_ms = pancakes_origin_ms(payload);
-    let raw = json_intensity_raw(payload, &["maxIntensity", "intensity"]);
+    let raw = json_intensity_raw(payload, &["maxIntensity", "MaxIntensity", "intensity"]);
     let (intensity_text, intensity_level) =
         fill_intensity(IntensityKind::JmaShindo, magnitude, depth_km, raw.as_deref());
+    if magnitude <= 0.0 && latitude.abs() < 0.01 && longitude.abs() < 0.01 {
+        return;
+    }
     let _ = tx.send(NetEvent::Record(EqRecord {
         agency: AgencyId("jma".into()),
         place: crate::place::fix_place("jma", &place, latitude, longitude),
@@ -1507,6 +1805,7 @@ fn ingest_pancakes_jma_tsunami(tx: &NetTx, payload: &Value) {
                 .collect()
         })
         .unwrap_or_default();
+    let expire_ms = parse_tsunami_expire_ms(payload);
     let _ = tx.send(NetEvent::Tsunami(TsunamiInfo {
         title: zh_title,
         grade: if cancelled {
@@ -1518,9 +1817,10 @@ fn ingest_pancakes_jma_tsunami(tx: &NetTx, payload: &Value) {
         areas_list,
         cancelled,
         issued_ms,
-            source: "pancakes".into(),
+        source: "pancakes".into(),
         source_priority: 2,
-}));
+        expire_ms,
+    }));
 }
 
 fn ingest_pancakes_ocean_alert(tx: &NetTx, source: &str, payload: &Value) {
@@ -1624,8 +1924,27 @@ fn ingest_pancakes_volcano(tx: &NetTx, payload: &Value) {
                 .map(|s| s.to_string())
         })
         .unwrap_or_else(|| title.clone());
-    let latitude = field_f64(payload, &["latitude", "Latitude", "lat"]).unwrap_or(0.0);
-    let longitude = field_f64(payload, &["longitude", "Longitude", "lon", "lng"]).unwrap_or(0.0);
+    let mut latitude = field_f64(payload, &["latitude", "Latitude", "lat"]).unwrap_or(0.0);
+    let mut longitude = field_f64(payload, &["longitude", "Longitude", "lon", "lng"]).unwrap_or(0.0);
+    if latitude.abs() <= 0.01 && longitude.abs() <= 0.01 {
+        if let Some(arr) = payload.get("areas").and_then(|a| a.as_array()) {
+            for a in arr {
+                let la = field_f64(a, &["latitude", "Latitude", "lat"]).unwrap_or(0.0);
+                let lo = field_f64(a, &["longitude", "Longitude", "lon", "lng"]).unwrap_or(0.0);
+                if la.abs() > 0.01 || lo.abs() > 0.01 {
+                    latitude = la;
+                    longitude = lo;
+                    break;
+                }
+            }
+        }
+    }
+    if latitude.abs() <= 0.01 && longitude.abs() <= 0.01 {
+        if let Some((la, lo)) = jma_volcano_coords(&name).or_else(|| jma_volcano_coords(&title)) {
+            latitude = la;
+            longitude = lo;
+        }
+    }
     let _ = tx.send(NetEvent::Volcano(jian_core::VolcanoNotice {
         agency: AgencyId("jma-volcano".into()),
         name,
@@ -1636,6 +1955,42 @@ fn ingest_pancakes_volcano(tx: &NetTx, payload: &Value) {
         longitude,
     }));
 }
+
+fn jma_volcano_coords(name: &str) -> Option<(f64, f64)> {
+    const TABLE: &[(&str, f64, f64)] = &[
+        ("桜島", 31.593, 130.657),
+        ("薩摩硫黄島", 30.793, 130.305),
+        ("口永良部島", 30.447, 130.217),
+        ("諏訪之瀬島", 29.638, 129.716),
+        ("阿蘇山", 32.884, 131.104),
+        ("霧島山", 31.934, 130.862),
+        ("新燃岳", 31.909, 130.886),
+        ("十勝岳", 43.418, 142.686),
+        ("樽前山", 42.690, 141.380),
+        ("俱多楽", 42.488, 141.157),
+        ("北海道駒ヶ岳", 42.063, 140.677),
+        ("有珠山", 42.157, 140.412),
+        ("白山", 36.135, 138.523),
+        ("吾妻山", 37.647, 140.081),
+        ("草津白根山", 36.650, 139.233),
+        ("那須岳", 36.864, 138.114),
+        ("富士山", 35.363, 138.731),
+        ("伊豆大島", 34.724, 139.004),
+        ("三宅島", 34.736, 139.395),
+        ("大島", 34.722, 139.398),
+        ("三原山", 34.217, 139.150),
+        ("硫黄島", 30.793, 130.305),
+        ("桜島", 31.593, 130.657),
+    ];
+    let n = name.trim();
+    for (k, la, lo) in TABLE {
+        if n.contains(k) {
+            return Some((*la, *lo));
+        }
+    }
+    None
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1679,6 +2034,9 @@ mod tests {
         assert_eq!(rec.intensity_level, 8);
         assert_eq!(rec.place, "巴拿马");
         assert!(!rec.is_auto);
+        assert!(rec.origin_ms > 0, "CENC time must parse to origin_ms");
+        // 2026-10-10 12:14:01 CST
+        assert_eq!(rec.origin_ms, 1_791_605_641_000);
     }
 
     #[test]
@@ -1701,5 +2059,77 @@ mod tests {
             panic!("expected Record");
         };
         assert!(rec.is_auto);
+    }
+
+    #[test]
+    fn wolfx_all_dispatches_sc_eew() {
+        let body = r#"{
+            "type": "sc_eew",
+            "ID": 1,
+            "EventID": "SC202610110001",
+            "ReportTime": "2026-10-11 12:00:00",
+            "ReportNum": 2,
+            "OriginTime": "2026-10-11 11:59:30",
+            "HypoCenter": "四川阿坝州红原县",
+            "Latitude": 32.8,
+            "Longitude": 102.6,
+            "Magnitude": 4.5,
+            "Depth": 12.0,
+            "MaxIntensity": 5.0
+        }"#;
+        let (tx, mut rx) = channel();
+        ingest_wolfx_frame(&tx, body, true, true);
+        let NetEvent::Eew(e) = rx.try_recv().expect("eew") else {
+            panic!("expected Eew");
+        };
+        assert_eq!(e.agency.0, "wolfx-cea-pr:四川");
+        assert_eq!(e.event_id, "SC202610110001");
+        assert_eq!(e.serial, 2);
+        assert!((e.magnitude - 4.5).abs() < 1e-9);
+        assert_eq!(e.intensity_kind, IntensityKind::CnIntensity);
+    }
+
+    #[test]
+    fn wolfx_all_dispatches_jma_eqlist() {
+        let body = r#"{
+            "type": "jma_eqlist",
+            "No1": {
+                "time": "2026/10/11 12:00:00",
+                "location": "千葉県東方沖",
+                "magnitude": "4.2",
+                "shindo": "3",
+                "depth": "40km",
+                "latitude": "35.5",
+                "longitude": "140.5"
+            }
+        }"#;
+        let (tx, mut rx) = channel();
+        ingest_wolfx_frame(&tx, body, true, true);
+        let NetEvent::Record(rec) = rx.try_recv().expect("record") else {
+            panic!("expected Record");
+        };
+        assert_eq!(rec.agency.0, "wolfx-jma");
+        assert!((rec.magnitude - 4.2).abs() < 1e-9);
+        assert_eq!(rec.intensity_kind, IntensityKind::JmaShindo);
+        assert!(rec.origin_ms > 0);
+    }
+
+    #[test]
+    fn wolfx_eew_toggle_skips_when_disabled() {
+        let body = r#"{
+            "type": "jma_eew",
+            "EventID": "20261011201300",
+            "Serial": 1,
+            "OriginTime": "2026/10/11 20:13:00",
+            "Hypocenter": "未知",
+            "Latitude": 35.0,
+            "Longitude": 139.0,
+            "Magnitude": 5.0,
+            "Depth": 10.0,
+            "MaxIntensity": "3"
+        }"#;
+        let (tx, mut rx) = channel();
+        ingest_wolfx_frame(&tx, body, false, true);
+        assert!(rx.try_recv().is_err());
     }
 }

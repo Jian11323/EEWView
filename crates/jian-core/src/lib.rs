@@ -8,7 +8,8 @@ pub mod palette;
 use serde::{Deserialize, Serialize};
 
 pub use agency::{
-    agency_bracket, agency_family, cea_pr_agency_id, place_with_agency, AgencyFamily,
+    agency_bracket, agency_family, cea_pr_agency_id, eew_feed_priority, place_with_agency,
+    AgencyFamily,
     EEW_FILTER_FAMILIES, RECORD_FILTER_FAMILIES,
 };
 pub use estimate::{
@@ -56,6 +57,12 @@ pub struct EewReport {
     pub is_final: bool,
     #[serde(default)]
     pub is_cancel: bool,
+    /// 仮定震源 / 调查中（Wolfx `isAssumption` 等）；不驱动本地倒计时
+    #[serde(default)]
+    pub is_assumption: bool,
+    /// 紧急地震速报（警报）（Wolfx `isWarn` 或震度≥5弱）
+    #[serde(default)]
+    pub is_warn: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +103,8 @@ impl EqRecord {
             intensity_level: self.intensity_level,
             is_final: false,
             is_cancel: false,
+            is_assumption: false,
+            is_warn: false,
         }
     }
 }
@@ -148,6 +157,9 @@ pub struct TsunamiInfo {
     /// 来源优先级：Jian=3 > Pancakes=2 > P2P=1（高者优先）
     #[serde(default)]
     pub source_priority: u8,
+    /// 预报有效截止/预计解除 unix ms（0 未知）。注意报/警报级通常靠解除报文，不用此字段自动清。
+    #[serde(default)]
+    pub expire_ms: i64,
 }
 
 /// JMA 海啸四档官方色（预报青绿 / 注意报黄 / 警报红 / 大海啸紫）。
@@ -204,6 +216,8 @@ impl StationSample {
             intensity_level: self.intensity_level,
             is_final: false,
             is_cancel: false,
+            is_assumption: false,
+            is_warn: false,
         }
     }
 }
@@ -261,6 +275,10 @@ pub struct AppSnapshot {
     pub eew_list: Vec<EewReport>,
     pub stations: Vec<StationSample>,
     pub countdown_s: Option<i32>,
+    /// 本机预估烈度/震度（与 countdown_s 同步；无倒计时时为空）
+    pub countdown_local_kind: IntensityKind,
+    pub countdown_local_level: u8,
+    pub countdown_local_text: String,
     pub health_jian: HealthStatus,
     pub health_wolfx: HealthStatus,
     pub health_p2p: HealthStatus,
@@ -297,6 +315,8 @@ impl AppSnapshot {
             intensity_level: 5,
             is_final: false,
             is_cancel: false,
+            is_assumption: false,
+            is_warn: true,
         };
         let eew_b = EewReport {
             agency: AgencyId("cea".into()),
@@ -313,6 +333,8 @@ impl AppSnapshot {
             intensity_level: 6,
             is_final: false,
             is_cancel: false,
+            is_assumption: false,
+            is_warn: false,
         };
         let eew_pr = EewReport {
             agency: AgencyId("cea-pr:四川".into()),
@@ -329,6 +351,8 @@ impl AppSnapshot {
             intensity_level: 6,
             is_final: false,
             is_cancel: false,
+            is_assumption: false,
+            is_warn: false,
         };
         let eew_c = EewReport {
             agency: AgencyId("jma-eew".into()),
@@ -345,6 +369,8 @@ impl AppSnapshot {
             intensity_level: 6,
             is_final: false,
             is_cancel: false,
+            is_assumption: false,
+            is_warn: true,
         };
 
         Self {
@@ -354,7 +380,7 @@ impl AppSnapshot {
                 EqRecord {
                     agency: AgencyId("cenc".into()),
                     place: "四川阿坝州汶川县".into(),
-                    time_text: "10-09 12:01".into(),
+                    time_text: "2026-10-09 12:01".into(),
                     magnitude: 4.2,
                     intensity_text: "Ⅴ".into(),
                     intensity_kind: IntensityKind::CnIntensity,
@@ -368,7 +394,7 @@ impl AppSnapshot {
                 EqRecord {
                     agency: AgencyId("jma".into()),
                     place: "千叶县西北部".into(),
-                    time_text: "10-09 11:58".into(),
+                    time_text: "2026-10-09 11:58".into(),
                     magnitude: 5.4,
                     intensity_text: "5弱".into(),
                     intensity_kind: IntensityKind::JmaShindo,
@@ -382,7 +408,7 @@ impl AppSnapshot {
                 EqRecord {
                     agency: AgencyId("jma".into()),
                     place: "福岛县中通".into(),
-                    time_text: "10-09 09:12".into(),
+                    time_text: "2026-10-09 09:12".into(),
                     magnitude: 4.6,
                     intensity_text: "4".into(),
                     intensity_kind: IntensityKind::JmaShindo,
@@ -428,6 +454,9 @@ impl AppSnapshot {
                 },
             ],
             countdown_s: Some(28),
+            countdown_local_kind: IntensityKind::CnIntensity,
+            countdown_local_level: 3,
+            countdown_local_text: "3".into(),
             health_jian: HealthStatus::Normal,
             health_wolfx: HealthStatus::Normal,
             health_p2p: HealthStatus::Fluctuating,
@@ -456,7 +485,7 @@ impl AppSnapshot {
                 let lat = ev.latitude;
                 self.active = Some(ev);
                 self.overlay_mode = OverlayMode::Wave;
-                Some((lon, lat, 7.2))
+                Some((lon, lat, 8.0))
             }
             SidebarTab::Records => {
                 let r = self.records.get(index)?;
@@ -464,7 +493,7 @@ impl AppSnapshot {
                 let lat = r.latitude;
                 self.active = Some(r.as_header_report());
                 self.overlay_mode = OverlayMode::Wave;
-                Some((lon, lat, 7.2))
+                Some((lon, lat, 8.0))
             }
             SidebarTab::Station => {
                 let s = self.stations.get(index)?;
@@ -499,6 +528,9 @@ impl AppSnapshot {
             eew_list: Vec::new(),
             stations: Vec::new(),
             countdown_s: None,
+            countdown_local_kind: IntensityKind::CnIntensity,
+            countdown_local_level: 0,
+            countdown_local_text: String::new(),
             health_jian: HealthStatus::Abnormal,
             health_wolfx: HealthStatus::Abnormal,
             health_p2p: HealthStatus::Abnormal,
@@ -518,6 +550,7 @@ impl AppSnapshot {
     }
 
     /// 海啸并入：Jian > Pancakes > P2P；同级取更新的 issued_ms。
+    /// 解除报文（注意报/警报等）直接清空；预报可带 expire_ms，到期由 `prune_expired_tsunami` 清除。
     pub fn upsert_tsunami(&mut self, info: TsunamiInfo) {
         let cancel = info.cancelled || info.grade.eq_ignore_ascii_case("Cancel");
         if cancel {
@@ -527,6 +560,19 @@ impl AppSnapshot {
                 }
             }
             self.tsunami = None;
+            return;
+        }
+        // 入库时已过期的预报直接丢弃，并清掉同级旧残留
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if info.expire_ms > 0 && now_ms >= info.expire_ms {
+            if let Some(cur) = self.tsunami.as_ref() {
+                if info.source_priority >= cur.source_priority {
+                    self.tsunami = None;
+                }
+            }
             return;
         }
         if let Some(cur) = self.tsunami.as_ref() {
@@ -541,6 +587,38 @@ impl AppSnapshot {
             }
         }
         self.tsunami = Some(info);
+    }
+
+    /// 清除已解除/已到期的海啸顶条。
+    /// 预报：优先 `expire_ms`；缺截止时用 issued 后 2 小时兜底。注意报/警报等仍主要靠解除报文。
+    pub fn prune_expired_tsunami(&mut self, now_ms: i64) {
+        let Some(t) = self.tsunami.as_ref() else {
+            return;
+        };
+        if t.cancelled || t.grade.eq_ignore_ascii_case("Cancel") {
+            self.tsunami = None;
+            return;
+        }
+        if t.expire_ms > 0 && now_ms >= t.expire_ms {
+            self.tsunami = None;
+            return;
+        }
+        let is_forecast = matches!(t.grade.as_str(), "Forecast" | "forecast" | "")
+            || t.title.contains("预报")
+            || t.title.contains("予報");
+        if !is_forecast {
+            return;
+        }
+        // 无解除时间的预报：避免永久残留
+        let base = if t.issued_ms > 0 {
+            t.issued_ms
+        } else {
+            return;
+        };
+        const FORECAST_TTL_MS: i64 = 2 * 60 * 60 * 1000;
+        if now_ms >= base + FORECAST_TTL_MS {
+            self.tsunami = None;
+        }
     }
 
     pub fn set_health(&mut self, source: &str, status: HealthStatus) {
@@ -569,21 +647,19 @@ impl AppSnapshot {
         prune_eew_list(&mut self.eew_list, 14 * 24 * 60 * 60 * 1000, 80);
     }
 
-    /// 插入/更新 EEW：同 agency+event_id 取更高 serial；不同 event_id 各留一条（eewcn 回看）。
-    /// 地图波圈/叉标仅画仍在传播的；侧栏展示全部保留记录。
+    /// 插入/更新 EEW：跨 API 同机构族同一事件合并（如 Jian `jma-eew` 与 Wolfx `wolfx-jma-eew`）。
+    /// 报数更高优先；报数相同取更高镜像源优先级。不同事件各留一条供多震波圈。
     /// 新预警：刷新左上角 + 切到预警 Tab；不改列表选中（与跟焦解绑，对齐 eewcn）。
     pub fn upsert_eew(&mut self, report: EewReport) {
-        let key = (report.agency.0.clone(), report.event_id.clone());
-        if let Some(pos) = self
+        let pos = self
             .eew_list
             .iter()
-            .position(|e| e.agency.0 == key.0 && e.event_id == key.1)
-        {
-            if report.serial >= self.eew_list[pos].serial {
-                self.eew_list[pos] = report.clone();
-            } else {
+            .position(|e| same_eew_event(e, &report));
+        if let Some(pos) = pos {
+            if !prefer_eew_report(&self.eew_list[pos], &report) {
                 return;
             }
+            self.eew_list[pos] = report.clone();
         } else {
             self.eew_list.push(report.clone());
         }
@@ -592,7 +668,7 @@ impl AppSnapshot {
         if let Some(pos) = self
             .eew_list
             .iter()
-            .position(|e| e.agency.0 == key.0 && e.event_id == key.1)
+            .position(|e| same_eew_event(e, &report))
         {
             self.active = Some(self.eew_list[pos].clone());
             self.overlay_mode = OverlayMode::Wave;
@@ -609,7 +685,7 @@ impl AppSnapshot {
         })
     }
 
-    /// 插入速报；按 agency+place+time 粗去重；列表按发震时刻新→旧。
+    /// 插入速报；全源混合后按机构族+发震时刻去重；新→旧。
     /// 无活跃预警时：新项会选中并写入 `pending_record_fly`（有坐标时）。
     /// 有预警展示中：只入列表，不抢左上角与地图跟焦。
     pub fn upsert_record(&mut self, record: EqRecord) {
@@ -619,13 +695,22 @@ impl AppSnapshot {
         {
             return;
         }
-        let dup = self.records.iter().any(|r| {
-            r.agency == record.agency
-                && r.place == record.place
-                && r.time_text == record.time_text
-                && (r.magnitude - record.magnitude).abs() < 0.05
-        });
-        if dup {
+        // 跨 API 同机构族同一事件：更新槽位（Jian cenc ↔ Wolfx wolfx-cenc；自动→正式）
+        if let Some(pos) = self.records.iter().position(|r| same_record_event(r, &record)) {
+            let cur = &self.records[pos];
+            let prefer_new = if cur.is_auto && !record.is_auto {
+                true
+            } else if !cur.is_auto && record.is_auto {
+                false
+            } else {
+                let pn = eew_feed_priority(&record.agency.0);
+                let po = eew_feed_priority(&cur.agency.0);
+                pn > po || (pn == po && record.origin_ms >= cur.origin_ms)
+            };
+            if prefer_new {
+                self.records[pos] = record.clone();
+                sort_records_newest_first(&mut self.records);
+            }
             return;
         }
         let lon = record.longitude;
@@ -688,7 +773,41 @@ impl AppSnapshot {
         self.active = Some(ev);
         self.overlay_mode = OverlayMode::Wave;
         self.tab = SidebarTab::Eew;
-        Some((lon, lat, 6.0))
+        Some((lon, lat, 7.2))
+    }
+
+    /// 无预警时取最新有坐标速报的镜头目标；不改 Tab（仅相机跟焦）。
+    pub fn latest_record_camera(&self) -> Option<(f64, f64, f64, String)> {
+        let idx = self.records.iter().position(|r| {
+            r.latitude.abs() > 0.01 || r.longitude.abs() > 0.01
+        })?;
+        let rec = &self.records[idx];
+        let key = format!(
+            "{}|{}|{}|{:.2}",
+            rec.agency.0, rec.place, rec.origin_ms, rec.magnitude
+        );
+        Some((rec.longitude, rec.latitude, 7.5, key))
+    }
+
+    /// 启动超时无预警时：选中最新速报并返回镜头目标。
+    pub fn focus_latest_record(&mut self) -> Option<(f64, f64, f64, String)> {
+        let (lon, lat, zoom, key) = self.latest_record_camera()?;
+        let idx = self.records.iter().position(|r| {
+            let k = format!(
+                "{}|{}|{}|{:.2}",
+                r.agency.0, r.place, r.origin_ms, r.magnitude
+            );
+            k == key
+        })?;
+        let rec = self.records[idx].clone();
+        self.tab = SidebarTab::Records;
+        self.selection = Some(ListSelection {
+            tab: SidebarTab::Records,
+            index: idx,
+        });
+        self.active = Some(rec.as_header_report());
+        self.overlay_mode = OverlayMode::Wave;
+        Some((lon, lat, zoom, key))
     }
 
     /// 用一帧有感测站快照替换列表（按震度降序，上限 120）
@@ -780,32 +899,38 @@ pub fn is_wave_candidate(e: &EewReport) -> bool {
 
 /// 与 jian_travel::max_s_wave_spread_km 对齐的本地副本（core 不依赖 travel）。
 fn approx_max_s_km(magnitude: f64) -> f64 {
-    if magnitude <= 3.0 {
-        600.0
+    if magnitude <= 2.0 {
+        200.0
+    } else if magnitude <= 2.5 {
+        350.0
+    } else if magnitude <= 3.0 {
+        500.0
+    } else if magnitude <= 3.5 {
+        700.0
     } else if magnitude <= 4.0 {
-        800.0
+        900.0
+    } else if magnitude <= 4.5 {
+        1200.0
     } else if magnitude <= 5.0 {
-        1500.0
+        1600.0
     } else if magnitude <= 5.5 {
-        2000.0
+        2100.0
     } else if magnitude <= 6.0 {
-        2250.0
-    } else if magnitude <= 6.2 {
-        2500.0
+        2600.0
     } else if magnitude <= 6.5 {
-        3200.0
+        3400.0
     } else if magnitude <= 7.0 {
-        4000.0
-    } else if magnitude <= 7.2 {
-        5000.0
+        4200.0
     } else if magnitude <= 7.5 {
-        6000.0
+        5200.0
+    } else if magnitude <= 8.0 {
+        6200.0
     } else {
-        6500.0
+        7500.0
     }
 }
 
-/// S 波是否仍在传播（地表等效约 3.5 km/s；走完即视为结束）。
+/// S 波是否仍在传播（地表等效约 5 km/s，与走时兜底一致；走完即视为结束）。
 pub fn eew_wave_active(e: &EewReport, now_ms: i64) -> bool {
     if !is_wave_candidate(e) {
         return false;
@@ -819,8 +944,8 @@ pub fn eew_wave_active(e: &EewReport, now_ms: i64) -> bool {
     }
     let elapsed_s = (age_ms as f64 / 1000.0).max(0.0);
     let max_km = approx_max_s_km(e.magnitude);
-    // 略留余量，避免刚走完就闪掉
-    elapsed_s * 3.5 < max_km * 1.05
+    // 与地图波圈上限对齐；略留余量避免刚走完闪掉
+    elapsed_s * 5.0 < max_km * 1.05
 }
 
 /// 仍在传播中的多震：PS 走完即排除（不按 30 分钟挂着）。`max_age_ms` 仅兜底。
@@ -833,7 +958,7 @@ pub fn eew_map_markers(list: &[EewReport], now_ms: i64) -> Vec<&EewReport> {
     live_wave_eews(list, now_ms, 0)
 }
 
-/// 预警侧栏：每个数据源只显示最新一条（GQ 直接替换）；波走完仍留这条供回看。
+/// 预警侧栏：每个机构族只显示最新一条（跨 API 镜像已去重）；波走完仍留这条供回看。
 /// 地图多震仍用 live_wave_eews，与列表无关。
 pub fn eew_sidebar_entries(list: &[EewReport]) -> Vec<(usize, &EewReport)> {
     latest_eew_per_source(list)
@@ -846,7 +971,7 @@ pub fn eew_sidebar_entries(list: &[EewReport]) -> Vec<(usize, &EewReport)> {
         .collect()
 }
 
-/// 每个数据源（agency）只保留发震最新的一条。
+/// 每个机构族（如 JMA，含 Jian/Wolfx 镜像）只保留发震最新的一条。
 pub fn latest_eew_per_source(list: &[EewReport]) -> Vec<&EewReport> {
     let mut best: Vec<&EewReport> = Vec::new();
     for e in list {
@@ -857,10 +982,11 @@ pub fn latest_eew_per_source(list: &[EewReport]) -> Vec<&EewReport> {
         {
             continue;
         }
-        if let Some(pos) = best.iter().position(|b| b.agency.0 == e.agency.0) {
+        let fam = agency_family(&e.agency.0);
+        if let Some(pos) = best.iter().position(|b| agency_family(&b.agency.0) == fam) {
             let cur = best[pos];
             let newer = recency_ms(e.origin_ms) > recency_ms(cur.origin_ms)
-                || (e.origin_ms == cur.origin_ms && e.serial > cur.serial);
+                || (e.origin_ms == cur.origin_ms && prefer_eew_report(cur, e));
             if newer {
                 best[pos] = e;
             }
@@ -874,6 +1000,60 @@ pub fn latest_eew_per_source(list: &[EewReport]) -> Vec<&EewReport> {
             .then(b.serial.cmp(&a.serial))
     });
     best
+}
+
+/// 跨 API 是否同一 EEW 事件（同机构族 + 同 EventID，或发震时刻/震中接近）。
+fn same_record_event(a: &EqRecord, b: &EqRecord) -> bool {
+    if agency_family(&a.agency.0) != agency_family(&b.agency.0) {
+        return false;
+    }
+    if a.origin_ms > 0 && b.origin_ms > 0 {
+        if (a.origin_ms - b.origin_ms).abs() > 120_000 {
+            return false;
+        }
+    } else if a.time_text != b.time_text {
+        return false;
+    }
+    let dlat = (a.latitude - b.latitude).abs();
+    let dlon = (a.longitude - b.longitude).abs();
+    let dmag = (a.magnitude - b.magnitude).abs();
+    dlat <= 0.35 && dlon <= 0.35 && dmag <= 0.6
+}
+
+pub fn same_eew_event(a: &EewReport, b: &EewReport) -> bool {
+    if agency_family(&a.agency.0) != agency_family(&b.agency.0) {
+        return false;
+    }
+    let id_a = a.event_id.trim();
+    let id_b = b.event_id.trim();
+    let id_usable = |id: &str| {
+        !id.is_empty()
+            && id != "—"
+            && id != "wolfx-unknown"
+            && !id.starts_with("anon:")
+            && !id.starts_with("station:")
+            && !id.starts_with("record:")
+    };
+    if id_usable(id_a) && id_usable(id_b) && id_a == id_b {
+        return true;
+    }
+    if a.origin_ms > 0 && b.origin_ms > 0 && (a.origin_ms - b.origin_ms).abs() <= 180_000 {
+        let dlat = (a.latitude - b.latitude).abs();
+        let dlon = (a.longitude - b.longitude).abs();
+        let dmag = (a.magnitude - b.magnitude).abs();
+        if dlat <= 0.5 && dlon <= 0.5 && dmag <= 0.8 {
+            return true;
+        }
+    }
+    false
+}
+
+/// `new` 是否应覆盖 `old`：报数优先，其次镜像源优先级。
+fn prefer_eew_report(old: &EewReport, new: &EewReport) -> bool {
+    if new.serial != old.serial {
+        return new.serial > old.serial;
+    }
+    eew_feed_priority(&new.agency.0) >= eew_feed_priority(&old.agency.0)
 }
 
 fn recency_ms(origin_ms: i64) -> i64 {
@@ -897,7 +1077,8 @@ fn prune_eew_list(list: &mut Vec<EewReport>, max_age_ms: i64, max_len: usize) {
     // 每源最新（非取消、有坐标）必须保留，否则冷启动历史会被 6h 窗清空
     let mut keep_ids: std::collections::HashSet<(String, String)> =
         std::collections::HashSet::new();
-    let mut best_by_agency: std::collections::HashMap<String, usize> =
+    // 每机构族最新一条（跨 API 镜像只留一条）
+    let mut best_by_family: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
     for (i, e) in list.iter().enumerate() {
         if e.is_cancel
@@ -907,21 +1088,22 @@ fn prune_eew_list(list: &mut Vec<EewReport>, max_age_ms: i64, max_len: usize) {
         {
             continue;
         }
-        match best_by_agency.get(&e.agency.0) {
+        let fam = agency_family(&e.agency.0).as_filter_key().to_string();
+        match best_by_family.get(&fam) {
             None => {
-                best_by_agency.insert(e.agency.0.clone(), i);
+                best_by_family.insert(fam, i);
             }
             Some(&j) => {
                 let cur = &list[j];
                 let newer = recency_ms(e.origin_ms) > recency_ms(cur.origin_ms)
-                    || (e.origin_ms == cur.origin_ms && e.serial > cur.serial);
+                    || (e.origin_ms == cur.origin_ms && prefer_eew_report(cur, e));
                 if newer {
-                    best_by_agency.insert(e.agency.0.clone(), i);
+                    best_by_family.insert(fam, i);
                 }
             }
         }
     }
-    for &i in best_by_agency.values() {
+    for &i in best_by_family.values() {
         keep_ids.insert((list[i].agency.0.clone(), list[i].event_id.clone()));
     }
 
@@ -984,4 +1166,54 @@ fn sort_eew_newest_first(list: &mut [EewReport]) {
 
 fn sort_records_newest_first(list: &mut [EqRecord]) {
     list.sort_by(|a, b| recency_ms(b.origin_ms).cmp(&recency_ms(a.origin_ms)));
+}
+
+#[cfg(test)]
+mod eew_dedup_tests {
+    use super::*;
+
+    fn sample(agency: &str, event_id: &str, serial: u32) -> EewReport {
+        EewReport {
+            agency: AgencyId(agency.into()),
+            event_id: event_id.into(),
+            serial,
+            place: "宫古岛近海".into(),
+            magnitude: 4.6,
+            depth_km: 10.0,
+            latitude: 24.8,
+            longitude: 125.3,
+            origin_ms: 1_728_650_000_000,
+            max_intensity_text: "2".into(),
+            intensity_kind: IntensityKind::JmaShindo,
+            intensity_level: 2,
+            is_final: false,
+            is_cancel: false,
+            is_assumption: false,
+            is_warn: false,
+        }
+    }
+
+    #[test]
+    fn upsert_merges_jian_and_wolfx_jma() {
+        let mut snap = AppSnapshot::offline_sample();
+        snap.eew_list.clear();
+        snap.active = None;
+        snap.upsert_eew(sample("wolfx-jma-eew", "20261011201300", 6));
+        snap.upsert_eew(sample("jma-eew", "20261011201300", 6));
+        assert_eq!(snap.eew_list.len(), 1);
+        assert_eq!(snap.eew_list[0].agency.0, "jma-eew");
+        let side = eew_sidebar_entries(&snap.eew_list);
+        assert_eq!(side.len(), 1);
+    }
+
+    #[test]
+    fn higher_serial_from_wolfx_updates_jian_slot() {
+        let mut snap = AppSnapshot::offline_sample();
+        snap.eew_list.clear();
+        snap.active = None;
+        snap.upsert_eew(sample("jma-eew", "20261011201300", 5));
+        snap.upsert_eew(sample("wolfx-jma-eew", "20261011201300", 6));
+        assert_eq!(snap.eew_list.len(), 1);
+        assert_eq!(snap.eew_list[0].serial, 6);
+    }
 }

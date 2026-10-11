@@ -434,7 +434,7 @@ impl Default for AppConfig {
                 tile_source: "arcwob".into(),
                 default_lon: 120.0,
                 default_lat: 30.0,
-                default_zoom: 5.0,
+                default_zoom: 6.8,
             },
             audio: AudioConfig {
                 event_pack: "srev".into(),

@@ -5,7 +5,7 @@ mod settings;
 mod theme;
 
 use chrono::{FixedOffset, Local};
-use egui::{Color32, FontId, Frame, Margin, RichText, Sense, Stroke, Ui, Vec2};
+use egui::{Color32, FontFamily, FontId, Frame, Margin, RichText, Sense, Stroke, Ui, Vec2};
 use intensity_icons::IntensityIcons;
 use jian_core::palette::color_for;
 use jian_core::{
@@ -223,9 +223,9 @@ impl MainShell {
                                 ev.latitude,
                                 r,
                                 map_rect.width().min(map_rect.height()),
-                                0.82,
+                                0.58,
                             )
-                            .clamp(5.2, 10.5);
+                            .clamp(6.8, 11.2);
                             self.map.apply_linear_zoom_out(z, 0.10);
                             ctx.request_repaint_after(std::time::Duration::from_millis(16));
                         }
@@ -290,9 +290,9 @@ impl MainShell {
                                                 lat,
                                                 r_km,
                                                 map_rect.width().min(map_rect.height()),
-                                                0.82,
+                                                0.58,
                                             )
-                                            .clamp(5.2, 10.5);
+                                            .clamp(6.8, 11.2);
                                             let dur = if tab == SidebarTab::Eew {
                                                 1.0
                                             } else {
@@ -407,13 +407,14 @@ fn format_list_time(origin_ms: i64) -> String {
         return "—".into();
     };
     let cst = FixedOffset::east_opt(8 * 3600).unwrap();
-    dt.with_timezone(&cst).format("%m-%d %H:%M").to_string()
+    dt.with_timezone(&cst).format("%Y-%m-%d %H:%M").to_string()
 }
 
 fn rgb(c: jian_core::palette::Rgb) -> Color32 {
     Color32::from_rgb(c.r, c.g, c.b)
 }
 
+#[allow(dead_code)]
 fn glass_frame(p: &ThemePalette) -> Frame {
     Frame::NONE
         .fill(p.panel_glass)
@@ -507,24 +508,23 @@ fn draw_map_load_banner(ui: &mut Ui, p: &ThemePalette, state: BasemapLoadState, 
         });
 }
 
-/// 左上角：仅当前仍在传播的预警；历史回看不显示信息头。
-fn header_eew(snap: &AppSnapshot) -> Option<&jian_core::EewReport> {
+/// 左上预警框与右上实时震度卡共用顶边。
+const OVERLAY_TOP_Y: f32 = 12.0;
+
+/// 左上角堆叠条：仍在传播的预警（EEWCN 向下堆叠，不切换单条）。
+fn header_live_eews(snap: &AppSnapshot) -> Vec<&jian_core::EewReport> {
     let now_ms = chrono::Utc::now().timestamp_millis();
-    if let Some(ev) = snap.active.as_ref() {
-        if !ev.is_cancel
-            && !ev.event_id.starts_with("station:")
-            && !ev.event_id.starts_with("record:")
-            && eew_wave_active(ev, now_ms)
-        {
-            return Some(ev);
-        }
-    }
-    live_wave_eews(&snap.eew_list, now_ms, 0).into_iter().next()
+    live_wave_eews(&snap.eew_list, now_ms, 0)
 }
 
-/// 左上角是否正在展示预警信息头（用于海啸条避让）。
-fn eew_header_visible(snap: &AppSnapshot) -> bool {
-    header_eew(snap).is_some()
+/// 左上角预警条总高度（海啸条避让）。
+fn eew_header_stack_height(snap: &AppSnapshot) -> f32 {
+    let n = header_live_eews(snap).len();
+    if n == 0 {
+        return 0.0;
+    }
+    // 单条约 96px + 条间距 6
+    96.0 * n as f32 + 6.0 * (n.saturating_sub(1) as f32)
 }
 
 fn draw_event_header(
@@ -534,117 +534,123 @@ fn draw_event_header(
     scale: &str,
     icons: &IntensityIcons,
 ) {
-    let Some(ev) = header_eew(snap) else {
+    let live = header_live_eews(snap);
+    if live.is_empty() {
         return;
-    };
-
-    let agency = agency_bracket(&ev.agency.0);
-    let title = if ev.is_cancel {
-        format!("{} ({agency}) \u{00b7} 取消", ev.place)
-    } else if ev.serial > 0 && ev.serial < 10_000 {
-        format!("{} ({agency}) #{}", ev.place, ev.serial)
-    } else {
-        format!("{} ({agency})", ev.place)
-    };
-    let time_line = format_header_time(ev.origin_ms);
-    let mag_line = format!("M{:.1}", ev.magnitude);
-    let depth_line = format!("{:.0}km", ev.depth_km);
-    let now_ms = chrono::Utc::now().timestamp_millis();
-    let live = live_wave_eews(&snap.eew_list, now_ms, 30 * 60 * 1000);
-    let multi_idx = live
-        .iter()
-        .position(|e| e.agency.0 == ev.agency.0 && e.event_id == ev.event_id)
-        .map(|i| (i + 1, live.len()));
+    }
 
     const LEFT_PANEL_X: f32 = 12.0;
     const LEFT_PANEL_W: f32 = 340.0;
+    const ROW_GAP: f32 = 6.0;
     egui::Area::new(egui::Id::new("event_header"))
-        .fixed_pos(ui.max_rect().left_top() + Vec2::new(LEFT_PANEL_X, 12.0))
+        .fixed_pos(ui.max_rect().left_top() + Vec2::new(LEFT_PANEL_X, OVERLAY_TOP_Y))
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
-            // 图二：大方块烈度 + 地名(源)#报数 / 时刻 / 震级+深度
-            Frame::NONE
-                .fill(Color32::from_rgba_unmultiplied(28, 28, 32, 230))
-                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(0x55, 0x55, 0x66)))
-                .inner_margin(Margin::symmetric(10, 8))
-                .corner_radius(6.0)
-                .show(ui, |ui| {
-                    ui.set_width(LEFT_PANEL_W);
-                    ui.horizontal(|ui| {
-                        paint_intensity(
-                            ui,
-                            icons,
-                            ev.intensity_kind,
-                            ev.intensity_level,
-                            &ev.max_intensity_text,
-                            scale,
-                            72.0,
-                            false,
-                        );
-                        ui.add_space(10.0);
-                        ui.vertical(|ui| {
-                            ui.set_min_width(180.0);
+            ui.spacing_mut().item_spacing.y = ROW_GAP;
+            ui.vertical(|ui| {
+                for (i, ev) in live.iter().enumerate() {
+                    let agency = agency_bracket(&ev.agency.0);
+                    let idx_mark = if live.len() > 1 {
+                        format!("{} ", circled_index(i + 1))
+                    } else {
+                        String::new()
+                    };
+                    let title = if ev.is_cancel {
+                        format!("{idx_mark}{} ({agency}) \u{00b7} 取消", ev.place)
+                    } else if ev.serial > 0 && ev.serial < 10_000 {
+                        format!("{idx_mark}{} ({agency}) #{}", ev.place, ev.serial)
+                    } else {
+                        format!("{idx_mark}{} ({agency})", ev.place)
+                    };
+                    let time_line = format_header_time(ev.origin_ms);
+                    let mag_line = format!("M{:.1}", ev.magnitude);
+                    let depth_line = format!("{:.0}km", ev.depth_km);
+                    let focused = snap.active.as_ref().is_some_and(|a| {
+                        a.agency.0 == ev.agency.0 && a.event_id == ev.event_id
+                    });
+                    let stroke = if focused {
+                        Stroke::new(1.5_f32, Color32::from_rgb(0x7D, 0xF9, 0xFF))
+                    } else {
+                        Stroke::new(1.0_f32, Color32::from_rgb(0x55, 0x55, 0x66))
+                    };
+                    Frame::NONE
+                        .fill(Color32::from_rgba_unmultiplied(28, 28, 32, 230))
+                        .stroke(stroke)
+                        .inner_margin(Margin::symmetric(10, 8))
+                        .corner_radius(6.0)
+                        .show(ui, |ui| {
+                            ui.set_width(LEFT_PANEL_W);
                             ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(title)
-                                        .color(Color32::WHITE)
-                                        .strong()
-                                        .size(16.0),
+                                paint_intensity(
+                                    ui,
+                                    icons,
+                                    ev.intensity_kind,
+                                    ev.intensity_level,
+                                    &ev.max_intensity_text,
+                                    scale,
+                                    72.0,
+                                    false,
                                 );
-                                if let Some((i, n)) = multi_idx {
-                                    if n > 1 {
+                                ui.add_space(10.0);
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(180.0);
+                                    ui.label(
+                                        RichText::new(title)
+                                            .color(Color32::WHITE)
+                                            .strong()
+                                            .size(16.0),
+                                    );
+                                    ui.add_space(2.0);
+                                    ui.label(
+                                        RichText::new(time_line)
+                                            .color(Color32::WHITE)
+                                            .size(14.0)
+                                            .monospace(),
+                                    );
+                                    ui.add_space(2.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(mag_line)
+                                                .color(Color32::WHITE)
+                                                .strong()
+                                                .size(15.0),
+                                        );
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
                                             |ui| {
-                                                Frame::NONE
-                                                    .fill(Color32::from_rgba_unmultiplied(
-                                                        0, 0, 0, 120,
-                                                    ))
-                                                    .corner_radius(4.0)
-                                                    .inner_margin(Margin::symmetric(6, 2))
-                                                    .show(ui, |ui| {
-                                                        ui.label(
-                                                            RichText::new(format!("{i}/{n}"))
-                                                                .color(Color32::WHITE)
-                                                                .strong()
-                                                                .size(13.0),
-                                                        );
-                                                    });
+                                                ui.label(
+                                                    RichText::new(depth_line)
+                                                        .color(Color32::from_rgb(
+                                                            0xDD, 0xDD, 0xEE,
+                                                        ))
+                                                        .size(14.0),
+                                                );
                                             },
                                         );
-                                    }
-                                }
-                            });
-                            ui.add_space(2.0);
-                            ui.label(
-                                RichText::new(time_line)
-                                    .color(Color32::WHITE)
-                                    .size(14.0)
-                                    .monospace(),
-                            );
-                            ui.add_space(2.0);
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(mag_line)
-                                        .color(Color32::WHITE)
-                                        .strong()
-                                        .size(15.0),
-                                );
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(
-                                            RichText::new(depth_line)
-                                                .color(Color32::from_rgb(0xDD, 0xDD, 0xEE))
-                                                .size(14.0),
-                                        );
-                                    },
-                                );
+                                    });
+                                });
                             });
                         });
-                    });
-                });
+                }
+            });
         });
+}
+
+/// ①②③… 序号（多震堆叠，对齐 EEWCN）。
+fn circled_index(n: usize) -> char {
+    match n {
+        1 => '\u{2460}',
+        2 => '\u{2461}',
+        3 => '\u{2462}',
+        4 => '\u{2463}',
+        5 => '\u{2464}',
+        6 => '\u{2465}',
+        7 => '\u{2466}',
+        8 => '\u{2467}',
+        9 => '\u{2468}',
+        10 => '\u{2469}',
+        _ => '\u{00b7}',
+    }
 }
 
 fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
@@ -692,11 +698,14 @@ fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
             Color32::from_rgb(0xD1, 0xD5, 0xDB),
         ),
     };
-    // 有预警信息头时下移；无预警时贴到左上角
-    let top_y = if eew_header_visible(snap) {
-        118.0
-    } else {
-        12.0
+    // 有预警信息头时下移（按堆叠条数）；无预警时贴到左上角
+    let top_y = {
+        let h = eew_header_stack_height(snap);
+        if h > 0.0 {
+            OVERLAY_TOP_Y + h + 8.0
+        } else {
+            OVERLAY_TOP_Y
+        }
     };
     const LEFT_PANEL_X: f32 = 12.0;
     const LEFT_PANEL_W: f32 = 340.0;
@@ -719,6 +728,17 @@ fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
                     );
                     ui.add_space(4.0);
                     ui.label(RichText::new(desc).color(body_c).size(12.5));
+                    if t.expire_ms > 0 {
+                        ui.add_space(2.0);
+                        let exp = chrono::DateTime::from_timestamp_millis(t.expire_ms)
+                            .map(|dt| {
+                                dt.with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap())
+                                    .format("预计解除 %Y/%m/%d %H:%M")
+                                    .to_string()
+                            })
+                            .unwrap_or_else(|| "预计解除 —".into());
+                        ui.label(RichText::new(exp).color(body_c).size(11.5));
+                    }
                     ui.add_space(6.0);
                     let line = ui.available_width();
                     let (resp, painter) = ui.allocate_painter(Vec2::new(line, 2.0), Sense::hover());
@@ -779,13 +799,14 @@ fn draw_realtime_intensity_card(
     }
 
     const CARD_W: f32 = 72.0;
-    const CARD_H: f32 = 66.0;
+    // 与左上预警框（72 烈度块 + 边距）同顶、接近同高
+    const CARD_H: f32 = 88.0;
     let gap = 6.0_f32;
     let now_ms = chrono::Utc::now().timestamp_millis();
     // 超过该间隔未刷新视为测站 API 断开（原版 NIED ~0.8s；WS 心跳略宽）
     const STALE_MS: i64 = 8_000;
     let total_w = CARD_W * cards.len() as f32 + gap * (cards.len().saturating_sub(1) as f32);
-    let top_right = ui.max_rect().right_top() + Vec2::new(-12.0, 12.0);
+    let top_right = ui.max_rect().right_top() + Vec2::new(-12.0, OVERLAY_TOP_Y);
     egui::Area::new(egui::Id::new("rt_intensity_card"))
         .pivot(egui::Align2::RIGHT_TOP)
         .fixed_pos(top_right)
@@ -845,17 +866,17 @@ fn draw_realtime_intensity_card(
                         Color32::WHITE,
                     );
                     painter.text(
-                        egui::pos2(r.center().x, head.bottom() + 15.0),
+                        egui::pos2(r.center().x, head.bottom() + 22.0),
                         egui::Align2::CENTER_CENTER,
                         value,
-                        FontId::proportional(20.0),
+                        FontId::proportional(22.0),
                         value_color,
                     );
                     painter.text(
-                        egui::pos2(r.center().x, r.bottom() - 10.0),
+                        egui::pos2(r.center().x, r.bottom() - 14.0),
                         egui::Align2::CENTER_CENTER,
                         time_text,
-                        FontId::proportional(11.0),
+                        FontId::proportional(12.0),
                         time_color,
                     );
                 }
@@ -961,50 +982,120 @@ fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_ni
         let jst = FixedOffset::east_opt(9 * 3600).unwrap();
         Some(format!(
             "JST {}",
-            local.with_timezone(&jst).format("%H:%M:%S")
+            local.with_timezone(&jst).format("%Y/%m/%d %H:%M:%S")
         ))
     } else {
         None
     };
 
+    // 对齐 eewcn rowcounter：左本地预估烈度 + 右 M:SS；时钟用比例字体（非等宽）
     egui::Area::new(egui::Id::new("countdown_hud"))
         .pivot(egui::Align2::RIGHT_BOTTOM)
-        .fixed_pos(ui.max_rect().right_bottom() + Vec2::new(-6.0, -4.0))
+        .fixed_pos(ui.max_rect().right_bottom() + Vec2::new(-5.0, -2.0))
         .order(egui::Order::Foreground)
         .interactable(false)
         .show(ui.ctx(), |ui| {
             ui.spacing_mut().window_margin = Margin::ZERO;
-            ui.spacing_mut().item_spacing = Vec2::ZERO;
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
             ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
                 if let Some(sec) = snap.countdown_s {
-                    glass_frame(p).show(ui, |ui| {
-                        ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
-                            ui.label(RichText::new("S 波到达").color(p.text_muted).size(13.0));
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(format!("{sec}"))
-                                        .color(p.danger)
-                                        .strong()
-                                        .size(56.0),
-                                );
-                                ui.label(RichText::new("秒").color(p.text_dim).size(18.0));
-                            });
+                    outlined_label(ui, "S波即将到达", Color32::WHITE, 14.0, false);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // 右侧倒计时 M:SS
+                            let mm = sec / 60;
+                            let ss = sec % 60;
+                            let time_txt = format!("{mm}:{ss:02}");
+                            let time_color = if sec > 10 {
+                                Color32::from_rgb(0xFF, 0xEB, 0x3B)
+                            } else {
+                                p.danger
+                            };
+                            Frame::NONE
+                                .fill(Color32::from_rgba_unmultiplied(0x66, 0x66, 0x66, 0x80))
+                                .inner_margin(Margin::symmetric(6, 2))
+                                .show(ui, |ui| {
+                                    outlined_label(ui, &time_txt, time_color, 34.0, false);
+                                });
+                            // 左侧本地预估烈度
+                            let lv = snap.countdown_local_level;
+                            let label = if snap.countdown_local_text.is_empty() {
+                                if lv == 0 {
+                                    "0".into()
+                                } else {
+                                    lv.to_string()
+                                }
+                            } else {
+                                snap.countdown_local_text.clone()
+                            };
+                            let bg = if lv == 0 {
+                                Color32::from_rgb(0x2A, 0x2A, 0x2E)
+                            } else {
+                                rgb(color_for(snap.countdown_local_kind, lv))
+                            };
+                            let fg = intensity_fg(bg);
+                            let border = if lv == 0 {
+                                Stroke::new(1.0_f32, Color32::WHITE)
+                            } else {
+                                Stroke::NONE
+                            };
+                            Frame::NONE
+                                .fill(bg)
+                                .stroke(border)
+                                .inner_margin(Margin::symmetric(8, 2))
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        RichText::new(label)
+                                            .color(fg)
+                                            .strong()
+                                            .size(34.0),
+                                    );
+                                });
                         });
                     });
-                    ui.add_space(8.0);
+                    ui.add_space(4.0);
                 }
-                ui.label(
-                    RichText::new(clock)
-                        .color(p.text)
-                        .strong()
-                        .size(22.0)
-                        .monospace(),
-                );
+                // 时钟：强制文楷、无描边（描边偏移会显假粗）
+                clock_label(ui, &clock, 18.0);
                 if let Some(jst) = jst_line {
-                    ui.label(RichText::new(jst).color(p.text_dim).size(12.0));
+                    clock_label(ui, &jst, 16.0);
                 }
             });
         });
+}
+
+fn intensity_fg(bg: Color32) -> Color32 {
+    let y = 0.299 * bg.r() as f32 + 0.587 * bg.g() as f32 + 0.114 * bg.b() as f32;
+    if y > 160.0 {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    }
+}
+
+fn outlined_label(ui: &mut Ui, text: &str, color: Color32, size: f32, monospace: bool) {
+    let font = if monospace {
+        FontId::monospace(size)
+    } else {
+        FontId::proportional(size)
+    };
+    let galley = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font, color));
+    let size_v = galley.size();
+    let (resp, painter) = ui.allocate_painter(size_v, Sense::hover());
+    let pos = resp.rect.min;
+    // 仅四向细描边，避免八向叠绘把笔画撑成「加粗」
+    let stroke = Color32::from_rgba_unmultiplied(0, 0, 0, 160);
+    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+        painter.galley(pos + Vec2::new(dx, dy), galley.clone(), stroke);
+    }
+    painter.galley(pos, galley, color);
+}
+
+/// 右下角时钟：嵌入字体名强制文楷，不加描边。
+fn clock_label(ui: &mut Ui, text: &str, size: f32) {
+    let font = FontId::new(size, FontFamily::Name("lxgw_wenkai".into()));
+    ui.label(RichText::new(text).font(font).color(Color32::WHITE));
 }
 
 enum SideAction {
@@ -1040,15 +1131,15 @@ fn draw_sidebar(
                     RichText::new("地震情报实况")
                         .color(p.text)
                         .strong()
-                        .size(14.0),
+                        .size(16.0),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add(
-                            egui::Button::new(RichText::new("设置").size(12.0).color(p.text_muted))
+                            egui::Button::new(RichText::new("设置").size(13.0).color(p.text_muted))
                                 .fill(p.tab_idle)
                                 .corner_radius(6.0)
-                                .min_size(Vec2::new(48.0, 24.0)),
+                                .min_size(Vec2::new(52.0, 26.0)),
                         )
                         .clicked()
                     {
@@ -1070,9 +1161,9 @@ fn draw_sidebar(
                     let resp = ui
                         .horizontal(|ui| {
                             let (r, painter) =
-                                ui.allocate_painter(Vec2::splat(8.0), Sense::hover());
-                            painter.circle_filled(r.rect.center(), 3.5, health_dot(p, st));
-                            ui.label(RichText::new(name).size(11.0).color(p.text_dim));
+                                ui.allocate_painter(Vec2::splat(9.0), Sense::hover());
+                            painter.circle_filled(r.rect.center(), 3.8, health_dot(p, st));
+                            ui.label(RichText::new(name).size(12.5).color(p.text_dim));
                         })
                         .response;
                     resp.on_hover_text(tip);
@@ -1096,7 +1187,7 @@ fn draw_sidebar(
                     );
                 } else {
                     // 顶层虚拟列表（勿套进外层 ScrollArea，否则 available_height 无效）
-                    let row_h = 52.0_f32;
+                    let row_h = 58.0_f32;
                     let n = snap.stations.len();
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
@@ -1278,9 +1369,9 @@ fn empty_hint(ui: &mut Ui, p: &ThemePalette, title: &str, detail: &str) {
         .inner_margin(Margin::symmetric(12, 14))
         .corner_radius(10.0)
         .show(ui, |ui| {
-            ui.label(RichText::new(title).color(p.text_muted).strong().size(13.0));
+            ui.label(RichText::new(title).color(p.text_muted).strong().size(14.0));
             ui.add_space(4.0);
-            ui.label(RichText::new(detail).color(p.text_dim).size(11.0));
+            ui.label(RichText::new(detail).color(p.text_dim).size(12.5));
         });
 }
 
@@ -1294,9 +1385,9 @@ fn draw_side_tabs(ui: &mut Ui, p: &ThemePalette, cur: &mut SidebarTab) {
         ] {
             let selected = *cur == tab;
             let text = if selected {
-                RichText::new(label).strong().size(12.0).color(p.text)
+                RichText::new(label).strong().size(14.0).color(p.text)
             } else {
-                RichText::new(label).size(12.0).color(p.text_dim)
+                RichText::new(label).size(14.0).color(p.text_dim)
             };
             let resp = ui.add(
                 egui::Button::new(text)
@@ -1307,7 +1398,7 @@ fn draw_side_tabs(ui: &mut Ui, p: &ThemePalette, cur: &mut SidebarTab) {
                     })
                     .stroke(Stroke::NONE)
                     .corner_radius(6.0)
-                    .min_size(Vec2::new(56.0, 28.0)),
+                    .min_size(Vec2::new(60.0, 30.0)),
             );
             if selected {
                 let r = resp.rect;
@@ -1347,9 +1438,10 @@ fn volcano_list_row(
         .inner_margin(Margin::symmetric(8, 7))
         .corner_radius(8.0)
         .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (stripe, painter) =
-                    ui.allocate_painter(Vec2::new(4.0, 36.0), Sense::hover());
+                    ui.allocate_painter(Vec2::new(4.0, 50.0), Sense::hover());
                 painter.rect_filled(stripe.rect, 2.0, accent);
 
                 ui.add_space(8.0);
@@ -1357,18 +1449,26 @@ fn volcano_list_row(
                     ui.label(
                         RichText::new("\u{25b2}")
                             .color(accent)
-                            .size(14.0)
+                            .size(16.0)
                             .strong(),
                     );
                     ui.add_space(4.0);
                 }
                 ui.vertical(|ui| {
-                    ui.set_max_width(ui.available_width());
-                    ui.label(RichText::new(place).color(p.text).size(13.0));
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(sub).color(p.text_dim).size(11.0));
-                        ui.label(RichText::new(title).color(p.text_muted).size(11.0));
-                    });
+                    let max_w = (ui.available_width() - 4.0).max(40.0);
+                    ui.set_max_width(max_w);
+                    ui.add(
+                        egui::Label::new(RichText::new(place).color(p.text).size(15.0))
+                            .truncate(),
+                    );
+                    ui.add(
+                        egui::Label::new(RichText::new(sub).color(p.text_dim).size(13.0))
+                            .truncate(),
+                    );
+                    ui.add(
+                        egui::Label::new(RichText::new(title).color(p.text_muted).size(12.5))
+                            .wrap(),
+                    );
                 });
             });
         })
@@ -1416,28 +1516,28 @@ fn list_row(
 
     let resp = Frame::NONE
         .fill(bg)
-        .inner_margin(Margin::symmetric(8, 7))
+        .inner_margin(Margin::symmetric(8, 8))
         .corner_radius(8.0)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 let (stripe, painter) =
-                    ui.allocate_painter(Vec2::new(4.0, 36.0), Sense::hover());
+                    ui.allocate_painter(Vec2::new(4.0, 42.0), Sense::hover());
                 painter.rect_filled(stripe.rect, 2.0, accent);
 
                 ui.add_space(8.0);
                 ui.vertical(|ui| {
-                    ui.set_max_width(ui.available_width() - 40.0);
-                    ui.label(RichText::new(place).color(p.text).size(13.0));
+                    ui.set_max_width(ui.available_width() - 48.0);
+                    ui.label(RichText::new(place).color(p.text).size(15.0));
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(sub).color(p.text_dim).size(11.0));
+                        ui.label(RichText::new(sub).color(p.text_dim).size(13.0));
                         if !mag.is_empty() {
-                            ui.label(RichText::new(mag).color(p.text_muted).size(11.0));
+                            ui.label(RichText::new(mag).color(p.text_muted).size(13.0));
                         }
                     });
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    paint_intensity(ui, icons, kind, level, intensity_text, scale, 30.0, false);
+                    paint_intensity(ui, icons, kind, level, intensity_text, scale, 34.0, false);
                 });
             });
         })

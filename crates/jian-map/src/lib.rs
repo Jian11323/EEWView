@@ -53,7 +53,7 @@ impl Default for MapViewport {
         Self {
             center_lon: 135.0,
             center_lat: 35.0,
-            zoom: 5.0,
+            zoom: 6.8,
             basemap: BasemapMode::Vector,
             projection_mode: ProjectionMode::Flat,
             ocean_fill: OCEAN,

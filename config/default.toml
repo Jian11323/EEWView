@@ -32,7 +32,7 @@ tile_base = "https://tilemap.sismotide.top"
 tile_source = "arcwob"
 default_lon = 135.0
 default_lat = 35.0
-default_zoom = 5.0
+default_zoom = 6.8
 
 [audio]
 event_pack = "srev"

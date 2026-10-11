@@ -188,12 +188,12 @@ SOURCES_INNER = rf'''
             }});
         }}
         row_divider(ui);
-        control_row(ui, "S-Net", "海上强震网（Jian 中转）", "\u{{25ce}}", |ui| {{
+        control_row(ui, "S-Net", "海上强震网（中转 / 原版 MSIL）", "\u{{25ce}}", |ui| {{
             toggle(ui, &mut draft.sources.stations.snet_enabled);
         }});
         if draft.sources.stations.snet_enabled {{
             row_divider(ui);
-            control_row(ui, "S-Net 源", "目前原版需 pixels.csv，暂用中转", "\u{{25ce}}", |ui| {{
+            control_row(ui, "S-Net 源", "原版需 assets/stations/pixels.csv", "\u{{25ce}}", |ui| {{
                 egui::ComboBox::from_id_salt("set_snet_station_src")
                     .selected_text(snet_station_src_label(&draft.sources.stations.snet_source))
                     .width(200.0)
@@ -206,7 +206,7 @@ SOURCES_INNER = rf'''
                         ui.selectable_value(
                             &mut draft.sources.stations.snet_source,
                             "original".into(),
-                            "原版（开发中）",
+                            "原版 MSIL 切片",
                         );
                     }});
             }});
@@ -336,12 +336,12 @@ SOURCES_INNER = '''
             });
         }
         row_divider(ui);
-        control_row(ui, "S-Net", "海上强震网（Jian 中转）", "\\u{25ce}", |ui| {
+        control_row(ui, "S-Net", "海上强震网（中转 / 原版 MSIL）", "\\u{25ce}", |ui| {
             toggle(ui, &mut draft.sources.stations.snet_enabled);
         });
         if draft.sources.stations.snet_enabled {
             row_divider(ui);
-            control_row(ui, "S-Net 源", "目前原版需 pixels.csv，暂用中转", "\\u{25ce}", |ui| {
+            control_row(ui, "S-Net 源", "原版需 assets/stations/pixels.csv", "\\u{25ce}", |ui| {
                 egui::ComboBox::from_id_salt("set_snet_station_src")
                     .selected_text(snet_station_src_label(&draft.sources.stations.snet_source))
                     .width(200.0)
@@ -354,7 +354,7 @@ SOURCES_INNER = '''
                         ui.selectable_value(
                             &mut draft.sources.stations.snet_source,
                             "original".into(),
-                            "原版（开发中）",
+                            "原版 MSIL 切片",
                         );
                     });
             });
@@ -694,7 +694,7 @@ ABOUT_BODY = (
     "        );\n"
     "        ui.add_space(10.0);\n"
     "        ui.label(\n"
-    '            RichText::new("致谢与授权")\n'
+    '            RichText::new("致谢")\n'
     "                .size(13.0)\n"
     "                .strong()\n"
     "                .color(chrome().text),\n"
@@ -736,7 +736,7 @@ HELPERS = r'''fn jma_station_src_label(s: &str) -> String {
 
 fn snet_station_src_label(s: &str) -> String {
     match s.trim().to_ascii_lowercase().as_str() {
-        "original" => "原版（开发中）".into(),
+        "original" => "原版 MSIL 切片".into(),
         _ => "Jian 中转 /s-net".into(),
     }
 }

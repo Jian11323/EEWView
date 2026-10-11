@@ -114,6 +114,20 @@ pub fn fill_intensity(
     raw: Option<&str>,
 ) -> (String, u8) {
     let raw = raw.map(str::trim).unwrap_or("");
+    // 调查中 / 不明：保留原文，不估算假震度
+    if matches!(
+        raw,
+        "不明"
+            | "?"
+            | "調査中"
+            | "调查中"
+            | "なし"
+            | "无"
+            | "N/A"
+            | "n/a"
+    ) {
+        return (raw.into(), 0);
+    }
     if !raw.is_empty() && raw != "—" && raw != "-" && raw != "null" {
         match kind {
             IntensityKind::JmaShindo => {
