@@ -4,7 +4,7 @@ use crate::marker_icons::MarkerIcons;
 use crate::projection::{self, ViewCtx};
 use egui::{Color32, Pos2, Rect, Stroke, TextureHandle, Ui, Vec2};
 use jian_core::palette::color_for;
-use jian_core::{EewReport, EqRecord, StationSample};
+use jian_core::{EewReport, EqRecord, StationSample, VolcanoNotice};
 use jian_travel::{max_s_wave_spread_km, TravelEngine, Wave};
 use std::sync::Once;
 
@@ -147,8 +147,16 @@ pub fn paint_stations(
     let rect = view.rect;
     let painter = ui.painter_at(rect);
     let pad = 16.0_f32;
-    // 低缩放时略过极低計測值以减负；预警期间仍显示有感点
+    // 低缩放隐藏静默点；中缩放抽稀静默点以减负
     let show_quiet = view.zoom >= 4.5;
+    let quiet_stride = if view.zoom < 5.5 {
+        4usize
+    } else if view.zoom < 6.5 {
+        2
+    } else {
+        1
+    };
+    let _ = eew_active;
     // 先静默点、后有感图标，且有感按震度升序，避免震度1被蓝点盖住
     let mut order: Vec<usize> = (0..stations.len()).collect();
     order.sort_by(|&a, &b| {
@@ -162,18 +170,24 @@ pub fn paint_stations(
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
     });
+    let mut quiet_i = 0usize;
     for idx in order {
         let s = &stations[idx];
         let felt = s.intensity_level >= 1
             || (s.intensity_kind == jian_core::IntensityKind::JmaShindo && s.instrumental >= 0.5);
         let quiet = !felt && s.intensity_level == 0;
-        if quiet && !show_quiet {
-            if selected_id != Some(s.id.as_str()) {
-                continue;
+        if quiet {
+            if !show_quiet {
+                if selected_id != Some(s.id.as_str()) {
+                    continue;
+                }
+            } else if selected_id != Some(s.id.as_str()) {
+                quiet_i += 1;
+                if quiet_stride > 1 && (quiet_i % quiet_stride) != 0 {
+                    continue;
+                }
             }
         }
-        // 有预警时：震度>=1 的点不因缩放隐藏（已由 quiet 逻辑保证）
-        let _ = eew_active;
         let Some(p) = view.project(s.longitude, s.latitude) else {
             continue;
         };
@@ -234,23 +248,74 @@ pub fn paint_stations(
             3.2
         };
         painter.circle_filled(p, r, fill);
-        painter.circle_stroke(
-            p,
-            r,
-            Stroke::new(
-                if selected { 1.5_f32 } else { 0.8_f32 },
-                if selected {
-                    Color32::WHITE
-                } else {
-                    Color32::from_rgba_unmultiplied(255, 255, 255, 140)
-                },
-            ),
-        );
+        // 选中才描边；常态无白边，避免测站密网发糊发脏
+        if selected {
+            painter.circle_stroke(p, r, Stroke::new(1.5_f32, Color32::WHITE));
+        }
         if selected {
             painter.text(
                 p + Vec2::new(8.0, -12.0),
                 egui::Align2::LEFT_BOTTOM,
                 format!("{} {}", s.name, s.intensity_text),
+                egui::FontId::proportional(12.0),
+                Color32::WHITE,
+            );
+        }
+    }
+}
+
+
+
+/// 火山：按经纬度画实心三角 ▲
+pub fn paint_volcanoes(
+    ui: &mut Ui,
+    view: &ViewCtx,
+    volcanoes: &[VolcanoNotice],
+    selected_idx: Option<usize>,
+) {
+    if volcanoes.is_empty() {
+        return;
+    }
+    let rect = view.rect;
+    let painter = ui.painter_at(rect);
+    let pad = 20.0_f32;
+    let fill = Color32::from_rgb(0xF9, 0x73, 0x16);
+    let fill_sel = Color32::from_rgb(0xFF, 0xB0, 0x40);
+    for (i, v) in volcanoes.iter().enumerate() {
+        if v.latitude.abs() <= 0.01 && v.longitude.abs() <= 0.01 {
+            continue;
+        }
+        let Some(p) = view.project(v.longitude, v.latitude) else {
+            continue;
+        };
+        if p.x < rect.left() - pad
+            || p.x > rect.right() + pad
+            || p.y < rect.top() - pad
+            || p.y > rect.bottom() + pad
+        {
+            continue;
+        }
+        let selected = selected_idx == Some(i);
+        let h = if selected { 14.0_f32 } else { 10.0_f32 };
+        let half = h * 0.72;
+        let pts = vec![
+            egui::pos2(p.x, p.y - h),
+            egui::pos2(p.x - half, p.y + h * 0.55),
+            egui::pos2(p.x + half, p.y + h * 0.55),
+        ];
+        painter.add(egui::Shape::convex_polygon(
+            pts,
+            if selected { fill_sel } else { fill },
+            Stroke::new(
+                if selected { 1.6_f32 } else { 1.0_f32 },
+                Color32::from_rgb(0x33, 0x1A, 0x00),
+            ),
+        ));
+        if selected {
+            painter.text(
+                p + Vec2::new(h * 0.7, -h),
+                egui::Align2::LEFT_BOTTOM,
+                &v.name,
                 egui::FontId::proportional(12.0),
                 Color32::WHITE,
             );
@@ -426,7 +491,8 @@ pub fn paint_eew_markers(
     let rect = view.rect;
     let painter = ui.painter_at(rect);
     let pad = 28.0_f32;
-    for ev in markers {
+    let multi = markers.len() > 1;
+    for (i, ev) in markers.iter().enumerate() {
         let Some(p) = view.project(ev.longitude, ev.latitude) else {
             continue;
         };
@@ -439,5 +505,16 @@ pub fn paint_eew_markers(
         }
         let is_sel = selected == Some((ev.agency.0.as_str(), ev.event_id.as_str()));
         paint_epicenter_marker(&painter, icons, p, ev, is_sel);
+        if multi {
+            let label = format!("{}", i + 1);
+            let pos = egui::pos2(p.x + 14.0, p.y - 18.0);
+            painter.text(
+                pos,
+                egui::Align2::LEFT_CENTER,
+                label,
+                egui::FontId::proportional(16.0),
+                Color32::WHITE,
+            );
+        }
     }
 }

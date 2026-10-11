@@ -39,19 +39,32 @@ impl CameraFlight {
     }
 
     /// 推进 `dt` 秒；返回 (lon, lat, zoom, finished)。
+    /// 位移：GQ 余弦缓动；缩放：线性时间抛物线（对齐 eewcn），中途拉远有上限，不贴 ZOOM_MIN。
     pub fn tick(&mut self, dt: f64) -> (f64, f64, f64, bool) {
         self.elapsed = (self.elapsed + dt).min(self.duration);
         let t = (self.elapsed / self.duration).clamp(0.0, 1.0);
-        let e = ease_in_out_cubic(t);
-        let lon = lerp_lon(self.start_lon, self.end_lon, e);
-        let lat = self.start_lat + (self.end_lat - self.start_lat) * e;
-        // 中途拉远：与位移动画共用缓动，避免末端 zoom 猛收造成「弹一下」
-        let dip = 1.15 * 4.0 * e * (1.0 - e);
-        let zoom_base = self.start_zoom + (self.end_zoom - self.start_zoom) * e;
+        // GQ: t1 = -cos(t*PI)*0.5+0.5
+        let t1 = -((t * std::f64::consts::PI).cos()) * 0.5 + 0.5;
+        let lon = lerp_lon(self.start_lon, self.end_lon, t1);
+        let lat = self.start_lat + (self.end_lat - self.start_lat) * t1;
+        let dist_km = haversine_km(
+            self.start_lat,
+            self.start_lon,
+            self.end_lat,
+            self.end_lon,
+        );
+        let z0 = self.start_zoom;
+        let z1 = self.end_zoom;
+        let y_m = mid_flight_zoom(z0, z1, dist_km);
+        // eewcn: D=2*yM-avg; a=yA+yB-2D; b=yB-yA-a; zoom=a*t^2+b*t+yA（t 线性）
+        let avg = (z0 + z1) * 0.5;
+        let d = 2.0 * y_m - avg;
+        let a = z0 + z1 - 2.0 * d;
+        let b = z1 - z0 - a;
         let zoom = if t >= 1.0 - 1e-9 {
             self.end_zoom
         } else {
-            (zoom_base - dip).clamp(ZOOM_MIN, ZOOM_MAX)
+            (a * t * t + b * t + z0).clamp(ZOOM_MIN, ZOOM_MAX)
         };
         (
             if t >= 1.0 - 1e-9 {
@@ -74,6 +87,31 @@ impl CameraFlight {
     }
 }
 
+/// 中途拉远目标 zoom：远距最多掉约 1 级，地板 3.5，避免卡在 ZOOM_MIN。
+fn mid_flight_zoom(z0: f64, z1: f64, dist_km: f64) -> f64 {
+    let lo = z0.min(z1);
+    let avg = (z0 + z1) * 0.5;
+    if dist_km < 800.0 {
+        return avg;
+    }
+    let pull = (dist_km / 14000.0).clamp(0.0, 1.0) * 1.0;
+    let mut ym = (lo - pull).max(avg - 1.0).max(lo - 1.0).max(4.5);
+    if ym > avg - 0.12 {
+        ym = avg - 0.12;
+    }
+    ym.clamp(4.5, ZOOM_MAX)
+}
+
+fn haversine_km(lat0: f64, lon0: f64, lat1: f64, lon1: f64) -> f64 {
+    let r = 6371.0_f64;
+    let dlat = (lat1 - lat0).to_radians();
+    let dlon = (lon1 - lon0).to_radians();
+    let a = (dlat * 0.5).sin().powi(2)
+        + lat0.to_radians().cos() * lat1.to_radians().cos() * (dlon * 0.5).sin().powi(2);
+    2.0 * r * a.sqrt().asin()
+}
+
+#[allow(dead_code)]
 fn ease_in_out_cubic(t: f64) -> f64 {
     if t < 0.5 {
         4.0 * t * t * t
@@ -112,6 +150,57 @@ pub fn zoom_to_fit_radius_km(lat: f64, radius_km: f64, viewport_min_px: f32, fil
     ((lo + hi) * 0.5).clamp(ZOOM_MIN, ZOOM_MAX)
 }
 
+/// 以锚点为中心筛掉过远事件，避免全球多震把镜头拉到 ZOOM_MIN。
+/// `max_sep_deg`：平面近似角距（度），约 30° ≈ 3300 km。
+pub fn cluster_for_fit(
+    points: &[(f64, f64, f64)],
+    anchor: Option<(f64, f64)>,
+    max_sep_deg: f64,
+) -> Vec<(f64, f64, f64)> {
+    if points.is_empty() {
+        return Vec::new();
+    }
+    let (alon, alat) = anchor.unwrap_or((points[0].0, points[0].1));
+    let max_sep = max_sep_deg.max(5.0);
+    let mut out: Vec<(f64, f64, f64)> = points
+        .iter()
+        .copied()
+        .filter(|(lon, lat, _)| {
+            let mut dlon = (lon - alon).abs();
+            if dlon > 180.0 {
+                dlon = 360.0 - dlon;
+            }
+            let dlat = (lat - alat).abs();
+            (dlon * dlon + dlat * dlat).sqrt() <= max_sep
+        })
+        .collect();
+    if out.is_empty() {
+        // 锚点本身不在列表时，至少保留最近的一点
+        if let Some(p) = points.iter().min_by(|a, b| {
+            let da = {
+                let mut dlon = (a.0 - alon).abs();
+                if dlon > 180.0 {
+                    dlon = 360.0 - dlon;
+                }
+                let dlat = (a.1 - alat).abs();
+                dlon * dlon + dlat * dlat
+            };
+            let db = {
+                let mut dlon = (b.0 - alon).abs();
+                if dlon > 180.0 {
+                    dlon = 360.0 - dlon;
+                }
+                let dlat = (b.1 - alat).abs();
+                dlon * dlon + dlat * dlat
+            };
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        }) {
+            out.push(*p);
+        }
+    }
+    out
+}
+
 /// 多震：用包围盒 + 各震 S 半径估一个合适缩放与中心。
 pub fn fit_events(
     points: &[(f64, f64, f64)],
@@ -123,7 +212,7 @@ pub fn fit_events(
     }
     if points.len() == 1 {
         let (lon, lat, r_km) = points[0];
-        let z = zoom_to_fit_radius_km(lat, r_km.max(80.0), viewport_w.min(viewport_h), 0.72);
+        let z = zoom_to_fit_radius_km(lat, r_km.max(50.0), viewport_w.min(viewport_h), 0.52);
         return Some((normalize_lon(lon), clamp_lat(lat), z));
     }
 

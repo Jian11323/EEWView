@@ -8,6 +8,7 @@ auto_follow_eew = true
 auto_zoom_waves = true
 show_wave_rings = true
 show_legend = true
+show_volcanoes = true
 
 [map]
 # auto = 暗色要石矢量 / 亮色地形瓦片；也可强制 vector | tiles | both
@@ -52,7 +53,7 @@ jma_jian_ws = "wss://api.sismotide.top/kmoni"
 snet_enabled = false
 snet_source = "jian"
 snet_jian_ws = "wss://api.sismotide.top/s-net"
-kma_enabled = false
+kma_enabled = true
 kma_jian_ws = "wss://api.sismotide.top/kma-station"
 
 [sources.wolfx]

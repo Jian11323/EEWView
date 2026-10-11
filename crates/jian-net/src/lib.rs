@@ -1,4 +1,4 @@
-//! 三源网络：Jian / Wolfx / P2PQuake → 归一化事件总线。
+//! 情报网络：Jian / Wolfx / P2PQuake / Pancakes → 归一化事件总线。
 
 pub mod adapter;
 pub mod bus;
@@ -48,6 +48,7 @@ pub enum SourceKind {
     Jian,
     Wolfx,
     P2pQuake,
+    Pancakes,
 }
 
 impl SourceKind {
@@ -56,6 +57,7 @@ impl SourceKind {
             Self::Jian => "jian",
             Self::Wolfx => "wolfx",
             Self::P2pQuake => "p2pquake",
+            Self::Pancakes => "pancakes",
         }
     }
 }
@@ -65,7 +67,7 @@ pub fn spawn_hub(sources: &SourcesConfig) -> NetHub {
     spawn_hub_with_assets(sources, None)
 }
 
-/// `assets_stations` 指向含 `nied_point.csv` 的目录（原版 kmoni/lmoni）。
+/// `assets_stations` 指向含 `nied_point.csv` / `pixels.csv` 的目录（原版 kmoni/lmoni / S-Net）。
 pub fn spawn_hub_with_assets(
     sources: &SourcesConfig,
     assets_stations: Option<std::path::PathBuf>,
@@ -75,6 +77,7 @@ pub fn spawn_hub_with_assets(
         jian = sources.jian.enabled,
         wolfx = sources.wolfx.enabled,
         p2p = sources.p2pquake.enabled,
+        pancakes = sources.pancakes.enabled,
         jma_st = sources.stations.jma_enabled,
         snet = sources.stations.snet_enabled,
         kma = sources.stations.kma_enabled,
@@ -87,6 +90,7 @@ pub fn spawn_hub_with_assets(
     tasks.extend(sources::jian::spawn(tx.clone(), jian_cfg));
     tasks.extend(sources::wolfx::spawn(tx.clone(), sources.wolfx.clone()));
     tasks.extend(sources::p2pquake::spawn(tx.clone(), sources.p2pquake.clone()));
+    tasks.extend(sources::pancakes::spawn(tx.clone(), sources.pancakes.clone()));
     tasks.extend(sources::stations::spawn(
         tx,
         sources.stations.clone(),
@@ -115,6 +119,7 @@ pub fn apply_event_filtered(
                     return;
                 }
             }
+            // GlobalQuake：再按 Pancakes 配置的震级阈值过滤（filters 路径无 cfg 时跳过）
             snap.upsert_eew(e);
         }
         NetEvent::Record(r) => {
@@ -126,13 +131,8 @@ pub fn apply_event_filtered(
             snap.upsert_record(r);
         }
         NetEvent::Stations { network, list } => snap.merge_stations(network, list),
-        NetEvent::Tsunami(t) => {
-            if t.cancelled || t.grade.eq_ignore_ascii_case("Cancel") {
-                snap.set_tsunami(None);
-            } else {
-                snap.set_tsunami(Some(t));
-            }
-        }
+        NetEvent::Tsunami(t) => snap.upsert_tsunami(t),
+        NetEvent::Volcano(v) => snap.upsert_volcano(v),
     }
 }
 

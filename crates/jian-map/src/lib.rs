@@ -10,13 +10,13 @@ mod topojson;
 mod tsunami_coast;
 mod vector_basemap;
 
-pub use camera::{fit_events, zoom_to_fit_radius_km, CameraFlight};
+pub use camera::{cluster_for_fit, fit_events, zoom_to_fit_radius_km, CameraFlight};
 pub use projection::{clamp_lat, km_to_pixels, lonlat_to_screen, normalize_lon, ProjectionMode};
 pub use tile_cache::TileCache;
 pub use vector_basemap::{BasemapLoadState, BasemapMode, VectorBasemap, VectorStyle};
 
 use egui::{Color32, Sense, Stroke, Ui};
-use jian_core::{EewReport, EqRecord, StationSample, TsunamiInfo};
+use jian_core::{EewReport, EqRecord, StationSample, TsunamiInfo, VolcanoNotice};
 use jian_travel::TravelEngine;
 use marker_icons::MarkerIcons;
 use projection::ViewCtx;
@@ -120,19 +120,21 @@ impl MapViewport {
         self.user_camera_override = false;
     }
 
-    /// 抛物线飞跃到目标震中（预警 / 速报列表切换与自动跟焦）。
+    /// GQ 风格跳转：`smoothTransition` 抛物线飞到目标；近距则瞬时到位。
     pub fn fly_to(&mut self, lon: f64, lat: f64, zoom: Option<f64>, duration_s: f64) {
         let end_zoom = zoom.unwrap_or(self.zoom).clamp(ZOOM_MIN, ZOOM_MAX);
         let dist = haversine_approx_deg(self.center_lon, self.center_lat, lon, lat);
-        // 近距离瞬时跳转，避免无谓动画
         if dist < 0.05 && (self.zoom - end_zoom).abs() < 0.12 {
             self.center_on(lon, lat, Some(end_zoom));
             return;
         }
+        // GQ runAnimation 约 5s；平面图按大圆距离略缩短
+        let km = dist * 111.0;
+        let dur = (duration_s.max(1.2) + km / 9000.0).clamp(1.2, 4.5);
         self.flight = Some(CameraFlight::new(
             (self.center_lon, self.center_lat, self.zoom),
             (lon, lat, end_zoom),
-            duration_s,
+            dur,
         ));
         self.post_flight_cooldown = 0.0;
         self.user_camera_override = false;
@@ -156,8 +158,7 @@ impl MapViewport {
             self.center_lat = elat;
             self.zoom = ez;
             self.flight = None;
-            // 落地后冻结自动缩放，避免「平移后再二次缩」
-            self.post_flight_cooldown = 1.6;
+            self.post_flight_cooldown = 0.0;
         }
         !done
     }
@@ -166,24 +167,17 @@ impl MapViewport {
         self.flight.is_some()
     }
 
-    /// 飞跃中或落地冷却期内，波圈自动缩放应让路。
-    pub fn blocks_auto_zoom(&self) -> bool {
-        self.flight.is_some() || self.post_flight_cooldown > 0.0 || self.user_camera_override
-    }
-
-    /// 仅在波圈扩大需要「缩小视野」时平滑跟 zoom（禁止二次放大/乱缩）。
-    pub fn apply_auto_zoom(&mut self, zoom: f64, smooth: f64) {
-        if self.blocks_auto_zoom() {
+    /// 预警期跟 S 波：只线性缩小（zoom 减小），不放大、不停顿跳级。
+    pub fn apply_linear_zoom_out(&mut self, target_zoom: f64, rate: f64) {
+        if self.flight.is_some() || self.user_camera_override || self.post_flight_cooldown > 0.0 {
             return;
         }
-        let z = zoom.clamp(ZOOM_MIN, ZOOM_MAX);
-        // 只跟波圈长大而 zoom-out；略放大或抖动一律忽略
-        if z >= self.zoom - 0.12 {
+        let target = target_zoom.clamp(ZOOM_MIN, ZOOM_MAX);
+        if target >= self.zoom - 0.02 {
             return;
         }
-        let t = smooth.clamp(0.0, 1.0);
-        let next = self.zoom + (z - self.zoom) * t;
-        self.zoom = if (z - next).abs() < 0.01 { z } else { next };
+        let k = rate.clamp(0.02, 0.35);
+        self.zoom = (self.zoom + (target - self.zoom) * k).clamp(ZOOM_MIN, ZOOM_MAX);
     }
 
     pub fn load_state(&self) -> BasemapLoadState {
@@ -217,6 +211,8 @@ impl MapViewport {
         show_waves: bool,
         stations: &[StationSample],
         records: &[EqRecord],
+        volcanoes: &[VolcanoNotice],
+        selected_volcano: Option<usize>,
         home: Option<(f64, f64)>,
         tsunami: Option<&TsunamiInfo>,
     ) -> Option<(f64, f64)> {
@@ -297,6 +293,7 @@ impl MapViewport {
             });
             overlay::paint_stations(ui, &view, stations, selected_station, icons, eew_active);
             overlay::paint_records(ui, &view, records, selected_record, icons);
+            overlay::paint_volcanoes(ui, &view, volcanoes, selected_volcano);
 
             if let Some((hlon, hlat)) = home {
                 overlay::paint_home(ui, &view, hlon, hlat, icons);

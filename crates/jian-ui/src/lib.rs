@@ -9,11 +9,12 @@ use egui::{Color32, FontId, Frame, Margin, RichText, Sense, Stroke, Ui, Vec2};
 use intensity_icons::IntensityIcons;
 use jian_core::palette::color_for;
 use jian_core::{
-    agency_bracket, cn_intensity_text, instrumental_band_rgb, latest_eew_per_source,
-    live_wave_eews, place_with_agency, prefer_intensity_scale, AppSnapshot, IntensityKind,
-    ListSelection, OverlayMode, SidebarTab,
+    agency_bracket, cn_intensity_text, instrumental_band_rgb, eew_map_markers,
+    eew_sidebar_entries, eew_wave_active, live_wave_eews, place_with_agency,
+    prefer_intensity_scale, AppSnapshot, IntensityKind, ListSelection, OverlayMode,
+    SidebarTab,
 };
-use jian_map::{fit_events, BasemapLoadState, BasemapMode, MapViewport, VectorStyle, ProjectionMode};
+use jian_map::{fit_events, zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, MapViewport, VectorStyle, ProjectionMode};
 use jian_travel::{max_s_wave_spread_km, TravelEngine, Wave};
 use std::path::Path;
 use theme::{ThemePalette, UiTheme};
@@ -25,11 +26,6 @@ pub struct MainShell {
     pub map: MapViewport,
     /// 地图波圈用经过时间（秒）
     pub map_elapsed: f64,
-    /// 检知框显示截止（unix ms）
-    detection_until_ms: i64,
-    /// 上一帧测站最大計測（用于触发检知）
-    prev_max_instrumental: f64,
-    last_detection_eew: String,
     /// Home / 复位用默认视口
     pub home_lon: f64,
     pub home_lat: f64,
@@ -48,9 +44,6 @@ impl Default for MainShell {
         Self {
             map: MapViewport::default(),
             map_elapsed: 0.0,
-            detection_until_ms: 0,
-            prev_max_instrumental: -99.0,
-            last_detection_eew: String::new(),
             home_lon: 135.0,
             home_lat: 35.0,
             home_zoom: 5.0,
@@ -121,6 +114,7 @@ impl MainShell {
         self.map
             .set_vector_style(VectorStyle::for_theme(&cfg.ui.theme));
 
+        snap.prune_finished_eews();
         self.intensity_icons.ensure(ctx);
         self.map_elapsed += ctx.input(|i| i.stable_dt) as f64;
         let now_ms = chrono::Utc::now().timestamp_millis();
@@ -131,7 +125,7 @@ impl MainShell {
 
         let live_refs = live_wave_eews(&snap.eew_list, now_ms, 30 * 60 * 1000);
         let wave_owned: Vec<_> = live_refs.into_iter().cloned().collect();
-        let marker_refs = latest_eew_per_source(&snap.eew_list);
+        let marker_refs = eew_map_markers(&snap.eew_list, now_ms);
         let marker_owned: Vec<_> = marker_refs.into_iter().cloned().collect();
         // 演示样本：无有效发震时刻时用 map_elapsed 驱动波圈
         let sample_elapsed = self.map_elapsed % 120.0;
@@ -157,43 +151,6 @@ impl MainShell {
                     full.max,
                 );
 
-                // 自动缩放：按多震 S 波适配；飞跃中/落地冷却期内让路，避免弹跳
-                if show_waves
-                    && cfg.ui.auto_zoom_waves
-                    && !self.map.blocks_auto_zoom()
-                {
-                    let mut pts = Vec::new();
-                    for ev in &wave_owned {
-                        let elapsed = if ev.origin_ms > 0 {
-                            ((now_ms - ev.origin_ms) as f64 / 1000.0).max(0.0)
-                        } else {
-                            sample_elapsed
-                        };
-                        let s_km = if let Some(eng) = travel {
-                            eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, elapsed)
-                        } else {
-                            elapsed * 5.0
-                        };
-                        let max_km = max_s_wave_spread_km(ev.magnitude);
-                        let r = s_km.min(max_km).max(60.0);
-                        pts.push((ev.longitude, ev.latitude, r));
-                    }
-                    if pts.is_empty() {
-                        if let Some(ev) = snap.active.as_ref().filter(|e| {
-                            !e.event_id.starts_with("station:")
-                                && !e.event_id.starts_with("record:")
-                        }) {
-                            pts.push((ev.longitude, ev.latitude, 120.0));
-                        }
-                    }
-                    if let Some((_lon, _lat, z)) =
-                        fit_events(&pts, map_rect.width(), map_rect.height())
-                    {
-                        self.map.apply_auto_zoom(z, 0.06);
-                        ctx.request_repaint_after(std::time::Duration::from_millis(16));
-                    }
-                }
-
                 ui.scope_builder(egui::UiBuilder::new().max_rect(map_rect), |ui| {
                     let home = match (self.local_lon, self.local_lat) {
                         (Some(lon), Some(lat)) => Some((lon, lat)),
@@ -208,6 +165,18 @@ impl MainShell {
                             ev.origin_ms = now_ms - (sample_elapsed * 1000.0) as i64;
                         }
                     }
+                    let selected_volcano = snap.selection.and_then(|s| {
+                        if s.tab == SidebarTab::Volcano {
+                            Some(s.index)
+                        } else {
+                            None
+                        }
+                    });
+                    let volcanoes_for_map = if cfg.ui.show_volcanoes {
+                        snap.volcanoes.as_slice()
+                    } else {
+                        &[]
+                    };
                     map_click = self.map.ui(
                         ui,
                         snap.active.as_ref(),
@@ -218,47 +187,54 @@ impl MainShell {
                         show_waves,
                         &snap.stations,
                         &snap.records,
+                        volcanoes_for_map,
+                        selected_volcano,
                         home,
                         snap.tsunami.as_ref(),
                     );
+                    // 只跟当前焦点预警的 S 波线性缩小，绝不对全球多震取最小 zoom
+                    if cfg.ui.auto_zoom_waves
+                        && show_waves
+                        && !self.map.is_flying()
+                        && !self.map.user_camera_override
+                    {
+                        let focus = snap.active.as_ref().filter(|e| {
+                            !e.is_cancel
+                                && !e.event_id.starts_with("record:")
+                                && !e.event_id.starts_with("station:")
+                                && (e.latitude.abs() > 0.01 || e.longitude.abs() > 0.01)
+                        });
+                        if let Some(ev) = focus {
+                            let elapsed = if ev.origin_ms > 0 {
+                                ((now_ms - ev.origin_ms) as f64 / 1000.0).max(0.0)
+                            } else {
+                                sample_elapsed
+                            };
+                            let s_km = if let Some(eng) = travel {
+                                eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, elapsed)
+                            } else {
+                                elapsed * 5.0
+                            };
+                            let r = s_km
+                                .min(max_s_wave_spread_km(ev.magnitude))
+                                .max(80.0);
+                            let z = zoom_to_fit_radius_km(
+                                ev.latitude,
+                                r,
+                                map_rect.width().min(map_rect.height()),
+                                0.55,
+                            )
+                            .max(5.2);
+                            self.map.apply_linear_zoom_out(z, 0.08);
+                            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+                        }
+                    }
                     draw_map_load_banner(ui, &p, self.map.load_state(), self.map.load_status());
                     if let Some(kind) = self.settings.map_pick {
                         draw_map_pick_banner(ui, &p, kind);
                     }
                     draw_event_header(ui, &p, snap, scale.as_str(), &self.intensity_icons);
                     draw_tsunami_banner(ui, &p, snap);
-                    // 检知：测站計測首次上冲 / 新预警事件时显示要石风格检出框
-                    {
-                        let max_inst = snap
-                            .stations
-                            .iter()
-                            .map(|s| s.instrumental)
-                            .fold(-99.0_f64, f64::max);
-                        let felt_rise = max_inst >= 0.5 && self.prev_max_instrumental < 0.5;
-                        let eew_key = snap
-                            .active
-                            .as_ref()
-                            .filter(|e| {
-                                !e.is_cancel
-                                    && !e.event_id.starts_with("station:")
-                                    && !e.event_id.starts_with("record:")
-                            })
-                            .map(|e| format!("{}|{}", e.agency.0, e.event_id))
-                            .unwrap_or_default();
-                        // 检知框仅随测站有感上冲；境外 EEW 不弹「地震检知」
-                        if !eew_key.is_empty() {
-                            self.last_detection_eew = eew_key;
-                        }
-                        if felt_rise {
-                            self.detection_until_ms = now_ms + 18_000;
-                        }
-                        self.prev_max_instrumental = max_inst;
-                        if now_ms < self.detection_until_ms {
-                            draw_detection_box(ui, &p, max_inst, snap.active.as_ref());
-                            ui.ctx()
-                                .request_repaint_after(std::time::Duration::from_millis(33));
-                        }
-                    }
                     draw_realtime_intensity_card(ui, &p, snap, &self.intensity_icons);
                     if cfg.ui.show_legend {
                         draw_legend_bar(ui, &p);
@@ -267,16 +243,26 @@ impl MainShell {
                 });
 
                 ui.scope_builder(egui::UiBuilder::new().max_rect(side_rect), |ui| {
-                    if let Some(act) = draw_sidebar(ui, &p, snap, scale.as_str(), &self.intensity_icons)
-                    {
+                    if let Some(act) = draw_sidebar(
+                        ui,
+                        &p,
+                        snap,
+                        scale.as_str(),
+                        &self.intensity_icons,
+                        cfg.ui.show_volcanoes,
+                    ) {
                         match act {
                             SideAction::List(tab, idx) => {
                                 if let Some((lon, lat, zoom)) = snap.select_list_item(tab, idx) {
-                                    // 预警 / 速报：抛物线飞跃；测站：瞬时居中
+                                    // 预警 / 速报 / 火山：抛物线；测站：飞跃略近
                                     match tab {
                                         SidebarTab::Eew | SidebarTab::Records => {
                                             let r_km = if tab == SidebarTab::Eew {
                                                 snap.eew_list.get(idx).map(|e| {
+                                                    let live = eew_wave_active(e, now_ms);
+                                                    if !live {
+                                                        return 90.0;
+                                                    }
                                                     let elapsed = if e.origin_ms > 0 {
                                                         ((now_ms - e.origin_ms) as f64 / 1000.0)
                                                             .max(0.0)
@@ -293,18 +279,19 @@ impl MainShell {
                                                         elapsed * 5.0
                                                     };
                                                     s_km.min(max_s_wave_spread_km(e.magnitude))
-                                                        .max(80.0)
+                                                        .min(320.0)
+                                                        .max(55.0)
                                                 })
                                             } else {
-                                                None
+                                                Some(100.0)
                                             }
-                                            .unwrap_or(120.0);
+                                            .unwrap_or(100.0);
                                             let end_z = fit_events(
                                                 &[(lon, lat, r_km)],
                                                 map_rect.width(),
                                                 map_rect.height(),
                                             )
-                                            .map(|(_, _, z)| z)
+                                            .map(|(_, _, z)| (z + 0.45).clamp(5.5, 10.0))
                                             .unwrap_or(zoom);
                                             let dur = if tab == SidebarTab::Eew {
                                                 1.0
@@ -314,9 +301,11 @@ impl MainShell {
                                             self.map.fly_to(lon, lat, Some(end_z), dur);
                                         }
                                         SidebarTab::Station => {
-                                            self.map.center_on(lon, lat, Some(zoom));
+                                            self.map.fly_to(lon, lat, Some(zoom.max(8.5)), 0.7);
                                         }
-                                        SidebarTab::Volcano => {}
+                                        SidebarTab::Volcano => {
+                                            self.map.fly_to(lon, lat, Some(zoom.max(7.5)), 0.85);
+                                        }
                                     }
                                     if snap.overlay_mode == OverlayMode::Wave {
                                         self.map_elapsed = 0.0;
@@ -518,18 +507,24 @@ fn draw_map_load_banner(ui: &mut Ui, p: &ThemePalette, state: BasemapLoadState, 
         });
 }
 
+/// 左上角：仅当前仍在传播的预警；历史回看不显示信息头。
+fn header_eew(snap: &AppSnapshot) -> Option<&jian_core::EewReport> {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    if let Some(ev) = snap.active.as_ref() {
+        if !ev.is_cancel
+            && !ev.event_id.starts_with("station:")
+            && !ev.event_id.starts_with("record:")
+            && eew_wave_active(ev, now_ms)
+        {
+            return Some(ev);
+        }
+    }
+    live_wave_eews(&snap.eew_list, now_ms, 0).into_iter().next()
+}
+
 /// 左上角是否正在展示预警信息头（用于海啸条避让）。
 fn eew_header_visible(snap: &AppSnapshot) -> bool {
-    let Some(ev) = &snap.active else {
-        return false;
-    };
-    if snap.overlay_mode == OverlayMode::MarkerOnly
-        || ev.event_id.starts_with("station:")
-        || ev.event_id.starts_with("record:")
-    {
-        return false;
-    }
-    true
+    header_eew(snap).is_some()
 }
 
 fn draw_event_header(
@@ -539,10 +534,7 @@ fn draw_event_header(
     scale: &str,
     icons: &IntensityIcons,
 ) {
-    if !eew_header_visible(snap) {
-        return;
-    }
-    let Some(ev) = &snap.active else {
+    let Some(ev) = header_eew(snap) else {
         return;
     };
 
@@ -557,6 +549,12 @@ fn draw_event_header(
     let time_line = format_header_time(ev.origin_ms);
     let mag_line = format!("M{:.1}", ev.magnitude);
     let depth_line = format!("{:.0}km", ev.depth_km);
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let live = live_wave_eews(&snap.eew_list, now_ms, 30 * 60 * 1000);
+    let multi_idx = live
+        .iter()
+        .position(|e| e.agency.0 == ev.agency.0 && e.event_id == ev.event_id)
+        .map(|i| (i + 1, live.len()));
 
     egui::Area::new(egui::Id::new("event_header"))
         .fixed_pos(ui.max_rect().left_top() + Vec2::new(12.0, 12.0))
@@ -569,7 +567,7 @@ fn draw_event_header(
                 .inner_margin(Margin::symmetric(8, 8))
                 .corner_radius(4.0)
                 .show(ui, |ui| {
-                    ui.set_max_width(420.0);
+                    ui.set_max_width(315.0);
                     ui.horizontal(|ui| {
                         paint_intensity(
                             ui,
@@ -583,13 +581,38 @@ fn draw_event_header(
                         );
                         ui.add_space(10.0);
                         ui.vertical(|ui| {
-                            ui.set_min_width(240.0);
-                            ui.label(
-                                RichText::new(title)
-                                    .color(Color32::WHITE)
-                                    .strong()
-                                    .size(16.0),
-                            );
+                            ui.set_min_width(180.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(title)
+                                        .color(Color32::WHITE)
+                                        .strong()
+                                        .size(16.0),
+                                );
+                                if let Some((i, n)) = multi_idx {
+                                    if n > 1 {
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                Frame::NONE
+                                                    .fill(Color32::from_rgba_unmultiplied(
+                                                        0, 0, 0, 120,
+                                                    ))
+                                                    .corner_radius(4.0)
+                                                    .inner_margin(Margin::symmetric(6, 2))
+                                                    .show(ui, |ui| {
+                                                        ui.label(
+                                                            RichText::new(format!("{i}/{n}"))
+                                                                .color(Color32::WHITE)
+                                                                .strong()
+                                                                .size(13.0),
+                                                        );
+                                                    });
+                                            },
+                                        );
+                                    }
+                                }
+                            });
                             ui.add_space(2.0);
                             ui.label(
                                 RichText::new(time_line)
@@ -627,6 +650,10 @@ fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
         return;
     };
     if t.cancelled {
+        return;
+    }
+    // 仅 JMA：NMEFC/CENC 类「海啸信息」报文不进顶条
+    if t.areas_list.is_empty() && t.title.contains("海啸信息") {
         return;
     }
     let (r, g, b) = jian_core::tsunami_official_rgb(&t.grade);
@@ -679,7 +706,7 @@ fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
                 .corner_radius(6.0)
                 .inner_margin(Margin::symmetric(14, 10))
                 .show(ui, |ui| {
-                    ui.set_max_width(420.0);
+                    ui.set_max_width(315.0);
                     ui.label(
                         RichText::new(format!("{title}生效中"))
                             .color(title_c)
@@ -701,48 +728,6 @@ fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
                     ui.label(RichText::new(area_line).color(body_c).size(12.0));
                 });
             let _ = p;
-        });
-}
-
-/// 要石风格地震检出框（左上，信息头下方）。
-fn draw_detection_box(
-    ui: &mut Ui,
-    p: &ThemePalette,
-    max_inst: f64,
-    active: Option<&jian_core::EewReport>,
-) {
-    let (lv, _) = jian_core::jma_from_instrumental(max_inst.max(0.0));
-    let place = active
-        .map(|e| e.place.as_str())
-        .unwrap_or("震源测定中");
-    egui::Area::new(egui::Id::new("detection_box"))
-        .fixed_pos(ui.max_rect().left_top() + Vec2::new(14.0, 200.0))
-        .order(egui::Order::Foreground)
-        .show(ui.ctx(), |ui| {
-            Frame::NONE
-                .fill(Color32::from_rgba_unmultiplied(28, 28, 32, 230))
-                .stroke(Stroke::new(2.0_f32, Color32::from_rgb(0xF5, 0x9E, 0x0B)))
-                .corner_radius(6.0)
-                .inner_margin(Margin::symmetric(12, 10))
-                .show(ui, |ui| {
-                    ui.set_max_width(280.0);
-                    ui.label(
-                        RichText::new("地震检知")
-                            .color(Color32::from_rgb(0xFB, 0xBF, 0x24))
-                            .strong()
-                            .size(15.0),
-                    );
-                    ui.label(
-                        RichText::new(format!("检测到振动 · 推定震度 {lv}+"))
-                            .color(p.text)
-                            .size(12.5),
-                    );
-                    ui.label(
-                        RichText::new(place)
-                            .color(p.text_muted)
-                            .size(11.5),
-                    );
-                });
         });
 }
 
@@ -1038,6 +1023,7 @@ fn draw_sidebar(
     snap: &mut AppSnapshot,
     scale: &str,
     icons: &IntensityIcons,
+    show_volcano_icons: bool,
 ) -> Option<SideAction> {
     let mut clicked = None;
     ui.set_min_width(ui.available_width());
@@ -1068,6 +1054,7 @@ fn draw_sidebar(
             });
 
             ui.add_space(6.0);
+            // 仅色点 + 源名；状态文案放悬停，避免四源挤成一团
             ui.horizontal(|ui| {
                 for (name, st) in [
                     ("Jian", snap.health_jian),
@@ -1075,14 +1062,17 @@ fn draw_sidebar(
                     ("P2P", snap.health_p2p),
                     ("Pancakes", snap.health_pancakes),
                 ] {
-                    let (r, painter) = ui.allocate_painter(Vec2::splat(8.0), Sense::hover());
-                    painter.circle_filled(r.rect.center(), 3.5, health_dot(p, st));
-                    ui.label(
-                        RichText::new(format!("{} {}", name, st.as_zh()))
-                            .size(11.0)
-                            .color(p.text_dim),
-                    );
-                    ui.add_space(6.0);
+                    let tip = format!("{name}\u{00b7}{}", st.as_zh());
+                    let resp = ui
+                        .horizontal(|ui| {
+                            let (r, painter) =
+                                ui.allocate_painter(Vec2::splat(8.0), Sense::hover());
+                            painter.circle_filled(r.rect.center(), 3.5, health_dot(p, st));
+                            ui.label(RichText::new(name).size(11.0).color(p.text_dim));
+                        })
+                        .response;
+                    resp.on_hover_text(tip);
+                    ui.add_space(4.0);
                 }
             });
 
@@ -1090,109 +1080,25 @@ fn draw_sidebar(
             draw_side_tabs(ui, p, &mut snap.tab);
             ui.add_space(6.0);
 
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let tab = snap.tab;
-                    let sel = snap.selection;
-                    match tab {
-                        SidebarTab::Records => {
-                            if snap.records.is_empty() {
-                                empty_hint(
-                                    ui,
-                                    p,
-                                    "暂无速报",
-                                    "已启用数据源时将自动填入；也可在设置中检查连接状态。",
-                                );
-                            }
-                            for (i, r) in snap.records.iter().enumerate() {
-                                let selected = sel
-                                    == Some(ListSelection {
-                                        tab: SidebarTab::Records,
-                                        index: i,
-                                    });
-                                let mut place = place_with_agency(&r.place, &r.agency.0);
-                                if r.is_auto {
-                                    place.push_str(" [自动测定]");
-                                }
-                                let (_, _, col, _) = intensity_chip(
-                                    r.intensity_kind,
-                                    r.intensity_level,
-                                    &r.intensity_text,
-                                    scale,
-                                );
-                                if list_row(
-                                    ui,
-                                    p,
-                                    icons,
-                                    &place,
-                                    &r.time_text,
-                                    &format!("M{:.1}", r.magnitude),
-                                    r.intensity_kind,
-                                    r.intensity_level,
-                                    &r.intensity_text,
-                                    scale,
-                                    col,
-                                    selected,
-                                    egui::Id::new(("rec", i)),
-                                ) {
-                                    clicked = Some(SideAction::List(SidebarTab::Records, i));
-                                }
-                            }
-                        }
-                        SidebarTab::Eew => {
-                            if snap.eew_list.is_empty() {
-                                empty_hint(
-                                    ui,
-                                    p,
-                                    "暂无预警",
-                                    "连接正常后，紧急地震速报会出现在此列表。",
-                                );
-                            }
-                            for (i, e) in snap.eew_list.iter().enumerate() {
-                                let selected = sel
-                                    == Some(ListSelection {
-                                        tab: SidebarTab::Eew,
-                                        index: i,
-                                    });
-                                let place = place_with_agency(&e.place, &e.agency.0);
-                                let time = format_list_time(e.origin_ms);
-                                let (_, _, col, _) = intensity_chip(
-                                    e.intensity_kind,
-                                    e.intensity_level,
-                                    &e.max_intensity_text,
-                                    scale,
-                                );
-                                if list_row(
-                                    ui,
-                                    p,
-                                    icons,
-                                    &place,
-                                    &format!("{time}  #{}", e.serial),
-                                    &format!("M{:.1}", e.magnitude),
-                                    e.intensity_kind,
-                                    e.intensity_level,
-                                    &e.max_intensity_text,
-                                    scale,
-                                    col,
-                                    selected,
-                                    egui::Id::new(("eew", i)),
-                                ) {
-                                    clicked = Some(SideAction::List(SidebarTab::Eew, i));
-                                }
-                            }
-                        }
-                        SidebarTab::Station => {
-                            if snap.stations.is_empty() {
-                                empty_hint(
-                                    ui,
-                                    p,
-                                    "暂无测站",
-                                    "启用 Jian 测站 /kmoni 后，实时震度点将显示于此。",
-                                );
-                            }
-                            // 侧栏列出全部测站（含計測 -3～0）
-                            for (i, s) in snap.stations.iter().enumerate() {
+            let tab = snap.tab;
+            let sel = snap.selection;
+            if tab == SidebarTab::Station {
+                if snap.stations.is_empty() {
+                    empty_hint(
+                        ui,
+                        p,
+                        "暂无测站",
+                        "启用 Jian 测站 /kmoni 后，实时震度点将显示于此。",
+                    );
+                } else {
+                    // 顶层虚拟列表（勿套进外层 ScrollArea，否则 available_height 无效）
+                    let row_h = 52.0_f32;
+                    let n = snap.stations.len();
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show_rows(ui, row_h, n, |ui, row_range| {
+                            for i in row_range {
+                                let s = &snap.stations[i];
                                 let selected = sel
                                     == Some(ListSelection {
                                         tab: SidebarTab::Station,
@@ -1228,38 +1134,134 @@ fn draw_sidebar(
                                     clicked = Some(SideAction::List(SidebarTab::Station, i));
                                 }
                             }
-                        }
-                        SidebarTab::Volcano => {
-                            if snap.volcanoes.is_empty() {
-                                empty_hint(
-                                    ui,
-                                    p,
-                                    "暂无火山情报",
-                                    "启用 Pancakes JMA 火山后，降灰预报等会出现在此列表。",
-                                );
+                        });
+                }
+            } else {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        match tab {
+                            SidebarTab::Records => {
+                                if snap.records.is_empty() {
+                                    empty_hint(
+                                        ui,
+                                        p,
+                                        "暂无速报",
+                                        "已启用数据源时将自动填入；也可在设置中检查连接状态。",
+                                    );
+                                }
+                                for (i, r) in snap.records.iter().enumerate() {
+                                    let selected = sel
+                                        == Some(ListSelection {
+                                            tab: SidebarTab::Records,
+                                            index: i,
+                                        });
+                                    let mut place = place_with_agency(&r.place, &r.agency.0);
+                                    if r.is_auto {
+                                        place.push_str(" [自动测定]");
+                                    }
+                                    let (_, _, col, _) = intensity_chip(
+                                        r.intensity_kind,
+                                        r.intensity_level,
+                                        &r.intensity_text,
+                                        scale,
+                                    );
+                                    if list_row(
+                                        ui,
+                                        p,
+                                        icons,
+                                        &place,
+                                        &r.time_text,
+                                        &format!("M{:.1}", r.magnitude),
+                                        r.intensity_kind,
+                                        r.intensity_level,
+                                        &r.intensity_text,
+                                        scale,
+                                        col,
+                                        selected,
+                                        egui::Id::new(("rec", i)),
+                                    ) {
+                                        clicked = Some(SideAction::List(SidebarTab::Records, i));
+                                    }
+                                }
                             }
-                            for (i, v) in snap.volcanoes.iter().enumerate() {
-                                let selected = sel
-                                    == Some(ListSelection {
-                                        tab: SidebarTab::Volcano,
-                                        index: i,
-                                    });
-                                let place = place_with_agency(&v.name, &v.agency.0);
-                                if volcano_list_row(
-                                    ui,
-                                    p,
-                                    &place,
-                                    &v.time_text,
-                                    &v.title,
-                                    selected,
-                                    egui::Id::new(("vol", i)),
-                                ) {
-                                    clicked = Some(SideAction::List(SidebarTab::Volcano, i));
+                            SidebarTab::Eew => {
+                                let sidebar = eew_sidebar_entries(&snap.eew_list);
+                                if sidebar.is_empty() {
+                                    empty_hint(
+                                        ui,
+                                        p,
+                                        "暂无预警",
+                                        "连接正常后，紧急地震速报会出现在此列表。",
+                                    );
+                                }
+                                for (real_i, e) in sidebar {
+                                    let selected = sel
+                                        == Some(ListSelection {
+                                            tab: SidebarTab::Eew,
+                                            index: real_i,
+                                        });
+                                    let place = place_with_agency(&e.place, &e.agency.0);
+                                    let time = format_list_time(e.origin_ms);
+                                    let (_, _, col, _) = intensity_chip(
+                                        e.intensity_kind,
+                                        e.intensity_level,
+                                        &e.max_intensity_text,
+                                        scale,
+                                    );
+                                    if list_row(
+                                        ui,
+                                        p,
+                                        icons,
+                                        &place,
+                                        &format!("{time}  #{}", e.serial),
+                                        &format!("M{:.1}", e.magnitude),
+                                        e.intensity_kind,
+                                        e.intensity_level,
+                                        &e.max_intensity_text,
+                                        scale,
+                                        col,
+                                        selected,
+                                        egui::Id::new(("eew", real_i)),
+                                    ) {
+                                        clicked = Some(SideAction::List(SidebarTab::Eew, real_i));
+                                    }
+                                }
+                            }
+                            SidebarTab::Station => {}
+                            SidebarTab::Volcano => {
+                                if snap.volcanoes.is_empty() {
+                                    empty_hint(
+                                        ui,
+                                        p,
+                                        "暂无火山情报",
+                                        "启用 Pancakes JMA 火山后，降灰预报等会出现在此列表。",
+                                    );
+                                }
+                                for (i, v) in snap.volcanoes.iter().enumerate() {
+                                    let selected = sel
+                                        == Some(ListSelection {
+                                            tab: SidebarTab::Volcano,
+                                            index: i,
+                                        });
+                                    let place = place_with_agency(&v.name, &v.agency.0);
+                                    if volcano_list_row(
+                                        ui,
+                                        p,
+                                        &place,
+                                        &v.time_text,
+                                        &v.title,
+                                        selected,
+                                        show_volcano_icons,
+                                        egui::Id::new(("vol", i)),
+                                    ) {
+                                        clicked = Some(SideAction::List(SidebarTab::Volcano, i));
+                                    }
                                 }
                             }
                         }
-                    }
-                });
+                    });
+            }
         });
     clicked
 }
@@ -1325,6 +1327,7 @@ fn volcano_list_row(
     sub: &str,
     title: &str,
     selected: bool,
+    show_icon: bool,
     id: egui::Id,
 ) -> bool {
     let mut clicked = false;
@@ -1346,6 +1349,15 @@ fn volcano_list_row(
                 painter.rect_filled(stripe.rect, 2.0, accent);
 
                 ui.add_space(8.0);
+                if show_icon {
+                    ui.label(
+                        RichText::new("\u{25b2}")
+                            .color(accent)
+                            .size(14.0)
+                            .strong(),
+                    );
+                    ui.add_space(4.0);
+                }
                 ui.vertical(|ui| {
                     ui.set_max_width(ui.available_width());
                     ui.label(RichText::new(place).color(p.text).size(13.0));

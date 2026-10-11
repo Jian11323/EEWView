@@ -4,7 +4,7 @@ use anyhow::Result;
 use eframe::egui;
 use jian_audio::{AudioCue, AudioEngine, TsunamiCueKind};
 use jian_config::AppConfig;
-use jian_core::{AppSnapshot, HealthStatus, IntensityKind};
+use jian_core::{live_wave_eews, AppSnapshot, HealthStatus, IntensityKind};
 use jian_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
 use jian_travel::{max_s_wave_spread_km, TravelEngine, Wave};
 use jian_map::{zoom_to_fit_radius_km, BasemapMode, ProjectionMode};
@@ -294,6 +294,9 @@ fn main() -> Result<()> {
                 audio,
                 auto_center_pending: live,
                 last_follow_key: None,
+                cinema_idx: 0,
+                cinema_next_at: Instant::now(),
+                cinema_seen_key: String::new(),
                 prev_health: (
                     HealthStatus::Abnormal,
                     HealthStatus::Abnormal,
@@ -353,6 +356,11 @@ struct JianApp {
     auto_center_pending: bool,
     /// 已跟焦的预警 (event_id, serial)，避免每帧重复居中
     last_follow_key: Option<(String, u32)>,
+    /// 多震 cinema 轮播：当前索引与下次切换时刻
+    cinema_idx: usize,
+    cinema_next_at: Instant,
+    /// 已见过多震 id 签名，用于发现新震立刻跳转
+    cinema_seen_key: String,
     prev_health: (HealthStatus, HealthStatus, HealthStatus, HealthStatus),
     prev_tsunami_key: String,
 }
@@ -413,10 +421,11 @@ impl eframe::App for JianApp {
                             .max(80.0);
                         zoom_to_fit_radius_km(
                             ev.latitude,
-                            r,
+                            r.min(320.0).max(55.0),
                             self.shell.map.last_viewport_min_px,
-                            0.72,
+                            0.52,
                         )
+                        .max(5.4)
                     } else {
                         6.0
                     };
@@ -435,57 +444,102 @@ impl eframe::App for JianApp {
                 }
             }
         } else if self.cfg.ui.auto_follow_eew {
-            if let Some(ev) = &self.snap.active {
-                let is_eew = !ev.event_id.starts_with("record:")
-                    && !ev.event_id.starts_with("station:");
-                if is_eew && (ev.latitude.abs() > 0.01 || ev.longitude.abs() > 0.01) {
+            // GQ CinemaHandler + eewcn 多震轮播：新震立刻跳；多震按间隔切换；报数更新跟焦
+            let browsing_other = self.snap.active.as_ref().is_some_and(|e| {
+                e.event_id.starts_with("record:") || e.event_id.starts_with("station:")
+            });
+            if !browsing_other && !self.shell.map.user_camera_override {
+                let now = chrono::Utc::now().timestamp_millis();
+                let live = live_wave_eews(&self.snap.eew_list, now, 30 * 60 * 1000);
+                let seen_key = live
+                    .iter()
+                    .map(|e| format!("{}|{}", e.agency.0, e.event_id))
+                    .collect::<Vec<_>>()
+                    .join(";");
+                if live.is_empty() {
+                    self.cinema_seen_key.clear();
+                } else if live.len() == 1 {
+                    let ev = live[0];
                     let key = (ev.event_id.clone(), ev.serial);
                     if self.last_follow_key.as_ref() != Some(&key) {
-                        // 新预警 / 报数更新：抛物线飞跃，目标 zoom 一次到位（对齐 eewcn 波圈适配）
-                        let duration = if self
-                            .last_follow_key
-                            .as_ref()
-                            .is_some_and(|(id, _)| id != &ev.event_id)
-                        {
-                            1.15
-                        } else {
-                            0.7
-                        };
-                        let now = chrono::Utc::now().timestamp_millis();
-                        let elapsed = if ev.origin_ms > 0 {
-                            ((now - ev.origin_ms) as f64 / 1000.0).max(0.0)
-                        } else {
-                            0.0
-                        };
-                        let s_km = if let Some(eng) = self.travel.as_ref() {
-                            eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, elapsed)
-                        } else {
-                            elapsed * 5.0
-                        };
-                        let r = s_km
-                            .min(max_s_wave_spread_km(ev.magnitude))
-                            .max(80.0);
-                        let z = zoom_to_fit_radius_km(
-                            ev.latitude,
-                            r,
+                        let z = gq_jump_zoom(
+                            ev,
+                            now,
+                            self.travel.as_ref(),
                             self.shell.map.last_viewport_min_px,
-                            0.72,
                         );
-                        self.shell.map.fly_to(
-                            ev.longitude,
-                            ev.latitude,
-                            Some(z),
-                            duration,
-                        );
+                        self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 1.6);
                         self.last_follow_key = Some(key);
+                        self.cinema_idx = 0;
+                        self.cinema_seen_key = seen_key;
+                        self.snap.active = Some(ev.clone());
+                    }
+                } else {
+                    let mut jump_idx: Option<usize> = None;
+                    if seen_key != self.cinema_seen_key {
+                        let old: std::collections::HashSet<&str> = self
+                            .cinema_seen_key
+                            .split(';')
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        for (i, e) in live.iter().enumerate() {
+                            let id = format!("{}|{}", e.agency.0, e.event_id);
+                            if !old.contains(id.as_str()) {
+                                jump_idx = Some(i);
+                                break;
+                            }
+                        }
+                        if jump_idx.is_none() {
+                            jump_idx = Some(0);
+                        }
+                        self.cinema_seen_key = seen_key;
+                    } else if Instant::now() >= self.cinema_next_at {
+                        jump_idx = Some((self.cinema_idx + 1) % live.len());
+                    } else {
+                        let idx = self.cinema_idx.min(live.len() - 1);
+                        let ev = live[idx];
+                        let key = (ev.event_id.clone(), ev.serial);
+                        if self.last_follow_key.as_ref() != Some(&key) {
+                            jump_idx = Some(idx);
+                        }
+                    }
+                    if let Some(idx) = jump_idx {
+                        let ev = live[idx];
+                        let z = gq_jump_zoom(
+                            ev,
+                            now,
+                            self.travel.as_ref(),
+                            self.shell.map.last_viewport_min_px,
+                        );
+                        self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 1.6);
+                        self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
+                        self.cinema_idx = idx;
+                        let hold = (2.5 + ev.magnitude * 0.8).clamp(5.0, 8.0);
+                        self.cinema_next_at =
+                            Instant::now() + std::time::Duration::from_secs_f64(hold);
+                        self.snap.active = Some(ev.clone());
+                        if let Some(pos) = self.snap.eew_list.iter().position(|e| {
+                            e.agency.0 == ev.agency.0 && e.event_id == ev.event_id
+                        }) {
+                            self.snap.selection = Some(jian_core::ListSelection {
+                                tab: jian_core::SidebarTab::Eew,
+                                index: pos,
+                            });
+                            self.snap.tab = jian_core::SidebarTab::Eew;
+                            self.snap.overlay_mode = jian_core::OverlayMode::Wave;
+                        }
                     }
                 }
             }
         }
-
-        // 新速报：启动汇聚结束后跳转到最新一条（侧栏已在 upsert 中选中）
+        // 新速报：启动汇聚结束后跳转；有活跃预警时让路，避免盖过震中跟焦
         if !self.auto_center_pending && self.started.elapsed().as_secs_f64() >= 2.5 {
-            if let Some((lon, lat, zoom)) = self.snap.pending_record_fly.take() {
+            let eew_active = self.snap.active.as_ref().is_some_and(|e| {
+                !e.event_id.starts_with("record:") && !e.event_id.starts_with("station:")
+            });
+            if eew_active {
+                self.snap.pending_record_fly = None;
+            } else if let Some((lon, lat, zoom)) = self.snap.pending_record_fly.take() {
                 if lat.abs() > 0.01 || lon.abs() > 0.01 {
                     self.shell.map.fly_to(lon, lat, Some(zoom), 1.0);
                 }
@@ -744,6 +798,41 @@ impl JianApp {
     }
 }
 
+
+
+/// GQ cinema 跳转缩放：按发震年龄估视野，并用当前 S 半径夹一层，只在跳转瞬间用一次。
+fn gq_jump_zoom(
+    ev: &jian_core::EewReport,
+    now_ms: i64,
+    travel: Option<&TravelEngine>,
+    viewport_min_px: f32,
+) -> f64 {
+    let age_min = if ev.origin_ms > 0 {
+        ((now_ms - ev.origin_ms) as f64 / 60_000.0).max(0.0)
+    } else {
+        0.0
+    };
+    // CinemaHandler: scroll = clamp(ageMin/5, 0.1, 1.6)；映射到平面 zoom
+    let scroll = (age_min / 5.0).clamp(0.1, 1.6);
+    let age_z = (11.6 - scroll * 3.4).clamp(5.0, 10.8);
+    let elapsed = if ev.origin_ms > 0 {
+        ((now_ms - ev.origin_ms) as f64 / 1000.0).max(0.0)
+    } else {
+        0.0
+    };
+    let s_km = if let Some(eng) = travel {
+        eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, elapsed)
+    } else {
+        elapsed * 5.0
+    };
+    let r = s_km
+        .min(max_s_wave_spread_km(ev.magnitude))
+        .min(320.0)
+        .max(55.0);
+    let fit_z = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.52);
+    // 取较近视野，地板略抬高
+    (age_z.min(fit_z) + 0.35).clamp(5.4, 10.8)
+}
 
 fn tsunami_audio_grade(grade: &str) -> u8 {
     match grade {

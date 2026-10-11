@@ -1,4 +1,4 @@
-//! 测站源：Jian 中转（kmoni / s-net / kma-station）+ NIED 原版 kmoni/lmoni 图像采样。
+//! 测站源：Jian 中转（kmoni / s-net / kma-station）+ NIED 原版 kmoni/lmoni + MSIL 原版 S-Net。
 
 use jian_config::StationsConfig;
 use jian_core::{instrumental_display_text, jma_from_instrumental, IntensityKind, StationSample};
@@ -57,8 +57,11 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
     if cfg.snet_enabled {
         match cfg.snet_source.trim().to_ascii_lowercase().as_str() {
             "original" => {
-                warn!("stations: S-Net 原版需要 pixels.csv，当前仅支持 Jian 中转；已回退 jian");
-                tasks.push(spawn_snet_jian(tx.clone(), cfg.snet_jian_ws.clone()));
+                tasks.push(spawn_snet_original(
+                    tx.clone(),
+                    assets_stations.clone(),
+                    cfg.snet_jian_ws.clone(),
+                ));
             }
             _ => {
                 tasks.push(spawn_snet_jian(tx.clone(), cfg.snet_jian_ws.clone()));
@@ -105,6 +108,202 @@ fn spawn_snet_jian(tx: NetTx, url: String) -> JoinHandle<()> {
         )
         .await;
     })
+}
+
+
+#[derive(Clone)]
+struct SnetPoint {
+    code: String,
+    lat: f64,
+    lon: f64,
+    x: u32,
+    y: u32,
+}
+
+/// 原版 MSIL S-Net：`pixels.csv` + 两张 zoom5 切片纵向拼接后按像素取色。
+fn spawn_snet_original(
+    tx: NetTx,
+    assets_stations: Option<std::path::PathBuf>,
+    fallback_jian_ws: String,
+) -> JoinHandle<()> {
+    let path = assets_stations
+        .as_ref()
+        .map(|d| d.join("pixels.csv"))
+        .filter(|p| p.is_file());
+    let Some(path) = path else {
+        warn!("stations: 缺少 assets/stations/pixels.csv，S-Net 原版回退 Jian 中转");
+        return spawn_snet_jian(tx, fallback_jian_ws);
+    };
+    let points = match load_snet_pixels(&path) {
+        Ok(p) if !p.is_empty() => p,
+        Ok(_) => {
+            warn!("stations: pixels.csv 为空，S-Net 原版回退 Jian 中转");
+            return spawn_snet_jian(tx, fallback_jian_ws);
+        }
+        Err(e) => {
+            warn!(error = %e, "stations: 读取 pixels.csv 失败，回退 Jian 中转");
+            return spawn_snet_jian(tx, fallback_jian_ws);
+        }
+    };
+    info!(n = points.len(), "stations: spawn original MSIL S-Net");
+    tokio::spawn(async move {
+        emit_health(&tx, "snet", jian_core::HealthStatus::Normal);
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(12))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
+        let mut last_key = String::new();
+        loop {
+            let latest = fetch_snet_latest_time(&client).await;
+            if let Some(key) = latest {
+                if key != last_key {
+                    match sample_snet_tiles(&client, &key, &points).await {
+                        Some(list) => {
+                            let _ = tx.send(NetEvent::Stations {
+                                network: "snet",
+                                list,
+                            });
+                            last_key = key;
+                            emit_health(&tx, "snet", jian_core::HealthStatus::Normal);
+                        }
+                        None => {
+                            emit_health(&tx, "snet", jian_core::HealthStatus::Fluctuating);
+                        }
+                    }
+                }
+            } else {
+                emit_health(&tx, "snet", jian_core::HealthStatus::Fluctuating);
+            }
+            // MSIL S-Net 切片约每分钟更新；过频轮询无意义
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
+    })
+}
+
+fn load_snet_pixels(path: &std::path::Path) -> Result<Vec<SnetPoint>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if i == 0 && line.to_ascii_lowercase().starts_with("x,") {
+            continue;
+        }
+        let cols: Vec<&str> = line.split(',').collect();
+        if cols.len() < 6 {
+            continue;
+        }
+        let x: u32 = cols[0].trim().parse().unwrap_or(0);
+        let y: u32 = cols[1].trim().parse().unwrap_or(0);
+        let code = cols[3].trim().to_string();
+        if code.is_empty() {
+            continue;
+        }
+        let lon: f64 = cols[4].trim().parse().unwrap_or(0.0);
+        let lat: f64 = cols[5].trim().parse().unwrap_or(0.0);
+        out.push(SnetPoint {
+            code,
+            lat,
+            lon,
+            x,
+            y,
+        });
+    }
+    Ok(out)
+}
+
+async fn fetch_snet_latest_time(client: &reqwest::Client) -> Option<String> {
+    let url = "https://www.msil.go.jp/data/tiles/smoni/targetTimes.json";
+    let resp = client.get(url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let v: serde_json::Value = resp.json().await.ok()?;
+    let arr = v.as_array()?;
+    let last = arr.last()?;
+    let t = last.get("validtime")?.as_str()?;
+    if t.len() >= 12 {
+        Some(t.to_string())
+    } else {
+        None
+    }
+}
+
+async fn sample_snet_tiles(
+    client: &reqwest::Client,
+    key: &str,
+    points: &[SnetPoint],
+) -> Option<Vec<StationSample>> {
+    // 对齐 Station/S-Net：两张 z=5 切片 (28,11)+(28,12) 纵向拼接
+    let base = "https://www.msil.go.jp/data/tiles/smoni/tileimage";
+    let url1 = format!("{base}/{key}/{key}/5/28/11.png");
+    let url2 = format!("{base}/{key}/{key}/5/28/12.png");
+    let b1 = client.get(&url1).send().await.ok()?.bytes().await.ok()?;
+    let b2 = client.get(&url2).send().await.ok()?.bytes().await.ok()?;
+    let img1 = image::load_from_memory(&b1).ok()?.to_rgb8();
+    let img2 = image::load_from_memory(&b2).ok()?.to_rgb8();
+    let (w1, h1) = img1.dimensions();
+    let (w2, h2) = img2.dimensions();
+    let w = w1.max(w2);
+    let h = h1 + h2;
+    let mut merged = image::RgbImage::new(w, h);
+    image::imageops::replace(&mut merged, &img1, 0, 0);
+    image::imageops::replace(&mut merged, &img2, 0, h1 as i64);
+
+    let mut out = Vec::new();
+    for pt in points {
+        if pt.x >= w || pt.y >= h {
+            continue;
+        }
+        let p = merged.get_pixel(pt.x, pt.y).0;
+        let Some(pos) = color_to_position_snet(p[0], p[1], p[2]) else {
+            continue;
+        };
+        let shindo = 10.0 * pos - 3.0;
+        if shindo < -3.0 {
+            continue;
+        }
+        let instrumental = if shindo >= 7.0 { 7.0 } else { shindo };
+        let (level, _) = jma_from_instrumental(instrumental);
+        out.push(StationSample {
+            id: pt.code.clone(),
+            name: pt.code.clone(),
+            latitude: pt.lat,
+            longitude: pt.lon,
+            intensity_text: instrumental_display_text(instrumental),
+            intensity_kind: IntensityKind::JmaShindo,
+            intensity_level: level,
+            instrumental,
+        });
+    }
+    Some(out)
+}
+
+/// 对齐 Station/S-Net `hsv_to_position_p`（阈值略宽于 NIED 版）。
+fn color_to_position_snet(r: u8, g: u8, b: u8) -> Option<f64> {
+    let (h, s, v) = rgb_to_hsv(r, g, b);
+    if !(v > 0.1 && s > 0.75) {
+        return None;
+    }
+    let p = if h > 0.1476 {
+        280.31 * h.powi(6) - 916.05 * h.powi(5) + 1142.6 * h.powi(4) - 709.95 * h.powi(3)
+            + 234.65 * h.powi(2)
+            - 40.27 * h
+            + 3.2217
+    } else if h > 0.001 && h <= 0.1476 {
+        151.4 * h.powi(4) - 49.32 * h.powi(3) + 6.753 * h.powi(2) - 2.481 * h + 0.9033
+    } else {
+        -0.005171 * v.powi(2) - 0.3282 * v + 1.221
+    };
+    let p = p.clamp(0.0, 1.0);
+    if p <= 0.0 {
+        None
+    } else {
+        Some(p)
+    }
 }
 
 #[derive(Clone, Copy)]

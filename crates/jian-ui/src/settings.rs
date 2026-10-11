@@ -1374,6 +1374,10 @@ fn draw_general(
         control_row(ui, "烈度图例", "地图左下角显示烈度色标", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_legend);
         });
+        row_divider(ui);
+        control_row(ui, "火山标注", "地图三角标与火山列表图标", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.ui.show_volcanoes);
+        });
     });
 
     section(ui, "界面偏好", "\u{2630}", |ui| {

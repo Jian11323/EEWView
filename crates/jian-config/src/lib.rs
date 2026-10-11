@@ -41,6 +41,9 @@ pub struct UiConfig {
     /// 地图左下角烈度图例
     #[serde(default = "default_true")]
     pub show_legend: bool,
+    /// 地图绘制火山三角标，并在火山列表显示图标
+    #[serde(default = "default_true")]
+    pub show_volcanoes: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -204,7 +207,7 @@ impl Default for StationsConfig {
             snet_enabled: false,
             snet_source: default_jma_station_source(),
             snet_jian_ws: default_snet_jian_ws(),
-            kma_enabled: false,
+            kma_enabled: true,
             kma_jian_ws: default_kma_station_ws(),
         }
     }
@@ -374,6 +377,7 @@ impl Default for AppConfig {
                 auto_zoom_waves: true,
                 show_wave_rings: true,
                 show_legend: true,
+                show_volcanoes: true,
             },
             map: MapConfig {
                 basemap: default_basemap(),
@@ -505,17 +509,13 @@ impl AppConfig {
         Ok(path)
     }
 
-    /// 旧键 `jian.station_enabled` 与 `stations.jma_*` 双向对齐。
+    /// `stations.jma_*` 为准；旧键 `jian.station_enabled` 仅镜像，不得反杀测站开关。
     pub fn sync_station_compat(&mut self) {
-        // 若仍用旧开关且 stations 为默认 jian，则以旧键为准
-        if !self.sources.jian.station_enabled && self.sources.stations.jma_source == "jian" {
-            self.sources.stations.jma_enabled = false;
-        }
         if self.sources.stations.jma_enabled && self.sources.stations.jma_source == "jian" {
             self.sources.jian.station_enabled = true;
             self.sources.jian.station_ws_url = self.sources.stations.jma_jian_ws.clone();
         } else if self.sources.stations.jma_source == "jian" {
-            self.sources.jian.station_enabled = self.sources.stations.jma_enabled;
+            self.sources.jian.station_enabled = false;
         } else {
             // 原版 kmoni/lmoni：关闭 Jian /kmoni 连接
             self.sources.jian.station_enabled = false;

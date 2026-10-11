@@ -16,10 +16,13 @@ pub use estimate::{
     hypocentral_km,
 };
 pub use intensity::{
-    cn_intensity_level, cn_intensity_text, instrumental_display_text, intensity_kind_for_agency,
+    cn_intensity_level, cn_intensity_text, instrumental_display_text, instrumental_half_step_text,
+    intensity_kind_for_agency,
     jma_from_instrumental, jma_shindo_level, jma_shindo_text, prefer_intensity_scale,
 };
 pub use palette::{instrumental_band_level, instrumental_band_rgb, instrumental_rgb};
+
+// tsunami_official_rgb / tsunami_grade_zh 定义于本文件
 
 /// 机构 / 源 ID（与 WS type 对齐）
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -115,6 +118,14 @@ fn default_instrumental() -> f64 {
     -99.0
 }
 
+/// 海啸影响区域一行。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TsunamiArea {
+    pub name: String,
+    /// Forecast / Watch / Warning / MajorWarning
+    pub grade: String,
+}
+
 /// JMA 海啸情报（预报 / 注意报 / 警报等）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TsunamiInfo {
@@ -122,12 +133,57 @@ pub struct TsunamiInfo {
     pub title: String,
     /// 等级原文或归一化：Forecast / Watch / Warning / MajorWarning / Cancel
     pub grade: String,
-    /// 区域摘要（逗号分隔）
+    /// 区域摘要（顿号分隔）
     pub areas: String,
+    /// 分区明细（有则优先用于地图着色）
+    #[serde(default)]
+    pub areas_list: Vec<TsunamiArea>,
     pub cancelled: bool,
     /// 发布时间 unix ms（0 未知）
     #[serde(default)]
     pub issued_ms: i64,
+    /// 来源标识：jian / pancakes / p2p
+    #[serde(default)]
+    pub source: String,
+    /// 来源优先级：Jian=3 > Pancakes=2 > P2P=1（高者优先）
+    #[serde(default)]
+    pub source_priority: u8,
+}
+
+/// JMA 海啸四档官方色（预报青绿 / 注意报黄 / 警报红 / 大海啸紫）。
+pub fn tsunami_official_rgb(grade: &str) -> (u8, u8, u8) {
+    match grade {
+        "MajorWarning" | "Major" => (0xC0, 0x00, 0xC0),
+        "Warning" => (0xFF, 0x00, 0x00),
+        "Watch" => (0xFF, 0xFF, 0x00),
+        _ => (0x00, 0xE5, 0xFF), // Forecast 津波予報
+    }
+}
+
+pub fn tsunami_grade_zh(grade: &str) -> &'static str {
+    match grade {
+        "MajorWarning" | "Major" => "大海啸警报",
+        "Warning" => "海啸警报",
+        "Watch" => "海啸注意报",
+        "Cancel" => "海啸情报解除",
+        _ => "海啸预报",
+    }
+}
+
+/// JMA 火山情报（降灰预报等；不进地震速报列表）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VolcanoNotice {
+    pub agency: AgencyId,
+    /// 火山名
+    pub name: String,
+    /// 标题，如「降灰予報（定時）」
+    pub title: String,
+    pub time_text: String,
+    pub issued_ms: i64,
+    #[serde(default)]
+    pub latitude: f64,
+    #[serde(default)]
+    pub longitude: f64,
 }
 
 impl StationSample {
@@ -178,6 +234,8 @@ pub enum SidebarTab {
     #[default]
     Eew,
     Station,
+    /// JMA 火山情报（与地震速报分离）
+    Volcano,
 }
 
 /// 列表选中项（驱动高亮 + 地图居中）
@@ -206,12 +264,19 @@ pub struct AppSnapshot {
     pub health_jian: HealthStatus,
     pub health_wolfx: HealthStatus,
     pub health_p2p: HealthStatus,
+    pub health_pancakes: HealthStatus,
     pub tab: SidebarTab,
     pub selection: Option<ListSelection>,
     /// 图例 P-S：是否绘制走时波圈
     pub show_wave_rings: bool,
     /// 当前有效的 JMA 海啸情报（取消后为 None）
     pub tsunami: Option<TsunamiInfo>,
+    /// JMA 火山情报（与 records 分离）
+    pub volcanoes: Vec<VolcanoNotice>,
+    /// 各测站网最近一帧到达时刻 unix ms（kmoni/snet/kma）
+    pub station_updated_ms: std::collections::HashMap<String, i64>,
+    /// 新速报写入后待主循环飞跃的 (lon, lat, zoom)；take 后清空
+    pub pending_record_fly: Option<(f64, f64, f64)>,
 }
 
 impl AppSnapshot {
@@ -366,6 +431,7 @@ impl AppSnapshot {
             health_jian: HealthStatus::Normal,
             health_wolfx: HealthStatus::Normal,
             health_p2p: HealthStatus::Fluctuating,
+            health_pancakes: HealthStatus::Abnormal,
             tab: SidebarTab::Eew,
             selection: Some(ListSelection {
                 tab: SidebarTab::Eew,
@@ -373,6 +439,9 @@ impl AppSnapshot {
             }),
             show_wave_rings: true,
             tsunami: None,
+            volcanoes: Vec::new(),
+            station_updated_ms: std::collections::HashMap::new(),
+            pending_record_fly: None,
         }
     }
 
@@ -387,7 +456,7 @@ impl AppSnapshot {
                 let lat = ev.latitude;
                 self.active = Some(ev);
                 self.overlay_mode = OverlayMode::Wave;
-                Some((lon, lat, 6.0))
+                Some((lon, lat, 7.2))
             }
             SidebarTab::Records => {
                 let r = self.records.get(index)?;
@@ -395,7 +464,7 @@ impl AppSnapshot {
                 let lat = r.latitude;
                 self.active = Some(r.as_header_report());
                 self.overlay_mode = OverlayMode::Wave;
-                Some((lon, lat, 6.5))
+                Some((lon, lat, 7.2))
             }
             SidebarTab::Station => {
                 let s = self.stations.get(index)?;
@@ -403,7 +472,20 @@ impl AppSnapshot {
                 let lat = s.latitude;
                 self.active = Some(s.as_header_report());
                 self.overlay_mode = OverlayMode::MarkerOnly;
-                Some((lon, lat, 8.0))
+                Some((lon, lat, 9.0))
+            }
+            SidebarTab::Volcano => {
+                let v = self.volcanoes.get(index)?;
+                let lon = v.longitude;
+                let lat = v.latitude;
+                // 火山不进左上预警条
+                self.active = None;
+                self.overlay_mode = OverlayMode::MarkerOnly;
+                if lat.abs() <= 0.01 && lon.abs() <= 0.01 {
+                    None
+                } else {
+                    Some((lon, lat, 8.0))
+                }
             }
         }
     }
@@ -420,10 +502,14 @@ impl AppSnapshot {
             health_jian: HealthStatus::Abnormal,
             health_wolfx: HealthStatus::Abnormal,
             health_p2p: HealthStatus::Abnormal,
+            health_pancakes: HealthStatus::Abnormal,
             tab: SidebarTab::Eew,
             selection: None,
             show_wave_rings: true,
             tsunami: None,
+            volcanoes: Vec::new(),
+            station_updated_ms: std::collections::HashMap::new(),
+            pending_record_fly: None,
         }
     }
 
@@ -431,24 +517,61 @@ impl AppSnapshot {
         self.tsunami = info;
     }
 
+    /// 海啸并入：Jian > Pancakes > P2P；同级取更新的 issued_ms。
+    pub fn upsert_tsunami(&mut self, info: TsunamiInfo) {
+        let cancel = info.cancelled || info.grade.eq_ignore_ascii_case("Cancel");
+        if cancel {
+            if let Some(cur) = self.tsunami.as_ref() {
+                if info.source_priority < cur.source_priority {
+                    return;
+                }
+            }
+            self.tsunami = None;
+            return;
+        }
+        if let Some(cur) = self.tsunami.as_ref() {
+            if info.source_priority < cur.source_priority {
+                return;
+            }
+            if info.source_priority == cur.source_priority
+                && info.issued_ms > 0
+                && cur.issued_ms > info.issued_ms
+            {
+                return;
+            }
+        }
+        self.tsunami = Some(info);
+    }
+
     pub fn set_health(&mut self, source: &str, status: HealthStatus) {
         match source {
             "jian" => self.health_jian = status,
-            // 测站 /kmoni 计入 Jian：无 /all 令牌时仍可显示「正常」
+            // 测站 /kmoni：仅测站通时标「波动」，避免无 /all 却显示 Jian「正常」
             "kmoni" => {
                 if status == HealthStatus::Normal {
-                    self.health_jian = HealthStatus::Normal;
+                    if self.health_jian == HealthStatus::Abnormal {
+                        self.health_jian = HealthStatus::Fluctuating;
+                    }
                 } else if self.health_jian != HealthStatus::Normal {
                     self.health_jian = status;
                 }
             }
             "wolfx" => self.health_wolfx = status,
             "p2pquake" | "p2p" => self.health_p2p = status,
+            "pancakes" => self.health_pancakes = status,
             _ => {}
         }
     }
 
-    /// 插入/更新 EEW；同 agency+event_id 保留更高 serial；列表按发震时刻新→旧
+    /// 列表按龄裁剪（供回看）；不因波走完删记录。地图叉标另按 `eew_wave_active`。
+    pub fn prune_finished_eews(&mut self) {
+        // 约 6 小时内每预警一条，便于对照 eewcn 回看
+        prune_eew_list(&mut self.eew_list, 6 * 60 * 60 * 1000, 64);
+    }
+
+    /// 插入/更新 EEW：同 agency+event_id 取更高 serial；不同 event_id 各留一条（eewcn 回看）。
+    /// 地图波圈/叉标仅画仍在传播的；侧栏展示全部保留记录。
+    /// 新预警/报数更新始终抢占左上角与侧栏选中（优先于速报/测站浏览），供自动跟焦。
     pub fn upsert_eew(&mut self, report: EewReport) {
         let key = (report.agency.0.clone(), report.event_id.clone());
         if let Some(pos) = self
@@ -465,59 +588,42 @@ impl AppSnapshot {
             self.eew_list.push(report.clone());
         }
         sort_eew_newest_first(&mut self.eew_list);
-        if self.eew_list.len() > 50 {
-            self.eew_list.truncate(50);
-        }
-        self.rebind_eew_selection(&key);
-
-        // 无选中，或选中正是该 EEW → 刷新 Header；用户点了 Records/Station 则不抢焦点
-        let refresh_active = match &self.selection {
-            None => true,
-            Some(sel) if sel.tab == SidebarTab::Eew => self
-                .eew_list
-                .get(sel.index)
-                .map(|e| e.agency.0 == key.0 && e.event_id == key.1)
-                .unwrap_or(true),
-            Some(_) => false,
-        };
-        if refresh_active || self.active.is_none() {
-            if let Some(pos) = self
-                .eew_list
-                .iter()
-                .position(|e| e.agency.0 == key.0 && e.event_id == key.1)
-            {
-                self.active = Some(self.eew_list[pos].clone());
-                self.overlay_mode = OverlayMode::Wave;
-                if self.selection.is_none() {
-                    self.selection = Some(ListSelection {
-                        tab: SidebarTab::Eew,
-                        index: pos,
-                    });
-                    self.tab = SidebarTab::Eew;
-                }
-            }
+        prune_eew_list(&mut self.eew_list, 6 * 60 * 60 * 1000, 64);
+        // 预警优先：始终刷新 Header / 选中，不因当前在速报、测站页而丢弃
+        if let Some(pos) = self
+            .eew_list
+            .iter()
+            .position(|e| e.agency.0 == key.0 && e.event_id == key.1)
+        {
+            self.active = Some(self.eew_list[pos].clone());
+            self.overlay_mode = OverlayMode::Wave;
+            self.tab = SidebarTab::Eew;
+            self.selection = Some(ListSelection {
+                tab: SidebarTab::Eew,
+                index: pos,
+            });
+            // 取消尚未执行的速报飞跃，避免盖过预警跟焦
+            self.pending_record_fly = None;
         }
     }
 
-    fn rebind_eew_selection(&mut self, key: &(String, String)) {
-        if let Some(sel) = self.selection {
-            if sel.tab == SidebarTab::Eew {
-                if let Some(i) = self
-                    .eew_list
-                    .iter()
-                    .position(|e| e.agency.0 == key.0 && e.event_id == key.1)
-                {
-                    self.selection = Some(ListSelection {
-                        tab: SidebarTab::Eew,
-                        index: i,
-                    });
-                }
-            }
-        }
+    /// 当前 active 是真预警（非速报/测站头）时为 true。
+    fn active_is_eew_header(&self) -> bool {
+        self.active.as_ref().is_some_and(|e| {
+            !e.event_id.starts_with("record:") && !e.event_id.starts_with("station:")
+        })
     }
 
-    /// 插入速报；按 agency+place+time 粗去重；列表按发震时刻新→旧
+    /// 插入速报；按 agency+place+time 粗去重；列表按发震时刻新→旧。
+    /// 无活跃预警时：新项会选中并写入 `pending_record_fly`（有坐标时）。
+    /// 有预警展示中：只入列表，不抢左上角与地图跟焦。
     pub fn upsert_record(&mut self, record: EqRecord) {
+        // 火山不得混入地震速报
+        if record.agency.0.eq_ignore_ascii_case("jma-volcano")
+            || record.agency.0.to_ascii_lowercase().contains("volcano")
+        {
+            return;
+        }
         let dup = self.records.iter().any(|r| {
             r.agency == record.agency
                 && r.place == record.place
@@ -527,25 +633,51 @@ impl AppSnapshot {
         if dup {
             return;
         }
-        self.records.push(record);
+        let lon = record.longitude;
+        let lat = record.latitude;
+        let has_coord = lat.abs() > 0.01 || lon.abs() > 0.01;
+        self.records.push(record.clone());
         sort_records_newest_first(&mut self.records);
         if self.records.len() > 80 {
             self.records.truncate(80);
         }
-        if let Some(sel) = self.selection {
-            if sel.tab == SidebarTab::Records {
-                // 新项插入后下标可能变化；保持选中项身份
-                if let Some(cur) = self.active.as_ref() {
-                    if let Some(i) = self.records.iter().position(|r| {
-                        r.agency.0 == cur.agency.0 && r.place == cur.place && r.origin_ms == cur.origin_ms
-                    }) {
-                        self.selection = Some(ListSelection {
-                            tab: SidebarTab::Records,
-                            index: i,
-                        });
-                    }
-                }
+        // 预警展示中不被速报抢焦点（否则左上角空空、也不会跟焦震中）
+        if self.active_is_eew_header() {
+            return;
+        }
+        if let Some(i) = self.records.iter().position(|r| {
+            r.agency == record.agency
+                && r.place == record.place
+                && r.origin_ms == record.origin_ms
+                && (r.magnitude - record.magnitude).abs() < 0.05
+        }) {
+            self.tab = SidebarTab::Records;
+            self.selection = Some(ListSelection {
+                tab: SidebarTab::Records,
+                index: i,
+            });
+            self.active = Some(record.as_header_report());
+            self.overlay_mode = OverlayMode::Wave;
+            if has_coord {
+                self.pending_record_fly = Some((lon, lat, 6.5));
             }
+        }
+    }
+
+    /// 插入火山情报；按 name+title+time 去重；新→旧。
+    pub fn upsert_volcano(&mut self, notice: VolcanoNotice) {
+        let dup = self.volcanoes.iter().any(|v| {
+            v.name == notice.name
+                && v.title == notice.title
+                && v.time_text == notice.time_text
+        });
+        if dup {
+            return;
+        }
+        self.volcanoes.push(notice);
+        self.volcanoes.sort_by(|a, b| b.issued_ms.cmp(&a.issued_ms));
+        if self.volcanoes.len() > 40 {
+            self.volcanoes.truncate(40);
         }
     }
 
@@ -582,11 +714,39 @@ impl AppSnapshot {
             .and_then(|e| e.event_id.strip_prefix("station:"))
             .map(|s| s.to_string());
 
-        self.stations.retain(|s| !s.id.starts_with(&prefix));
         for s in &mut stations {
             if !s.id.starts_with(&prefix) {
                 s.id = format!("{prefix}{}", s.id);
             }
+        }
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        // S-Net 上游约每分钟一帧：計測未变则不刷新时间戳，避免右上角像每秒在跳
+        let snet_unchanged = network == "snet" && {
+            let mut old: Vec<(String, i32)> = self
+                .stations
+                .iter()
+                .filter(|s| s.id.starts_with(&prefix))
+                .map(|s| (s.id.clone(), (s.instrumental * 10.0).round() as i32))
+                .collect();
+            let mut neu: Vec<(String, i32)> = stations
+                .iter()
+                .map(|s| (s.id.clone(), (s.instrumental * 10.0).round() as i32))
+                .collect();
+            old.sort_by(|a, b| a.0.cmp(&b.0));
+            neu.sort_by(|a, b| a.0.cmp(&b.0));
+            old == neu
+        };
+
+        self.stations.retain(|s| !s.id.starts_with(&prefix));
+        if !(network == "snet" && snet_unchanged) {
+            self.station_updated_ms.insert(network.to_string(), now_ms);
+        } else if !self.station_updated_ms.contains_key(network) {
+            self.station_updated_ms.insert(network.to_string(), now_ms);
         }
         self.stations.extend(stations);
         self.stations.sort_by(|a, b| {
@@ -627,23 +787,75 @@ pub fn is_wave_candidate(e: &EewReport) -> bool {
         && (e.latitude.abs() > 0.01 || e.longitude.abs() > 0.01)
 }
 
-/// 仍在传播窗口内的多震列表（默认 30 分钟；`origin_ms<=0` 视为演示样本始终纳入）。
-pub fn live_wave_eews(list: &[EewReport], now_ms: i64, max_age_ms: i64) -> Vec<&EewReport> {
-    list.iter()
-        .filter(|e| {
-            if !is_wave_candidate(e) {
-                return false;
-            }
-            if e.origin_ms <= 0 {
-                return true;
-            }
-            let age = now_ms - e.origin_ms;
-            age >= -60_000 && age <= max_age_ms
+/// 与 jian_travel::max_s_wave_spread_km 对齐的本地副本（core 不依赖 travel）。
+fn approx_max_s_km(magnitude: f64) -> f64 {
+    if magnitude <= 3.0 {
+        600.0
+    } else if magnitude <= 4.0 {
+        800.0
+    } else if magnitude <= 5.0 {
+        1500.0
+    } else if magnitude <= 5.5 {
+        2000.0
+    } else if magnitude <= 6.0 {
+        2250.0
+    } else if magnitude <= 6.2 {
+        2500.0
+    } else if magnitude <= 6.5 {
+        3200.0
+    } else if magnitude <= 7.0 {
+        4000.0
+    } else if magnitude <= 7.2 {
+        5000.0
+    } else if magnitude <= 7.5 {
+        6000.0
+    } else {
+        6500.0
+    }
+}
+
+/// S 波是否仍在传播（地表等效约 3.5 km/s；走完即视为结束）。
+pub fn eew_wave_active(e: &EewReport, now_ms: i64) -> bool {
+    if !is_wave_candidate(e) {
+        return false;
+    }
+    if e.origin_ms <= 0 {
+        return true; // 演示样本
+    }
+    let age_ms = now_ms - e.origin_ms;
+    if age_ms < -60_000 {
+        return false;
+    }
+    let elapsed_s = (age_ms as f64 / 1000.0).max(0.0);
+    let max_km = approx_max_s_km(e.magnitude);
+    // 略留余量，避免刚走完就闪掉
+    elapsed_s * 3.5 < max_km * 1.05
+}
+
+/// 仍在传播中的多震：PS 走完即排除（不按 30 分钟挂着）。`max_age_ms` 仅兜底。
+pub fn live_wave_eews(list: &[EewReport], now_ms: i64, _max_age_ms: i64) -> Vec<&EewReport> {
+    list.iter().filter(|e| eew_wave_active(e, now_ms)).collect()
+}
+
+/// 地图叉标：与波圈相同，PS 消失即去掉（GQ 多震不另留 30 分钟）。
+pub fn eew_map_markers(list: &[EewReport], now_ms: i64) -> Vec<&EewReport> {
+    live_wave_eews(list, now_ms, 0)
+}
+
+/// 预警侧栏：每个数据源只显示最新一条（GQ 直接替换）；波走完仍留这条供回看。
+/// 地图多震仍用 live_wave_eews，与列表无关。
+pub fn eew_sidebar_entries(list: &[EewReport]) -> Vec<(usize, &EewReport)> {
+    latest_eew_per_source(list)
+        .into_iter()
+        .filter_map(|e| {
+            list.iter()
+                .position(|x| x.agency.0 == e.agency.0 && x.event_id == e.event_id)
+                .map(|i| (i, e))
         })
         .collect()
 }
 
-/// 每个数据源（机构 ID）保留最新一条未取消预警，供地图常驻叉标。
+/// 每个数据源（agency）只保留发震最新的一条。
 pub fn latest_eew_per_source(list: &[EewReport]) -> Vec<&EewReport> {
     let mut best: Vec<&EewReport> = Vec::new();
     for e in list {
@@ -678,6 +890,31 @@ fn recency_ms(origin_ms: i64) -> i64 {
         i64::MIN / 4
     } else {
         origin_ms
+    }
+}
+
+/// 列表回看：按龄与条数裁剪；波走完不删（地图另用 eew_wave_active）。
+fn prune_eew_list(list: &mut Vec<EewReport>, max_age_ms: i64, max_len: usize) {
+    if list.is_empty() {
+        return;
+    }
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    list.retain(|e| {
+        if e.event_id.starts_with("station:") || e.event_id.starts_with("record:") {
+            return false;
+        }
+        if e.origin_ms <= 0 {
+            return true;
+        }
+        let age = now_ms - e.origin_ms;
+        age >= -60_000 && age <= max_age_ms
+    });
+    if list.len() > max_len {
+        sort_eew_newest_first(list);
+        list.truncate(max_len);
     }
 }
 
