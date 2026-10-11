@@ -105,12 +105,22 @@ cargo run -p jian-app
 
 未配置令牌时仍可使用 Wolfx 与 P2PQuake；Jian 健·态为「异常」。
 
-Windows 预览目录（`jian.exe` 与 `assets/` `geodata/` `config/` 同级）：
+发行打包（产物在 `dist/`，不进 Git）：
 
 ```bash
+# Windows 便携包
 python tools/pack_windows.py
-# 或 .\tools\pack_windows.ps1
-# 产出 dist/EEWView/ 与 dist/EEWView_Beta_x.y.z_portable.zip
+# Windows 安装包（NSIS → setup.exe；需先有便携目录或本脚本会自动组装）
+python tools/pack_windows_installer.py
+
+# Linux x86_64 便携包（本机 Linux / WSL，或 Windows 交叉 cargo zigbuild 后）
+# cargo zigbuild -p jian-app --release --target x86_64-unknown-linux-gnu.2.31
+python tools/pack_linux.py --skip-build --bin target/x86_64-unknown-linux-gnu/release/jian
+
+# NixOS / flake（在已装 Nix 的机器上）
+# nix run .#
+# nix profile install .#
+python tools/pack_nix.py
 ```
 
 资源根默认是可执行文件所在目录（或其上级仓库根）；也可用环境变量 `EEWVIEW_ROOT` 指定。
