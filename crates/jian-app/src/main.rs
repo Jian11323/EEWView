@@ -2,12 +2,12 @@
 
 use anyhow::Result;
 use eframe::egui;
-use jian_audio::{AudioCue, AudioEngine};
+use jian_audio::{AudioCue, AudioEngine, TsunamiCueKind};
 use jian_config::AppConfig;
 use jian_core::{AppSnapshot, HealthStatus, IntensityKind};
 use jian_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
-use jian_travel::TravelEngine;
-use jian_map::BasemapMode;
+use jian_travel::{max_s_wave_spread_km, TravelEngine, Wave};
+use jian_map::{zoom_to_fit_radius_km, BasemapMode, ProjectionMode};
 use jian_ui::{MainShell, SettingsAction};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -239,14 +239,16 @@ fn main() -> Result<()> {
         basemap,
         cfg.map.tile_base.clone(),
         cfg.map.tile_source.clone(),
-        basemap.show_vector().then_some(geodata_dir.as_path()),
+        Some(geodata_dir.as_path()),
         cfg.map.default_lon,
         cfg.map.default_lat,
         cfg.map.default_zoom,
+        ProjectionMode::parse(&cfg.map.projection),
     );
     snap.tab = match cfg.ui.sidebar_default_tab.to_ascii_lowercase().as_str() {
         "records" | "record" => jian_core::SidebarTab::Records,
         "station" => jian_core::SidebarTab::Station,
+        "volcano" => jian_core::SidebarTab::Volcano,
         _ => jian_core::SidebarTab::Eew,
     };
     if let Some(ev) = &snap.active {
@@ -296,7 +298,9 @@ fn main() -> Result<()> {
                     HealthStatus::Abnormal,
                     HealthStatus::Abnormal,
                     HealthStatus::Abnormal,
+                    HealthStatus::Abnormal,
                 ),
+                prev_tsunami_key: String::new(),
             }))
         }),
     )
@@ -349,7 +353,8 @@ struct JianApp {
     auto_center_pending: bool,
     /// 已跟焦的预警 (event_id, serial)，避免每帧重复居中
     last_follow_key: Option<(String, u32)>,
-    prev_health: (HealthStatus, HealthStatus, HealthStatus),
+    prev_health: (HealthStatus, HealthStatus, HealthStatus, HealthStatus),
+    prev_tsunami_key: String,
 }
 
 impl eframe::App for JianApp {
@@ -384,13 +389,38 @@ impl eframe::App for JianApp {
         }
 
         self.tick_health_audio();
+        self.tick_tsunami_audio();
 
         // 启动：稍等快照汇聚后跳到最新预警（速报不进左上角，也不自动跟焦）
         if self.auto_center_pending {
             let has_data = !self.snap.eew_list.is_empty();
             if has_data && self.started.elapsed().as_secs_f64() >= 1.2 {
-                if let Some((lon, lat, zoom)) = self.snap.focus_latest_event() {
-                    self.shell.map.fly_to(lon, lat, Some(zoom), 0.9);
+                if let Some((lon, lat, _zoom)) = self.snap.focus_latest_event() {
+                    let z = if let Some(ev) = &self.snap.active {
+                        let now = chrono::Utc::now().timestamp_millis();
+                        let elapsed = if ev.origin_ms > 0 {
+                            ((now - ev.origin_ms) as f64 / 1000.0).max(0.0)
+                        } else {
+                            0.0
+                        };
+                        let s_km = if let Some(eng) = self.travel.as_ref() {
+                            eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, elapsed)
+                        } else {
+                            elapsed * 5.0
+                        };
+                        let r = s_km
+                            .min(max_s_wave_spread_km(ev.magnitude))
+                            .max(80.0);
+                        zoom_to_fit_radius_km(
+                            ev.latitude,
+                            r,
+                            self.shell.map.last_viewport_min_px,
+                            0.72,
+                        )
+                    } else {
+                        6.0
+                    };
+                    self.shell.map.fly_to(lon, lat, Some(z), 1.0);
                     self.auto_center_pending = false;
                     if let Some(ev) = &self.snap.active {
                         self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
@@ -411,26 +441,57 @@ impl eframe::App for JianApp {
                 if is_eew && (ev.latitude.abs() > 0.01 || ev.longitude.abs() > 0.01) {
                     let key = (ev.event_id.clone(), ev.serial);
                     if self.last_follow_key.as_ref() != Some(&key) {
-                        // 新预警 / 报数更新：抛物线跳转；zoom 保持当前，落地后再由波圈平滑适配
+                        // 新预警 / 报数更新：抛物线飞跃，目标 zoom 一次到位（对齐 eewcn 波圈适配）
                         let duration = if self
                             .last_follow_key
                             .as_ref()
                             .is_some_and(|(id, _)| id != &ev.event_id)
                         {
-                            1.0
+                            1.15
                         } else {
-                            0.55
+                            0.7
                         };
+                        let now = chrono::Utc::now().timestamp_millis();
+                        let elapsed = if ev.origin_ms > 0 {
+                            ((now - ev.origin_ms) as f64 / 1000.0).max(0.0)
+                        } else {
+                            0.0
+                        };
+                        let s_km = if let Some(eng) = self.travel.as_ref() {
+                            eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, elapsed)
+                        } else {
+                            elapsed * 5.0
+                        };
+                        let r = s_km
+                            .min(max_s_wave_spread_km(ev.magnitude))
+                            .max(80.0);
+                        let z = zoom_to_fit_radius_km(
+                            ev.latitude,
+                            r,
+                            self.shell.map.last_viewport_min_px,
+                            0.72,
+                        );
                         self.shell.map.fly_to(
                             ev.longitude,
                             ev.latitude,
-                            None,
+                            Some(z),
                             duration,
                         );
                         self.last_follow_key = Some(key);
                     }
                 }
             }
+        }
+
+        // 新速报：启动汇聚结束后跳转到最新一条（侧栏已在 upsert 中选中）
+        if !self.auto_center_pending && self.started.elapsed().as_secs_f64() >= 2.5 {
+            if let Some((lon, lat, zoom)) = self.snap.pending_record_fly.take() {
+                if lat.abs() > 0.01 || lon.abs() > 0.01 {
+                    self.shell.map.fly_to(lon, lat, Some(zoom), 1.0);
+                }
+            }
+        } else {
+            self.snap.pending_record_fly = None;
         }
 
         if let Some(ev) = self.snap.active.as_ref() {
@@ -527,7 +588,12 @@ impl eframe::App for JianApp {
                 }
             }
         }
-        ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        // 空闲降频；波圈/飞跃由 UI·地图侧按需 60fps 请求，此处不因列表非空常驻高刷
+        if self.shell.map.is_flying() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
     }
 }
 
@@ -537,20 +603,23 @@ impl JianApp {
             self.snap.health_jian,
             self.snap.health_wolfx,
             self.snap.health_p2p,
+            self.snap.health_pancakes,
         );
         let prev = self.prev_health;
         if prev == cur {
             return;
         }
-        let any_ok = |h: (HealthStatus, HealthStatus, HealthStatus)| {
+        let any_ok = |h: (HealthStatus, HealthStatus, HealthStatus, HealthStatus)| {
             matches!(h.0, HealthStatus::Normal)
                 || matches!(h.1, HealthStatus::Normal)
                 || matches!(h.2, HealthStatus::Normal)
+                || matches!(h.3, HealthStatus::Normal)
         };
-        let all_bad = |h: (HealthStatus, HealthStatus, HealthStatus)| {
+        let all_bad = |h: (HealthStatus, HealthStatus, HealthStatus, HealthStatus)| {
             matches!(h.0, HealthStatus::Abnormal)
                 && matches!(h.1, HealthStatus::Abnormal)
                 && matches!(h.2, HealthStatus::Abnormal)
+                && matches!(h.3, HealthStatus::Abnormal)
         };
         if let Some(audio) = self.audio.as_mut() {
             if !any_ok(prev) && any_ok(cur) {
@@ -560,6 +629,44 @@ impl JianApp {
             }
         }
         self.prev_health = cur;
+    }
+
+
+    fn tick_tsunami_audio(&mut self) {
+        let key = match self.snap.tsunami.as_ref() {
+            Some(t) if !t.cancelled => format!("{}|{}", t.grade, t.issued_ms),
+            Some(_) => "cancel".into(),
+            None => String::new(),
+        };
+        if key == self.prev_tsunami_key {
+            return;
+        }
+        let prev = self.prev_tsunami_key.clone();
+        self.prev_tsunami_key = key.clone();
+        let Some(audio) = self.audio.as_mut() else {
+            return;
+        };
+        if key.is_empty() {
+            return;
+        }
+        if key == "cancel" {
+            if !prev.is_empty() && prev != "cancel" {
+                let g = tsunami_audio_grade(prev.split('|').next().unwrap_or("Forecast"));
+                audio.play(AudioCue::Tsunami {
+                    grade: g,
+                    kind: TsunamiCueKind::Cancel,
+                });
+            }
+            return;
+        }
+        let grade = key.split('|').next().unwrap_or("Forecast");
+        let g = tsunami_audio_grade(grade);
+        let kind = if prev.is_empty() || prev == "cancel" {
+            TsunamiCueKind::Issue
+        } else {
+            TsunamiCueKind::Update
+        };
+        audio.play(AudioCue::Tsunami { grade: g, kind });
     }
 
     fn apply_saved_config(&mut self, new_cfg: AppConfig) -> Result<PathBuf, String> {
@@ -586,7 +693,8 @@ impl JianApp {
             basemap,
             self.cfg.map.tile_base.clone(),
             self.cfg.map.tile_source.clone(),
-            basemap.show_vector().then_some(self.geodata_dir.as_path()),
+            Some(self.geodata_dir.as_path()),
+            ProjectionMode::parse(&self.cfg.map.projection),
         );
 
         if !travel_same {
@@ -633,5 +741,14 @@ impl JianApp {
                 Err(format!("{e:#}"))
             }
         }
+    }
+}
+
+
+fn tsunami_audio_grade(grade: &str) -> u8 {
+    match grade {
+        "MajorWarning" | "Major" | "Warning" => 3,
+        "Watch" => 2,
+        _ => 1,
     }
 }

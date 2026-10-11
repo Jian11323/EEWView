@@ -1,7 +1,37 @@
 //! Web Mercator 投影（XYZ 瓦片坐标系；经度相对中心折到 ±180°，支持循环地图）。
+//! 另提供平面 / 球体统一投影门面（球体见 [`crate::globe`]）。
 
+use crate::globe::{self, GlobeCamera};
 use egui::{Pos2, Rect, Vec2};
 use jian_util::EARTH_RADIUS_KM;
+
+/// 地图投影模式：平面 Web Mercator / 立体球。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectionMode {
+    #[default]
+    Flat,
+    Globe,
+}
+
+impl ProjectionMode {
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "globe" | "sphere" | "3d" | "ball" => Self::Globe,
+            _ => Self::Flat,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Flat => "flat",
+            Self::Globe => "globe",
+        }
+    }
+
+    pub fn is_globe(self) -> bool {
+        matches!(self, Self::Globe)
+    }
+}
 
 pub const TILE_SIZE: f64 = 256.0;
 
@@ -126,3 +156,98 @@ pub fn wrap_tile_x(x: i32, z: u8) -> u32 {
 pub fn tile_world_origin(x: i32, y: i32, _z: u8) -> (f64, f64) {
     (x as f64 * TILE_SIZE, y as f64 * TILE_SIZE)
 }
+
+/// 单帧视口投影上下文（球体相机按帧缓存）。
+#[derive(Clone, Copy)]
+pub struct ViewCtx {
+    pub mode: ProjectionMode,
+    pub center_lon: f64,
+    pub center_lat: f64,
+    pub zoom: f64,
+    pub rect: Rect,
+    globe: Option<GlobeCamera>,
+}
+
+impl ViewCtx {
+    pub fn new(
+        mode: ProjectionMode,
+        center_lon: f64,
+        center_lat: f64,
+        zoom: f64,
+        rect: Rect,
+    ) -> Self {
+        let globe = if mode.is_globe() {
+            Some(GlobeCamera::new(center_lon, center_lat, zoom, rect))
+        } else {
+            None
+        };
+        Self {
+            mode,
+            center_lon,
+            center_lat,
+            zoom,
+            rect,
+            globe,
+        }
+    }
+
+    pub fn project(&self, lon: f64, lat: f64) -> Option<Pos2> {
+        match self.mode {
+            ProjectionMode::Flat => Some(lonlat_to_screen(
+                lon,
+                lat,
+                self.center_lon,
+                self.center_lat,
+                self.zoom,
+                self.rect,
+            )),
+            ProjectionMode::Globe => self.globe.and_then(|c| c.try_project(lon, lat, self.rect)),
+        }
+    }
+
+    pub fn pan_by_delta(&self, dx_px: f32, dy_px: f32) -> (f64, f64) {
+        match self.mode {
+            ProjectionMode::Flat => {
+                pan_by_screen_delta(self.center_lon, self.center_lat, self.zoom, dx_px, dy_px)
+            }
+            ProjectionMode::Globe => self
+                .globe
+                .map(|c| c.pan_by_delta(dx_px, dy_px))
+                .unwrap_or((self.center_lon, self.center_lat)),
+        }
+    }
+
+    pub fn screen_to_lonlat(&self, pos: Pos2) -> (f64, f64) {
+        match self.mode {
+            ProjectionMode::Flat => {
+                let (cx, cy) = lonlat_to_world(self.center_lon, self.center_lat, self.zoom);
+                let wx = cx + (pos.x - self.rect.center().x) as f64;
+                let wy = cy + (pos.y - self.rect.center().y) as f64;
+                world_to_lonlat(wx, wy, self.zoom)
+            }
+            ProjectionMode::Globe => self
+                .globe
+                .map(|c| c.screen_to_lonlat(pos, self.rect))
+                .unwrap_or((self.center_lon, self.center_lat)),
+        }
+    }
+
+    pub fn horizon_radius(&self) -> Option<f32> {
+        self.globe.map(|c| c.horizon_dist as f32)
+    }
+
+    pub fn circle_segments(&self, lon: f64, lat: f64, radius_km: f64) -> Vec<Vec<Pos2>> {
+        let Some(cam) = self.globe else {
+            return Vec::new();
+        };
+        let step = if radius_km < 200.0 {
+            4.0
+        } else if radius_km < 1500.0 {
+            3.0
+        } else {
+            2.0
+        };
+        globe::project_polyline_km(&cam, lon, lat, radius_km, self.rect, step)
+    }
+}
+

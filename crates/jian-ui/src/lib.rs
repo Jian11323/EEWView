@@ -13,7 +13,7 @@ use jian_core::{
     live_wave_eews, place_with_agency, prefer_intensity_scale, AppSnapshot, IntensityKind,
     ListSelection, OverlayMode, SidebarTab,
 };
-use jian_map::{fit_events, BasemapLoadState, BasemapMode, MapViewport, VectorStyle};
+use jian_map::{fit_events, BasemapLoadState, BasemapMode, MapViewport, VectorStyle, ProjectionMode};
 use jian_travel::{max_s_wave_spread_km, TravelEngine, Wave};
 use std::path::Path;
 use theme::{ThemePalette, UiTheme};
@@ -25,6 +25,11 @@ pub struct MainShell {
     pub map: MapViewport,
     /// 地图波圈用经过时间（秒）
     pub map_elapsed: f64,
+    /// 检知框显示截止（unix ms）
+    detection_until_ms: i64,
+    /// 上一帧测站最大計測（用于触发检知）
+    prev_max_instrumental: f64,
+    last_detection_eew: String,
     /// Home / 复位用默认视口
     pub home_lon: f64,
     pub home_lat: f64,
@@ -43,6 +48,9 @@ impl Default for MainShell {
         Self {
             map: MapViewport::default(),
             map_elapsed: 0.0,
+            detection_until_ms: 0,
+            prev_max_instrumental: -99.0,
+            last_detection_eew: String::new(),
             home_lon: 135.0,
             home_lat: 35.0,
             home_zoom: 5.0,
@@ -66,7 +74,9 @@ impl MainShell {
         lon: f64,
         lat: f64,
         zoom: f64,
+        projection: ProjectionMode,
     ) {
+        self.map.set_projection_mode(projection);
         self.map
             .configure(basemap, tile_base, tile_source, geodata_dir);
         self.map.center_lon = lon;
@@ -77,17 +87,19 @@ impl MainShell {
         self.home_zoom = zoom;
     }
 
-    /// 仅换底图/瓦片，不改当前视口中心。
+    /// 仅换底图/瓦片/投影，不改当前视口中心。
     pub fn reload_basemap(
         &mut self,
         basemap: BasemapMode,
         tile_base: impl Into<String>,
         tile_source: impl Into<String>,
         geodata_dir: Option<&Path>,
+        projection: ProjectionMode,
     ) {
         let lon = self.map.center_lon;
         let lat = self.map.center_lat;
         let zoom = self.map.zoom;
+        self.map.set_projection_mode(projection);
         self.map
             .configure(basemap, tile_base, tile_source, geodata_dir);
         self.map.center_lon = lon;
@@ -125,9 +137,9 @@ impl MainShell {
         let sample_elapsed = self.map_elapsed % 120.0;
         let mut map_click = None;
 
-        // 有传播中波圈时每帧重绘，保证 P/S 圈持续扩张
+        // 波圈动画锁定约 60fps，避免 uncapped request_repaint 拉高 CPU
         if show_waves && !wave_owned.is_empty() {
-            ctx.request_repaint();
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
 
         egui::CentralPanel::default()
@@ -177,8 +189,8 @@ impl MainShell {
                     if let Some((_lon, _lat, z)) =
                         fit_events(&pts, map_rect.width(), map_rect.height())
                     {
-                        self.map.apply_auto_zoom(z, 0.08);
-                        ctx.request_repaint();
+                        self.map.apply_auto_zoom(z, 0.06);
+                        ctx.request_repaint_after(std::time::Duration::from_millis(16));
                     }
                 }
 
@@ -207,6 +219,7 @@ impl MainShell {
                         &snap.stations,
                         &snap.records,
                         home,
+                        snap.tsunami.as_ref(),
                     );
                     draw_map_load_banner(ui, &p, self.map.load_state(), self.map.load_status());
                     if let Some(kind) = self.settings.map_pick {
@@ -214,6 +227,39 @@ impl MainShell {
                     }
                     draw_event_header(ui, &p, snap, scale.as_str(), &self.intensity_icons);
                     draw_tsunami_banner(ui, &p, snap);
+                    // 检知：测站計測首次上冲 / 新预警事件时显示要石风格检出框
+                    {
+                        let max_inst = snap
+                            .stations
+                            .iter()
+                            .map(|s| s.instrumental)
+                            .fold(-99.0_f64, f64::max);
+                        let felt_rise = max_inst >= 0.5 && self.prev_max_instrumental < 0.5;
+                        let eew_key = snap
+                            .active
+                            .as_ref()
+                            .filter(|e| {
+                                !e.is_cancel
+                                    && !e.event_id.starts_with("station:")
+                                    && !e.event_id.starts_with("record:")
+                            })
+                            .map(|e| format!("{}|{}", e.agency.0, e.event_id))
+                            .unwrap_or_default();
+                        // 检知框仅随测站有感上冲；境外 EEW 不弹「地震检知」
+                        if !eew_key.is_empty() {
+                            self.last_detection_eew = eew_key;
+                        }
+                        if felt_rise {
+                            self.detection_until_ms = now_ms + 18_000;
+                        }
+                        self.prev_max_instrumental = max_inst;
+                        if now_ms < self.detection_until_ms {
+                            draw_detection_box(ui, &p, max_inst, snap.active.as_ref());
+                            ui.ctx()
+                                .request_repaint_after(std::time::Duration::from_millis(33));
+                        }
+                    }
+                    draw_realtime_intensity_card(ui, &p, snap, &self.intensity_icons);
                     if cfg.ui.show_legend {
                         draw_legend_bar(ui, &p);
                     }
@@ -229,23 +275,48 @@ impl MainShell {
                                     // 预警 / 速报：抛物线飞跃；测站：瞬时居中
                                     match tab {
                                         SidebarTab::Eew | SidebarTab::Records => {
+                                            let r_km = if tab == SidebarTab::Eew {
+                                                snap.eew_list.get(idx).map(|e| {
+                                                    let elapsed = if e.origin_ms > 0 {
+                                                        ((now_ms - e.origin_ms) as f64 / 1000.0)
+                                                            .max(0.0)
+                                                    } else {
+                                                        0.0
+                                                    };
+                                                    let s_km = if let Some(eng) = travel {
+                                                        eng.surface_distance_for_elapsed(
+                                                            Wave::S,
+                                                            e.depth_km,
+                                                            elapsed,
+                                                        )
+                                                    } else {
+                                                        elapsed * 5.0
+                                                    };
+                                                    s_km.min(max_s_wave_spread_km(e.magnitude))
+                                                        .max(80.0)
+                                                })
+                                            } else {
+                                                None
+                                            }
+                                            .unwrap_or(120.0);
                                             let end_z = fit_events(
-                                                &[(lon, lat, 120.0)],
+                                                &[(lon, lat, r_km)],
                                                 map_rect.width(),
                                                 map_rect.height(),
                                             )
                                             .map(|(_, _, z)| z)
                                             .unwrap_or(zoom);
                                             let dur = if tab == SidebarTab::Eew {
-                                                0.85
+                                                1.0
                                             } else {
-                                                0.75
+                                                0.85
                                             };
                                             self.map.fly_to(lon, lat, Some(end_z), dur);
                                         }
                                         SidebarTab::Station => {
                                             self.map.center_on(lon, lat, Some(zoom));
                                         }
+                                        SidebarTab::Volcano => {}
                                     }
                                     if snap.overlay_mode == OverlayMode::Wave {
                                         self.map_elapsed = 0.0;
@@ -280,6 +351,7 @@ impl MainShell {
             jian: snap.health_jian,
             wolfx: snap.health_wolfx,
             p2p: snap.health_p2p,
+            pancakes: snap.health_pancakes,
         };
         self.settings.ui(ctx, cfg, &health)
     }
@@ -325,18 +397,17 @@ fn draw_map_pick_banner(ui: &mut Ui, p: &ThemePalette, kind: MapPickKind) {
         });
 }
 
-fn format_origin(origin_ms: i64) -> String {
+fn format_header_time(origin_ms: i64) -> String {
     if origin_ms <= 0 {
-        return "发震时刻 —".into();
+        return "----/--/-- --:--:--".into();
     }
     let Some(dt) = chrono::DateTime::from_timestamp_millis(origin_ms) else {
-        return "发震时刻 —".into();
+        return "----/--/-- --:--:--".into();
     };
     let cst = FixedOffset::east_opt(8 * 3600).unwrap();
-    format!(
-        "发震 {}",
-        dt.with_timezone(&cst).format("%m-%d %H:%M:%S")
-    )
+    dt.with_timezone(&cst)
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string()
 }
 
 fn format_list_time(origin_ms: i64) -> String {
@@ -381,10 +452,11 @@ fn paint_intensity(
     text: &str,
     scale: &str,
     size: f32,
+    instrumental: bool,
 ) {
     let (k, lv, col, label) = intensity_chip(kind, level, text, scale);
     let (resp, painter) = ui.allocate_painter(Vec2::splat(size), Sense::hover());
-    if let Some(tex) = icons.get(k, lv) {
+    if let Some(tex) = icons.get_ex(k, lv, instrumental) {
         painter.image(
             tex.id(),
             resp.rect,
@@ -446,51 +518,59 @@ fn draw_map_load_banner(ui: &mut Ui, p: &ThemePalette, state: BasemapLoadState, 
         });
 }
 
+/// 左上角是否正在展示预警信息头（用于海啸条避让）。
+fn eew_header_visible(snap: &AppSnapshot) -> bool {
+    let Some(ev) = &snap.active else {
+        return false;
+    };
+    if snap.overlay_mode == OverlayMode::MarkerOnly
+        || ev.event_id.starts_with("station:")
+        || ev.event_id.starts_with("record:")
+    {
+        return false;
+    }
+    true
+}
+
 fn draw_event_header(
     ui: &mut Ui,
-    p: &ThemePalette,
+    _p: &ThemePalette,
     snap: &AppSnapshot,
     scale: &str,
     icons: &IntensityIcons,
 ) {
-    let Some(ev) = &snap.active else {
-        draw_idle_header(ui, p);
-        return;
-    };
-    // 左上角仅展示预警；速报 / 测站选中不占信息头
-    let is_station = snap.overlay_mode == OverlayMode::MarkerOnly
-        || ev.event_id.starts_with("station:");
-    let is_record = ev.event_id.starts_with("record:");
-    if is_record || is_station {
-        draw_idle_header(ui, p);
+    if !eew_header_visible(snap) {
         return;
     }
-    let (_, _, int_col, _) = intensity_chip(
-        ev.intensity_kind,
-        ev.intensity_level,
-        &ev.max_intensity_text,
-        scale,
-    );
+    let Some(ev) = &snap.active else {
+        return;
+    };
+
+    let agency = agency_bracket(&ev.agency.0);
+    let title = if ev.is_cancel {
+        format!("{} ({agency}) \u{00b7} 取消", ev.place)
+    } else if ev.serial > 0 && ev.serial < 10_000 {
+        format!("{} ({agency}) #{}", ev.place, ev.serial)
+    } else {
+        format!("{} ({agency})", ev.place)
+    };
+    let time_line = format_header_time(ev.origin_ms);
+    let mag_line = format!("M{:.1}", ev.magnitude);
+    let depth_line = format!("{:.0}km", ev.depth_km);
 
     egui::Area::new(egui::Id::new("event_header"))
         .fixed_pos(ui.max_rect().left_top() + Vec2::new(12.0, 12.0))
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
-            // 对齐 eewcn 旧版预警头：烈度色左边条 + 深底白边 + 三行信息
+            // 图二：大方块烈度 + 地名(源)#报数 / 时刻 / 震级+深度
             Frame::NONE
-                .fill(Color32::from_rgba_unmultiplied(17, 17, 34, 210))
-                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(0xCC, 0xCC, 0xDD)))
-                .inner_margin(Margin::ZERO)
+                .fill(Color32::from_rgba_unmultiplied(28, 28, 32, 230))
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(0x55, 0x55, 0x66)))
+                .inner_margin(Margin::symmetric(8, 8))
                 .corner_radius(4.0)
                 .show(ui, |ui| {
-                    ui.set_max_width(440.0);
+                    ui.set_max_width(420.0);
                     ui.horizontal(|ui| {
-                        // 左侧烈度色条
-                        let (bar_resp, bar_painter) =
-                            ui.allocate_painter(Vec2::new(5.0, 72.0), Sense::hover());
-                        bar_painter.rect_filled(bar_resp.rect, 0.0, int_col);
-
-                        ui.add_space(8.0);
                         paint_intensity(
                             ui,
                             icons,
@@ -498,76 +578,47 @@ fn draw_event_header(
                             ev.intensity_level,
                             &ev.max_intensity_text,
                             scale,
-                            64.0,
+                            72.0,
+                            false,
                         );
                         ui.add_space(10.0);
                         ui.vertical(|ui| {
+                            ui.set_min_width(240.0);
+                            ui.label(
+                                RichText::new(title)
+                                    .color(Color32::WHITE)
+                                    .strong()
+                                    .size(16.0),
+                            );
                             ui.add_space(2.0);
-                            let place = ev.place.clone();
                             ui.label(
-                                RichText::new(if ev.is_cancel {
-                                    format!("{place}  · 取消")
-                                } else {
-                                    place
-                                })
-                                .color(Color32::WHITE)
-                                .strong()
-                                .size(17.0),
+                                RichText::new(time_line)
+                                    .color(Color32::WHITE)
+                                    .size(14.0)
+                                    .monospace(),
                             );
-
-                            let agency = agency_bracket(&ev.agency.0);
-                            let mid = if ev.serial > 0 {
-                                if ev.is_final {
-                                    format!("[{agency}]  #{}  最终报", ev.serial)
-                                } else {
-                                    format!("[{agency}]  #{}  第{}报", ev.serial, ev.serial)
-                                }
-                            } else {
-                                format!("[{agency}]")
-                            };
-                            ui.label(
-                                RichText::new(mid)
-                                    .color(Color32::from_rgb(0xDD, 0xEE, 0xFF))
-                                    .size(13.0),
-                            );
-
-                            let sub = format!(
-                                "M{:.1}    {:.0} km    {}",
-                                ev.magnitude,
-                                ev.depth_km,
-                                format_origin(ev.origin_ms)
-                            );
-                            ui.label(
-                                RichText::new(sub)
-                                    .color(Color32::from_rgb(0xBB, 0xBB, 0xCC))
-                                    .size(13.0),
-                            );
+                            ui.add_space(2.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(mag_line)
+                                        .color(Color32::WHITE)
+                                        .strong()
+                                        .size(15.0),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(depth_line)
+                                                .color(Color32::from_rgb(0xDD, 0xDD, 0xEE))
+                                                .size(14.0),
+                                        );
+                                    },
+                                );
+                            });
                         });
-                        ui.add_space(10.0);
                     });
                 });
-        });
-}
-
-fn draw_idle_header(ui: &mut Ui, p: &ThemePalette) {
-    egui::Area::new(egui::Id::new("event_header_idle"))
-        .fixed_pos(ui.max_rect().left_top() + Vec2::new(14.0, 14.0))
-        .order(egui::Order::Foreground)
-        .show(ui.ctx(), |ui| {
-            glass_frame(p).show(ui, |ui| {
-                ui.set_max_width(360.0);
-                ui.label(
-                    RichText::new("EEWView · 地震视监器")
-                        .color(p.text)
-                        .strong()
-                        .size(16.0),
-                );
-                ui.label(
-                    RichText::new("等待预警… 速报与测站请在右栏查看")
-                        .color(p.text_muted)
-                        .size(12.0),
-                );
-            });
         });
 }
 
@@ -578,37 +629,262 @@ fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
     if t.cancelled {
         return;
     }
-    let accent = match t.grade.as_str() {
-        "MajorWarning" | "Major" => Color32::from_rgb(0xB9, 0x1C, 0x1C),
-        "Warning" => Color32::from_rgb(0xDC, 0x26, 0x26),
-        "Watch" => Color32::from_rgb(0xD9, 0x77, 0x06),
-        _ => Color32::from_rgb(0x25, 0x63, 0xEB),
+    let (r, g, b) = jian_core::tsunami_official_rgb(&t.grade);
+    let accent = Color32::from_rgb(r, g, b);
+    let title = if t.title.is_empty() {
+        jian_core::tsunami_grade_zh(&t.grade).to_string()
+    } else {
+        t.title.clone()
+    };
+    let desc = match t.grade.as_str() {
+        "MajorWarning" | "Major" => "大海啸警报：请立即撤离到高处或坚固建筑。",
+        "Warning" => "海啸警报：海岸附近请立即撤离。",
+        "Watch" => "海啸注意报：注意海面异常，远离海岸。",
+        _ => "海面可能发生些许变动，但无需采取特殊防灾措施。",
+    };
+    // 预报/注意报用深底+色框；警报级用官方色实底
+    let (fill, border, title_c, body_c) = match t.grade.as_str() {
+        "MajorWarning" | "Major" | "Warning" => (
+            Color32::from_rgba_unmultiplied(r, g, b, 230),
+            accent,
+            Color32::WHITE,
+            Color32::from_rgb(0xF8, 0xFA, 0xFC),
+        ),
+        "Watch" => (
+            Color32::from_rgba_unmultiplied(20, 20, 24, 230),
+            accent,
+            Color32::from_rgb(0xFF, 0xFF, 0x66),
+            Color32::from_rgb(0xE5, 0xE7, 0xEB),
+        ),
+        _ => (
+            Color32::from_rgba_unmultiplied(12, 24, 40, 235),
+            accent,
+            Color32::from_rgb(0x7D, 0xF9, 0xFF),
+            Color32::from_rgb(0xD1, 0xD5, 0xDB),
+        ),
+    };
+    // 有预警信息头时下移；无预警时贴到左上角
+    let top_y = if eew_header_visible(snap) {
+        118.0
+    } else {
+        12.0
     };
     egui::Area::new(egui::Id::new("tsunami_banner"))
-        .fixed_pos(ui.max_rect().left_top() + Vec2::new(14.0, 96.0))
+        .fixed_pos(ui.max_rect().left_top() + Vec2::new(14.0, top_y))
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
             Frame::NONE
-                .fill(Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 220))
-                .corner_radius(8.0)
-                .inner_margin(Margin::symmetric(12, 8))
+                .fill(fill)
+                .stroke(Stroke::new(2.0_f32, border))
+                .corner_radius(6.0)
+                .inner_margin(Margin::symmetric(14, 10))
                 .show(ui, |ui| {
-                    ui.set_max_width(440.0);
+                    ui.set_max_width(420.0);
                     ui.label(
-                        RichText::new(&t.title)
-                            .color(Color32::WHITE)
+                        RichText::new(format!("{title}生效中"))
+                            .color(title_c)
                             .strong()
-                            .size(15.0),
+                            .size(16.0),
                     );
-                    ui.label(
-                        RichText::new(format!("影响区域：{}", t.areas))
-                            .color(Color32::from_rgb(0xF8, 0xFA, 0xFC))
-                            .size(12.0),
-                    );
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(desc).color(body_c).size(12.5));
+                    ui.add_space(6.0);
+                    let line = ui.available_width();
+                    let (resp, painter) = ui.allocate_painter(Vec2::new(line, 2.0), Sense::hover());
+                    painter.rect_filled(resp.rect, 0.0, border);
+                    ui.add_space(4.0);
+                    let area_line = if t.areas.is_empty() || t.areas == "—" {
+                        jian_core::tsunami_grade_zh(&t.grade).to_string()
+                    } else {
+                        t.areas.clone()
+                    };
+                    ui.label(RichText::new(area_line).color(body_c).size(12.0));
                 });
             let _ = p;
         });
 }
+
+/// 要石风格地震检出框（左上，信息头下方）。
+fn draw_detection_box(
+    ui: &mut Ui,
+    p: &ThemePalette,
+    max_inst: f64,
+    active: Option<&jian_core::EewReport>,
+) {
+    let (lv, _) = jian_core::jma_from_instrumental(max_inst.max(0.0));
+    let place = active
+        .map(|e| e.place.as_str())
+        .unwrap_or("震源测定中");
+    egui::Area::new(egui::Id::new("detection_box"))
+        .fixed_pos(ui.max_rect().left_top() + Vec2::new(14.0, 200.0))
+        .order(egui::Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            Frame::NONE
+                .fill(Color32::from_rgba_unmultiplied(28, 28, 32, 230))
+                .stroke(Stroke::new(2.0_f32, Color32::from_rgb(0xF5, 0x9E, 0x0B)))
+                .corner_radius(6.0)
+                .inner_margin(Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    ui.set_max_width(280.0);
+                    ui.label(
+                        RichText::new("地震检知")
+                            .color(Color32::from_rgb(0xFB, 0xBF, 0x24))
+                            .strong()
+                            .size(15.0),
+                    );
+                    ui.label(
+                        RichText::new(format!("检测到振动 · 推定震度 {lv}+"))
+                            .color(p.text)
+                            .size(12.5),
+                    );
+                    ui.label(
+                        RichText::new(place)
+                            .color(p.text_muted)
+                            .size(11.5),
+                    );
+                });
+        });
+}
+
+/// 地图右上角实时震度卡片（对齐要石 sourceMaxCard：网名 / 計測值 / 时刻）。
+fn draw_realtime_intensity_card(
+    ui: &mut Ui,
+    _p: &ThemePalette,
+    snap: &AppSnapshot,
+    _icons: &IntensityIcons,
+) {
+    if snap.stations.is_empty() {
+        return;
+    }
+    let mut cards: Vec<(&str, &str, f64, i64)> = Vec::new();
+    for (key, label) in [("kmoni", "NIED"), ("snet", "S-Net"), ("kma", "KMA")] {
+        let mut max_inst = -99.0_f64;
+        let mut any = false;
+        for s in &snap.stations {
+            if !s.id.starts_with(&format!("{key}:")) {
+                continue;
+            }
+            any = true;
+            if s.instrumental > max_inst {
+                max_inst = s.instrumental;
+            }
+        }
+        if any {
+            let ts = snap.station_updated_ms.get(key).copied().unwrap_or(0);
+            cards.push((key, label, max_inst, ts));
+        }
+    }
+    if cards.is_empty() {
+        let max_inst = snap
+            .stations
+            .iter()
+            .map(|s| s.instrumental)
+            .fold(-99.0, f64::max);
+        let ts = snap
+            .station_updated_ms
+            .values()
+            .copied()
+            .max()
+            .unwrap_or(0);
+        cards.push(("all", "NIED", max_inst, ts));
+    }
+
+    const CARD_W: f32 = 72.0;
+    const CARD_H: f32 = 66.0;
+    let gap = 6.0_f32;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    // 超过该间隔未刷新视为测站 API 断开（原版 NIED ~0.8s；WS 心跳略宽）
+    const STALE_MS: i64 = 8_000;
+    let total_w = CARD_W * cards.len() as f32 + gap * (cards.len().saturating_sub(1) as f32);
+    let top_right = ui.max_rect().right_top() + Vec2::new(-12.0, 12.0);
+    egui::Area::new(egui::Id::new("rt_intensity_card"))
+        .pivot(egui::Align2::RIGHT_TOP)
+        .fixed_pos(top_right)
+        .order(egui::Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            ui.set_min_size(Vec2::new(total_w, CARD_H));
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for (k, label, inst, ts) in &cards {
+                    let value = if *inst >= -3.0 {
+                        jian_core::instrumental_half_step_text(*inst)
+                    } else {
+                        "-".into()
+                    };
+                    let rgb = jian_core::instrumental_rgb(*inst);
+                    let value_color = if *inst >= -3.0 {
+                        Color32::from_rgb(rgb.r, rgb.g, rgb.b)
+                    } else {
+                        Color32::from_rgb(0x66, 0x66, 0x66)
+                    };
+                    let time_text = if *ts > 0 {
+                        format_clock_hms(*ts)
+                    } else {
+                        "--:--:--".into()
+                    };
+                    // S-Net 约每分钟一帧，断线阈值放宽到 90s
+                    let stale = if *k == "snet" { 90_000_i64 } else { STALE_MS };
+                    let connected = *ts > 0 && (now_ms - *ts).abs() <= stale;
+                    let time_color = if connected {
+                        Color32::WHITE
+                    } else {
+                        Color32::from_rgb(0xFF, 0x44, 0x44)
+                    };
+
+                    let (r, _) =
+                        ui.allocate_exact_size(Vec2::new(CARD_W, CARD_H), Sense::hover());
+                    let painter = ui.painter();
+                    painter.rect_filled(r, 6.0, Color32::from_rgb(0x1A, 0x1A, 0x1A));
+                    let head = egui::Rect::from_min_size(r.min, Vec2::new(r.width(), 20.0));
+                    painter.rect_filled(head, 0.0, Color32::from_rgb(0x2D, 0x2D, 0x2D));
+                    painter.rect_stroke(
+                        r,
+                        6.0,
+                        Stroke::new(1.0_f32, Color32::from_rgb(0x40, 0x40, 0x40)),
+                        egui::StrokeKind::Inside,
+                    );
+                    painter.hline(
+                        r.x_range(),
+                        head.bottom(),
+                        Stroke::new(1.0_f32, Color32::from_rgb(0x40, 0x40, 0x40)),
+                    );
+                    painter.text(
+                        head.center(),
+                        egui::Align2::CENTER_CENTER,
+                        *label,
+                        FontId::proportional(12.0),
+                        Color32::WHITE,
+                    );
+                    painter.text(
+                        egui::pos2(r.center().x, head.bottom() + 15.0),
+                        egui::Align2::CENTER_CENTER,
+                        value,
+                        FontId::proportional(20.0),
+                        value_color,
+                    );
+                    painter.text(
+                        egui::pos2(r.center().x, r.bottom() - 10.0),
+                        egui::Align2::CENTER_CENTER,
+                        time_text,
+                        FontId::proportional(11.0),
+                        time_color,
+                    );
+                }
+            });
+        });
+}
+
+
+
+fn format_clock_hms(ms: i64) -> String {
+    use chrono::{TimeZone, Utc};
+    let Some(dt) = Utc.timestamp_millis_opt(ms).single() else {
+        return "--:--:--".into();
+    };
+    let local = dt.with_timezone(&Local);
+    local.format("%H:%M:%S").to_string()
+}
+
 
 fn draw_legend_bar(ui: &mut Ui, p: &ThemePalette) {
     // 左：中国烈度 I–XII；中：要石計測色带；右：震度/計測 -3～7（-3 深蓝 #0003cf）
@@ -797,6 +1073,7 @@ fn draw_sidebar(
                     ("Jian", snap.health_jian),
                     ("Wolfx", snap.health_wolfx),
                     ("P2P", snap.health_p2p),
+                    ("Pancakes", snap.health_pancakes),
                 ] {
                     let (r, painter) = ui.allocate_painter(Vec2::splat(8.0), Sense::hover());
                     painter.circle_filled(r.rect.center(), 3.5, health_dot(p, st));
@@ -952,6 +1229,35 @@ fn draw_sidebar(
                                 }
                             }
                         }
+                        SidebarTab::Volcano => {
+                            if snap.volcanoes.is_empty() {
+                                empty_hint(
+                                    ui,
+                                    p,
+                                    "暂无火山情报",
+                                    "启用 Pancakes JMA 火山后，降灰预报等会出现在此列表。",
+                                );
+                            }
+                            for (i, v) in snap.volcanoes.iter().enumerate() {
+                                let selected = sel
+                                    == Some(ListSelection {
+                                        tab: SidebarTab::Volcano,
+                                        index: i,
+                                    });
+                                let place = place_with_agency(&v.name, &v.agency.0);
+                                if volcano_list_row(
+                                    ui,
+                                    p,
+                                    &place,
+                                    &v.time_text,
+                                    &v.title,
+                                    selected,
+                                    egui::Id::new(("vol", i)),
+                                ) {
+                                    clicked = Some(SideAction::List(SidebarTab::Volcano, i));
+                                }
+                            }
+                        }
                     }
                 });
         });
@@ -978,6 +1284,7 @@ fn draw_side_tabs(ui: &mut Ui, p: &ThemePalette, cur: &mut SidebarTab) {
             (SidebarTab::Records, "速报"),
             (SidebarTab::Eew, "预警"),
             (SidebarTab::Station, "测站"),
+            (SidebarTab::Volcano, "火山"),
         ] {
             let selected = *cur == tab;
             let text = if selected {
@@ -994,7 +1301,7 @@ fn draw_side_tabs(ui: &mut Ui, p: &ThemePalette, cur: &mut SidebarTab) {
                     })
                     .stroke(Stroke::NONE)
                     .corner_radius(6.0)
-                    .min_size(Vec2::new(72.0, 28.0)),
+                    .min_size(Vec2::new(56.0, 28.0)),
             );
             if selected {
                 let r = resp.rect;
@@ -1009,6 +1316,64 @@ fn draw_side_tabs(ui: &mut Ui, p: &ThemePalette, cur: &mut SidebarTab) {
             }
         }
     });
+}
+
+fn volcano_list_row(
+    ui: &mut Ui,
+    p: &ThemePalette,
+    place: &str,
+    sub: &str,
+    title: &str,
+    selected: bool,
+    id: egui::Id,
+) -> bool {
+    let mut clicked = false;
+    let bg = if selected {
+        p.row_selected
+    } else {
+        Color32::TRANSPARENT
+    };
+    let accent = Color32::from_rgb(0xF9, 0x73, 0x16);
+
+    let resp = Frame::NONE
+        .fill(bg)
+        .inner_margin(Margin::symmetric(8, 7))
+        .corner_radius(8.0)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let (stripe, painter) =
+                    ui.allocate_painter(Vec2::new(4.0, 36.0), Sense::hover());
+                painter.rect_filled(stripe.rect, 2.0, accent);
+
+                ui.add_space(8.0);
+                ui.vertical(|ui| {
+                    ui.set_max_width(ui.available_width());
+                    ui.label(RichText::new(place).color(p.text).size(13.0));
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(sub).color(p.text_dim).size(11.0));
+                        ui.label(RichText::new(title).color(p.text_muted).size(11.0));
+                    });
+                });
+            });
+        })
+        .response;
+
+    let full = ui
+        .interact(resp.rect, id, Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if full.hovered() && !selected {
+        ui.painter().rect_stroke(
+            resp.rect,
+            8.0,
+            Stroke::new(1.0_f32, p.panel_border),
+            egui::StrokeKind::Outside,
+        );
+    }
+    if full.clicked() {
+        clicked = true;
+    }
+    ui.add_space(3.0);
+    clicked
 }
 
 fn list_row(
@@ -1056,7 +1421,7 @@ fn list_row(
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    paint_intensity(ui, icons, kind, level, intensity_text, scale, 30.0);
+                    paint_intensity(ui, icons, kind, level, intensity_text, scale, 30.0, false);
                 });
             });
         })

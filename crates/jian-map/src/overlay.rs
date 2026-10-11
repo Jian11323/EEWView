@@ -1,7 +1,7 @@
 //! 震中点、测站点与 P/S 波阵面叠加。
 
 use crate::marker_icons::MarkerIcons;
-use crate::projection;
+use crate::projection::{self, ViewCtx};
 use egui::{Color32, Pos2, Rect, Stroke, TextureHandle, Ui, Vec2};
 use jian_core::palette::color_for;
 use jian_core::{EewReport, EqRecord, StationSample};
@@ -119,38 +119,64 @@ fn paint_epicenter_marker(
     }
 }
 
-/// 测站散点（视口外跳过；計測 -3～7 用要石色带，低值点略小）
+
+fn felt_level(s: &StationSample) -> u8 {
+    if s.intensity_kind == jian_core::IntensityKind::JmaShindo {
+        if s.intensity_level >= 1 {
+            return s.intensity_level.min(9);
+        }
+        if s.instrumental >= 0.5 {
+            return jian_core::jma_from_instrumental(s.instrumental).0;
+        }
+    }
+    0
+}
+
+/// 测站散点：震度 >=1 用 `shindo_inst`；其余計測色点。有预警时有感点始终显示。
 pub fn paint_stations(
     ui: &mut Ui,
-    rect: Rect,
-    center_lon: f64,
-    center_lat: f64,
-    zoom: f64,
+    view: &ViewCtx,
     stations: &[StationSample],
     selected_id: Option<&str>,
+    icons: Option<&MarkerIcons>,
+    eew_active: bool,
 ) {
     if stations.is_empty() {
         return;
     }
+    let rect = view.rect;
     let painter = ui.painter_at(rect);
-    let pad = 8.0_f32;
-    // 低缩放时略过极低計測值以减负；放大后补全整网（含 -3）
-    let show_quiet = zoom >= 4.5;
-    for s in stations {
-        let quiet = s.instrumental < 0.5 && s.intensity_level == 0;
+    let pad = 16.0_f32;
+    // 低缩放时略过极低計測值以减负；预警期间仍显示有感点
+    let show_quiet = view.zoom >= 4.5;
+    // 先静默点、后有感图标，且有感按震度升序，避免震度1被蓝点盖住
+    let mut order: Vec<usize> = (0..stations.len()).collect();
+    order.sort_by(|&a, &b| {
+        let sa = &stations[a];
+        let sb = &stations[b];
+        let la = felt_level(sa);
+        let lb = felt_level(sb);
+        la.cmp(&lb).then_with(|| {
+            sa.instrumental
+                .partial_cmp(&sb.instrumental)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+    for idx in order {
+        let s = &stations[idx];
+        let felt = s.intensity_level >= 1
+            || (s.intensity_kind == jian_core::IntensityKind::JmaShindo && s.instrumental >= 0.5);
+        let quiet = !felt && s.intensity_level == 0;
         if quiet && !show_quiet {
             if selected_id != Some(s.id.as_str()) {
                 continue;
             }
         }
-        let p = projection::lonlat_to_screen(
-            s.longitude,
-            s.latitude,
-            center_lon,
-            center_lat,
-            zoom,
-            rect,
-        );
+        // 有预警时：震度>=1 的点不因缩放隐藏（已由 quiet 逻辑保证）
+        let _ = eew_active;
+        let Some(p) = view.project(s.longitude, s.latitude) else {
+            continue;
+        };
         if p.x < rect.left() - pad
             || p.x > rect.right() + pad
             || p.y < rect.top() - pad
@@ -158,13 +184,48 @@ pub fn paint_stations(
         {
             continue;
         }
+        let selected = selected_id == Some(s.id.as_str());
+        let jma_lv = if s.intensity_kind == jian_core::IntensityKind::JmaShindo {
+            if s.intensity_level >= 1 {
+                s.intensity_level.min(9)
+            } else if s.instrumental >= 0.5 {
+                jian_core::jma_from_instrumental(s.instrumental).0
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        if jma_lv >= 1 {
+            if let Some(tex) = icons.and_then(|i| i.shindo_inst(jma_lv)) {
+                // 震度1略小；高等级略大；选中再放大
+                let base = match jma_lv {
+                    1 => 12.0,
+                    2 => 14.0,
+                    3 | 4 => 16.0,
+                    5 | 6 => 18.0,
+                    _ => 20.0,
+                };
+                let size = if selected { base + 4.0 } else { base };
+                paint_tex(&painter, tex, p, size, Color32::WHITE);
+                if selected {
+                    painter.text(
+                        p + Vec2::new(size * 0.55, -size * 0.45),
+                        egui::Align2::LEFT_BOTTOM,
+                        format!("{} {}", s.name, jian_core::jma_shindo_text(jma_lv)),
+                        egui::FontId::proportional(12.0),
+                        Color32::WHITE,
+                    );
+                }
+                continue;
+            }
+        }
         let rgb = if s.instrumental >= -3.0 {
             jian_core::instrumental_rgb(s.instrumental)
         } else {
             color_for(s.intensity_kind, s.intensity_level)
         };
         let fill = Color32::from_rgb(rgb.r, rgb.g, rgb.b);
-        let selected = selected_id == Some(s.id.as_str());
         let r = if selected {
             5.5
         } else if quiet {
@@ -200,10 +261,7 @@ pub fn paint_stations(
 /// 速报列表：`markers/red.svg`，尺寸随震级
 pub fn paint_records(
     ui: &mut Ui,
-    rect: Rect,
-    center_lon: f64,
-    center_lat: f64,
-    zoom: f64,
+    view: &ViewCtx,
     records: &[EqRecord],
     selected_place: Option<&str>,
     icons: Option<&MarkerIcons>,
@@ -211,17 +269,13 @@ pub fn paint_records(
     if records.is_empty() {
         return;
     }
+    let rect = view.rect;
     let painter = ui.painter_at(rect);
     let pad = 24.0_f32;
     for r in records.iter().rev() {
-        let p = projection::lonlat_to_screen(
-            r.longitude,
-            r.latitude,
-            center_lon,
-            center_lat,
-            zoom,
-            rect,
-        );
+        let Some(p) = view.project(r.longitude, r.latitude) else {
+            continue;
+        };
         if p.x < rect.left() - pad
             || p.x > rect.right() + pad
             || p.y < rect.top() - pad
@@ -234,53 +288,50 @@ pub fn paint_records(
     }
 }
 
-/// 本机位置（`markers/green.svg`）
+/// 本机位置（`markers/green.svg` 蓝房子）
 pub fn paint_home(
     ui: &mut Ui,
-    rect: Rect,
-    center_lon: f64,
-    center_lat: f64,
-    zoom: f64,
+    view: &ViewCtx,
     lon: f64,
     lat: f64,
     icons: Option<&MarkerIcons>,
 ) {
-    let painter = ui.painter_at(rect);
-    let p = projection::lonlat_to_screen(lon, lat, center_lon, center_lat, zoom, rect);
-    if !rect.expand(20.0).contains(p) {
+    let Some(p) = view.project(lon, lat) else {
+        return;
+    };
+    if !view.rect.expand(20.0).contains(p) {
         return;
     }
+    let painter = ui.painter_at(view.rect);
     paint_home_marker(&painter, icons, p);
 }
 
 /// 仅震中标记（无波圈）
 pub fn paint_marker_only(
     ui: &mut Ui,
-    rect: Rect,
-    center_lon: f64,
-    center_lat: f64,
-    zoom: f64,
+    view: &ViewCtx,
     ev: &EewReport,
     icons: Option<&MarkerIcons>,
 ) {
-    let painter = ui.painter_at(rect);
-    let p = projection::lonlat_to_screen(
-        ev.longitude,
-        ev.latitude,
-        center_lon,
-        center_lat,
-        zoom,
-        rect,
-    );
+    let Some(p) = view.project(ev.longitude, ev.latitude) else {
+        return;
+    };
+    let painter = ui.painter_at(view.rect);
     paint_epicenter_marker(&painter, icons, p, ev, true);
+}
+
+fn stroke_polyline(painter: &egui::Painter, segs: &[Vec<Pos2>], stroke: Stroke) {
+    for pts in segs {
+        if pts.len() < 2 {
+            continue;
+        }
+        painter.add(egui::Shape::line(pts.clone(), stroke));
+    }
 }
 
 pub fn paint_wave_overlay(
     ui: &mut Ui,
-    rect: Rect,
-    center_lon: f64,
-    center_lat: f64,
-    zoom: f64,
+    view: &ViewCtx,
     active: Option<&EewReport>,
     travel: Option<&TravelEngine>,
     elapsed_s: f64,
@@ -288,16 +339,12 @@ pub fn paint_wave_overlay(
     selected: bool,
 ) {
     let Some(ev) = active else { return };
+    let rect = view.rect;
     let painter = ui.painter_at(rect);
 
-    let epicenter = projection::lonlat_to_screen(
-        ev.longitude,
-        ev.latitude,
-        center_lon,
-        center_lat,
-        zoom,
-        rect,
-    );
+    let Some(epicenter) = view.project(ev.longitude, ev.latitude) else {
+        return;
+    };
 
     let max_km = max_s_wave_spread_km(ev.magnitude);
     let (p_km, s_km) = if let Some(eng) = travel {
@@ -321,49 +368,44 @@ pub fn paint_wave_overlay(
     };
 
     let (p_alpha, s_alpha, p_w, s_w) = if selected {
-        (255_u8, 255_u8, 2.0_f32, 2.6_f32)
+        (255_u8, 255_u8, 3.2_f32, 4.0_f32)
     } else {
-        (160, 170, 1.3, 1.8)
+        (170, 180, 2.4, 3.0)
     };
 
-    // 未超过最大传播距离时画圈；接近上限时略淡
     let max_r = rect.width().max(rect.height()) * 3.0;
-    if p_km < max_km {
-        let fade = (1.0 - (p_km / max_km).clamp(0.0, 1.0)).mul_add(0.35, 0.65);
-        let p_r = projection::km_to_pixels(p_km, ev.latitude, zoom).max(3.0);
-        if p_r < max_r {
-            painter.circle_stroke(
-                epicenter,
-                p_r,
-                Stroke::new(
-                    p_w,
-                    Color32::from_rgba_unmultiplied(
-                        80,
-                        180,
-                        255,
-                        ((p_alpha as f64) * fade) as u8,
-                    ),
-                ),
-            );
-        }
-    }
     if s_km < max_km {
         let fade = (1.0 - (s_km / max_km).clamp(0.0, 1.0)).mul_add(0.35, 0.65);
-        let s_r = projection::km_to_pixels(s_km, ev.latitude, zoom).max(3.0);
-        if s_r < max_r {
-            painter.circle_stroke(
-                epicenter,
-                s_r,
-                Stroke::new(
-                    s_w,
-                    Color32::from_rgba_unmultiplied(
-                        255,
-                        80,
-                        80,
-                        ((s_alpha as f64) * fade) as u8,
-                    ),
-                ),
+        let p_stroke = Stroke::new(
+            p_w,
+            Color32::from_rgba_unmultiplied(80, 180, 255, ((p_alpha as f64) * fade) as u8),
+        );
+        let s_stroke = Stroke::new(
+            s_w,
+            Color32::from_rgba_unmultiplied(255, 80, 80, ((s_alpha as f64) * fade) as u8),
+        );
+        if view.mode.is_globe() {
+            stroke_polyline(
+                &painter,
+                &view.circle_segments(ev.longitude, ev.latitude, p_km),
+                p_stroke,
             );
+            if s_km > 0.5 {
+                stroke_polyline(
+                    &painter,
+                    &view.circle_segments(ev.longitude, ev.latitude, s_km),
+                    s_stroke,
+                );
+            }
+        } else {
+            let p_r = projection::km_to_pixels(p_km, ev.latitude, view.zoom).max(3.0);
+            if p_r < max_r {
+                painter.circle_stroke(epicenter, p_r, p_stroke);
+            }
+            let s_r = projection::km_to_pixels(s_km, ev.latitude, view.zoom).max(3.0);
+            if s_r < max_r && s_km > 0.5 {
+                painter.circle_stroke(epicenter, s_r, s_stroke);
+            }
         }
     }
 
@@ -373,10 +415,7 @@ pub fn paint_wave_overlay(
 /// 各数据源最新预警叉标（无波圈；选中项带标签）
 pub fn paint_eew_markers(
     ui: &mut Ui,
-    rect: Rect,
-    center_lon: f64,
-    center_lat: f64,
-    zoom: f64,
+    view: &ViewCtx,
     markers: &[EewReport],
     selected: Option<(&str, &str)>,
     icons: Option<&MarkerIcons>,
@@ -384,17 +423,13 @@ pub fn paint_eew_markers(
     if markers.is_empty() {
         return;
     }
+    let rect = view.rect;
     let painter = ui.painter_at(rect);
     let pad = 28.0_f32;
     for ev in markers {
-        let p = projection::lonlat_to_screen(
-            ev.longitude,
-            ev.latitude,
-            center_lon,
-            center_lat,
-            zoom,
-            rect,
-        );
+        let Some(p) = view.project(ev.longitude, ev.latitude) else {
+            continue;
+        };
         if p.x < rect.left() - pad
             || p.x > rect.right() + pad
             || p.y < rect.top() - pad

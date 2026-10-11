@@ -3,7 +3,7 @@
 //! 优先 `geodata/kanameishi/`（要石 TopoJSON / 展开 GeoJSON）；否则回退 Globalmap + 省市区划。
 //! 加载在后台线程分两阶段（世界 → 区划），主线程 `poll` 合并。
 
-use crate::projection;
+use crate::projection::{self, ViewCtx};
 use crate::topojson;
 use egui::{Color32, Pos2, Rect, Stroke, Ui};
 use serde::Deserialize;
@@ -432,10 +432,7 @@ impl VectorBasemap {
     pub fn paint(
         &self,
         ui: &mut Ui,
-        rect: Rect,
-        center_lon: f64,
-        center_lat: f64,
-        zoom: f64,
+        view: &ViewCtx,
         fill_land: bool,
         style: VectorStyle,
     ) {
@@ -443,26 +440,113 @@ impl VectorBasemap {
             return;
         }
 
+        let rect = view.rect;
+        let zoom = view.zoom;
+        let painter = ui.painter_at(rect);
+        let mut shapes = Vec::with_capacity(512);
+
+        if view.mode.is_globe() {
+            let max_jump_px = view
+                .horizon_radius()
+                .map(|r| r * 0.35)
+                .unwrap_or(80.0)
+                .max(40.0);
+            // 球体：半球可见，不做横向副本
+            let (min_lon, min_lat, max_lon, max_lat) = (-180.0, -90.0, 180.0, 90.0);
+            if !self.world.fine.is_empty() {
+                let rings = self.world.pick(zoom, 4.0, 6.0);
+                let min_seg = if zoom < 4.0 { 2.2_f32 } else { 1.4_f32 };
+                paint_rings(
+                    &mut shapes,
+                    rings,
+                    view,
+                    min_lon,
+                    min_lat,
+                    max_lon,
+                    max_lat,
+                    min_seg,
+                    max_jump_px,
+                    Stroke::new(0.9_f32, style.world_border),
+                    false,
+                    false,
+                    style.land_fill,
+                    0.0,
+                );
+            }
+            if zoom < ZOOM_REGIONAL {
+                if !self.national.fine.is_empty() {
+                    let rings = self.national.pick(zoom, 3.0, 4.0);
+                    paint_rings(
+                        &mut shapes,
+                        rings,
+                        view,
+                        min_lon,
+                        min_lat,
+                        max_lon,
+                        max_lat,
+                        2.2,
+                        max_jump_px,
+                        Stroke::new(0.95_f32, style.world_border),
+                        false,
+                        false,
+                        style.land_fill,
+                        0.0,
+                    );
+                }
+            } else if !self.regional.fine.is_empty() {
+                let rings = self
+                    .regional
+                    .pick(zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
+                let min_seg = if zoom < ZOOM_REGIONAL_MED {
+                    2.0_f32
+                } else if zoom < ZOOM_REGIONAL_FINE {
+                    1.4_f32
+                } else {
+                    1.0_f32
+                };
+                paint_rings(
+                    &mut shapes,
+                    rings,
+                    view,
+                    min_lon,
+                    min_lat,
+                    max_lon,
+                    max_lat,
+                    min_seg,
+                    max_jump_px,
+                    Stroke::new(
+                        if zoom < ZOOM_REGIONAL_MED {
+                            0.7_f32
+                        } else {
+                            0.95_f32
+                        },
+                        style.admin_border,
+                    ),
+                    false,
+                    zoom >= ZOOM_REGIONAL_FINE,
+                    style.land_fill,
+                    0.0,
+                );
+            }
+            let _ = fill_land;
+            painter.extend(shapes);
+            return;
+        }
+
         let world_px = projection::world_size(zoom) as f32;
-        // 视口宽超过一整圈世界时，经纬度包围盒会因 wrap 塌缩；改为全球可见
         let full_wrap = rect.width() >= world_px * 0.92;
         let (min_lon, min_lat, max_lon, max_lat) = if full_wrap {
             (-180.0, -85.0, 180.0, 85.0)
         } else {
-            viewport_bounds(center_lon, center_lat, zoom, rect)
+            viewport_bounds(view.center_lon, view.center_lat, zoom, rect)
         };
-        let painter = ui.painter_at(rect);
-        let mut shapes = Vec::with_capacity(512);
-        // 超过约 80° 经度的边视为跳变（宁拆勿穿）
         let max_jump_px = world_px * (80.0 / 360.0);
-        // 低缩放 / 宽窗口：横向循环多画几份世界（经度 ±360°），避免两侧空白
         let half_copies = ((rect.width() * 0.5 / world_px.max(1.0)).ceil() as i32 + 1)
             .clamp(1, 6);
 
         for k in -half_copies..=half_copies {
             let lon_shift = f64::from(k) * 360.0;
 
-            // 1) 世界轮廓：连续解缠描边。egui 凹多边形填色会出射线，默认不填。
             if !self.world.fine.is_empty() {
                 let rings = self.world.pick(zoom, 4.0, 6.0);
                 let min_seg = if zoom < 4.0 { 2.2_f32 } else { 1.4_f32 };
@@ -470,10 +554,7 @@ impl VectorBasemap {
                 paint_rings(
                     &mut shapes,
                     rings,
-                    center_lon,
-                    center_lat,
-                    zoom,
-                    rect,
+                    view,
                     min_lon + lon_shift,
                     min_lat,
                     max_lon + lon_shift,
@@ -481,14 +562,13 @@ impl VectorBasemap {
                     min_seg,
                     max_jump_px,
                     stroke,
-                    false, // 世界层不填色
+                    false,
                     false,
                     style.land_fill,
                     lon_shift,
                 );
             }
 
-            // 2) 中日：远距只画国界轮廓；放大后才叠省界/都道府县
             if zoom < ZOOM_REGIONAL {
                 if !self.national.fine.is_empty() {
                     let rings = self.national.pick(zoom, 3.0, 4.0);
@@ -496,10 +576,7 @@ impl VectorBasemap {
                     paint_rings(
                         &mut shapes,
                         rings,
-                        center_lon,
-                        center_lat,
-                        zoom,
-                        rect,
+                        view,
                         min_lon + lon_shift,
                         min_lat,
                         max_lon + lon_shift,
@@ -535,10 +612,7 @@ impl VectorBasemap {
                 paint_rings(
                     &mut shapes,
                     rings,
-                    center_lon,
-                    center_lat,
-                    zoom,
-                    rect,
+                    view,
                     min_lon + lon_shift,
                     min_lat,
                     max_lon + lon_shift,
@@ -562,10 +636,7 @@ impl VectorBasemap {
 fn paint_rings(
     shapes: &mut Vec<egui::Shape>,
     rings: &[RingSet],
-    center_lon: f64,
-    center_lat: f64,
-    zoom: f64,
-    rect: Rect,
+    view: &ViewCtx,
     min_lon: f64,
     min_lat: f64,
     max_lon: f64,
@@ -592,10 +663,7 @@ fn paint_rings(
 
         let segments = project_segments(
             &ring.exterior,
-            center_lon,
-            center_lat,
-            zoom,
-            rect,
+            view,
             min_seg_px,
             max_jump_px,
             lon_shift,
@@ -638,10 +706,7 @@ fn paint_rings(
             for hole in &ring.holes {
                 let hsegs = project_segments(
                     hole,
-                    center_lon,
-                    center_lat,
-                    zoom,
-                    rect,
+                    view,
                     min_seg_px,
                     max_jump_px,
                     lon_shift,
@@ -723,11 +788,43 @@ fn first_existing(dir: &Path, names: &[&str]) -> Option<PathBuf> {
     None
 }
 
-/// 全球层：优先要石 `kanameishi/`，否则 Globalmap + `world/` 补丁。
+/// 全球层：优先根目录精细 GeoJSON → 要石 Topo → Globalmap + `world/` 补丁。
 fn load_world_rings(dir: &Path) -> (Vec<RingSet>, usize, usize) {
     let mut world_fine = Vec::new();
     let mut files = 0usize;
     let mut skipped = 0usize;
+
+    // 根目录精细全球轮廓（与要石同名拓扑，展开更密）
+    if let Some(world) = first_existing(
+        dir,
+        &[
+            "medium.global.modified.geo.json",
+            "medium.global.modified.geojson",
+            "medium.global.geo.json",
+        ],
+    ) {
+        files += 1;
+        match load_any_map(&world) {
+            Ok(rings) => {
+                info!(
+                    path = %world.display(),
+                    rings = rings.len(),
+                    "loaded fine world basemap GeoJSON"
+                );
+                world_fine.extend(rings);
+                append_cn_boundary_patches(dir, &mut world_fine, &mut files, &mut skipped);
+                return (world_fine, files, skipped);
+            }
+            Err(e) => {
+                skipped += 1;
+                warn!(
+                    path = %world.display(),
+                    error = %e,
+                    "精细世界底图加载失败，回退要石"
+                );
+            }
+        }
+    }
 
     let kdir = kanameishi_dir(dir);
     if let Some(world) = first_existing(
@@ -747,6 +844,8 @@ fn load_world_rings(dir: &Path) -> (Vec<RingSet>, usize, usize) {
                     "loaded kanameishi world basemap"
                 );
                 world_fine.extend(rings);
+                // 要石世界层不含中日；藏南/钓鱼岛仍用补丁叠盖争议弧
+                append_cn_boundary_patches(dir, &mut world_fine, &mut files, &mut skipped);
                 return (world_fine, files, skipped);
             }
             Err(e) => {
@@ -811,6 +910,37 @@ fn load_world_rings(dir: &Path) -> (Vec<RingSet>, usize, usize) {
     }
 
     (world_fine, files, skipped)
+}
+
+/// 加载 `world/cn_boundary_patches`；若无文件则用内置藏南 / 钓鱼岛补丁。
+fn append_cn_boundary_patches(
+    dir: &Path,
+    world_fine: &mut Vec<RingSet>,
+    files: &mut usize,
+    skipped: &mut usize,
+) {
+    let world_dir = dir.join("world");
+    let mut saw_patch = false;
+    if world_dir.is_dir() {
+        for entry in walk_geojson(&world_dir) {
+            if !is_cn_boundary_patch(&entry) {
+                continue;
+            }
+            saw_patch = true;
+            *files += 1;
+            match load_file(&entry) {
+                Ok(rings) => world_fine.extend(rings),
+                Err(e) => {
+                    *skipped += 1;
+                    warn!(path = %entry.display(), error = %e, "跳过边界补丁");
+                }
+            }
+        }
+    }
+    if !saw_patch {
+        world_fine.extend(builtin_cn_boundary_patches());
+        info!("using builtin cn boundary patches (藏南 / 钓鱼岛)");
+    }
 }
 
 /// 区划层：优先要石中/日省界；否则扫中国地市 + 日本都道府县。
@@ -1406,22 +1536,62 @@ fn viewport_bounds(center_lon: f64, center_lat: f64, zoom: f64, rect: Rect) -> (
 }
 
 /// 相对视口中心连续解缠后投影；经度或屏幕跳变时拆段，禁止跨日界连线。
-/// `lon_shift`：世界副本偏移（±360°…），用于低缩放横向铺满。
+/// `lon_shift`：世界副本偏移（±360°…），用于低缩放横向铺满；球体忽略。
 fn project_segments(
     ring: &[[f32; 2]],
-    center_lon: f64,
-    center_lat: f64,
-    zoom: f64,
-    rect: Rect,
+    view: &ViewCtx,
     min_seg_px: f32,
     max_jump_px: f32,
     lon_shift: f64,
 ) -> Vec<Vec<Pos2>> {
     let min2 = min_seg_px * min_seg_px;
     let jump2 = max_jump_px * max_jump_px;
-    let (cx, cy) = projection::lonlat_to_world(center_lon, center_lat, zoom);
     let mut segments: Vec<Vec<Pos2>> = Vec::new();
     let mut cur: Vec<Pos2> = Vec::with_capacity(ring.len().min(256));
+
+    if view.mode.is_globe() {
+        for p in ring {
+            let lon = p[0] as f64;
+            let lat = p[1] as f64;
+            match view.project(lon, lat) {
+                Some(sp) => {
+                    if let Some(last) = cur.last() {
+                        let dx = sp.x - last.x;
+                        let dy = sp.y - last.y;
+                        let d2 = dx * dx + dy * dy;
+                        if d2 < min2 {
+                            continue;
+                        }
+                        if d2 > jump2 {
+                            if cur.len() >= 2 {
+                                segments.push(std::mem::take(&mut cur));
+                            } else {
+                                cur.clear();
+                            }
+                        }
+                    }
+                    cur.push(sp);
+                }
+                None => {
+                    if cur.len() >= 2 {
+                        segments.push(std::mem::take(&mut cur));
+                    } else {
+                        cur.clear();
+                    }
+                }
+            }
+        }
+        if cur.len() >= 2 {
+            segments.push(cur);
+        }
+        return segments;
+    }
+
+    let center_lon = view.center_lon;
+    let center_lat = view.center_lat;
+    let zoom = view.zoom;
+    let rect = view.rect;
+    let (cx, cy) = projection::lonlat_to_world(center_lon, center_lat, zoom);
     let mut prev_lon: Option<f64> = None;
 
     for p in ring {
@@ -1434,7 +1604,6 @@ fn project_segments(
             while prev - lon > 180.0 {
                 lon += 360.0;
             }
-            // 连续解缠后仍超过 180°：地理上不该相连 → 拆段
             if (lon - prev).abs() > 180.0 {
                 if cur.len() >= 2 {
                     segments.push(std::mem::take(&mut cur));

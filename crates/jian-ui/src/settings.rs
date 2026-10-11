@@ -195,6 +195,7 @@ pub struct SourceHealthView {
     pub jian: HealthStatus,
     pub wolfx: HealthStatus,
     pub p2p: HealthStatus,
+    pub pancakes: HealthStatus,
 }
 
 pub struct SettingsSession {
@@ -966,6 +967,8 @@ fn draw_sources(
         status_row(ui, "Wolfx", health.wolfx);
         row_divider(ui);
         status_row(ui, "P2PQuake", health.p2p);
+        row_divider(ui);
+        status_row(ui, "PancakesAPI", health.pancakes);
     });
 
     section(ui, "Jian Project", "\u{25ce}", |ui| {
@@ -1043,6 +1046,64 @@ fn draw_sources(
     });
 
 
+    section(ui, "PancakesAPI", "\u{25ce}", |ui| {
+        control_row(ui, "启用 Pancakes", "api.aloys23.link 全灾害聚合", "\u{26a1}", |ui| {
+            toggle(ui, &mut draft.sources.pancakes.enabled);
+        });
+        if draft.sources.pancakes.enabled {
+            row_divider(ui);
+            control_row(ui, "GlobalQuake", "全球预警（gq）", "\u{26a1}", |ui| {
+                toggle(ui, &mut draft.sources.pancakes.gq);
+            });
+            row_divider(ui);
+            control_row(ui, "GQ 最低震级", "0=不过滤；默认 3.0", "\u{25ce}", |ui| {
+                ui.add(
+                    egui::DragValue::new(&mut draft.sources.pancakes.gq_min_magnitude)
+                        .speed(0.1)
+                        .range(0.0..=9.0)
+                        .fixed_decimals(1),
+                );
+            });
+            row_divider(ui);
+            control_row(ui, "USGS", "美国地质调查局速报", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.pancakes.usgs);
+            });
+            row_divider(ui);
+            control_row(ui, "JMA EEW", "紧急地震速报", "\u{26a1}", |ui| {
+                toggle(ui, &mut draft.sources.pancakes.jma_eew);
+            });
+            row_divider(ui);
+            control_row(ui, "JMA 速报列表", "VXSE51/52/53", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.pancakes.jma_eqlist);
+            });
+            row_divider(ui);
+            control_row(ui, "NMEFC 海啸", "国家海洋环境预报中心", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.pancakes.nmefc);
+            });
+            row_divider(ui);
+            control_row(ui, "NMEFC 海浪", "海浪警报", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.pancakes.nmefc_wave);
+            });
+            row_divider(ui);
+            control_row(ui, "NMEFC 风暴潮", "风暴潮警报", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.pancakes.nmefc_surge);
+            });
+            row_divider(ui);
+            control_row(ui, "JMA 海啸", "津波预报/注意报/警报", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.pancakes.jma_tsunami);
+            });
+            row_divider(ui);
+            control_row(ui, "CMA 气象", "中国气象局预警", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.pancakes.cma);
+            });
+            row_divider(ui);
+            control_row(ui, "JMA 火山", "火山活动情报", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.pancakes.jma_volcano);
+            });
+        }
+    });
+
+
     section(ui, "实时测站", "\u{25ce}", |ui| {
         control_row(ui, "日本 JMA/NIED", "总开关", "\u{26a1}", |ui| {
             toggle(ui, &mut draft.sources.stations.jma_enabled);
@@ -1073,12 +1134,12 @@ fn draw_sources(
             });
         }
         row_divider(ui);
-        control_row(ui, "S-Net", "海上强震网（Jian 中转）", "\u{25ce}", |ui| {
+        control_row(ui, "S-Net", "海上强震网（中转 / 原版 MSIL）", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.sources.stations.snet_enabled);
         });
         if draft.sources.stations.snet_enabled {
             row_divider(ui);
-            control_row(ui, "S-Net 源", "目前原版需 pixels.csv，暂用中转", "\u{25ce}", |ui| {
+            control_row(ui, "S-Net 源", "原版需 assets/stations/pixels.csv", "\u{25ce}", |ui| {
                 egui::ComboBox::from_id_salt("set_snet_station_src")
                     .selected_text(snet_station_src_label(&draft.sources.stations.snet_source))
                     .width(200.0)
@@ -1091,7 +1152,7 @@ fn draw_sources(
                         ui.selectable_value(
                             &mut draft.sources.stations.snet_source,
                             "original".into(),
-                            "原版（开发中）",
+                            "原版 MSIL 切片",
                         );
                     });
             });
@@ -1125,6 +1186,19 @@ fn status_row(ui: &mut Ui, name: &str, status: HealthStatus) {
 }
 
 
+
+fn is_projection_flat(draft: &AppConfig) -> bool {
+    !draft.map.projection.eq_ignore_ascii_case("globe")
+}
+
+fn projection_label(draft: &AppConfig) -> &'static str {
+    if draft.map.projection.eq_ignore_ascii_case("globe") {
+        "球体"
+    } else {
+        "平面"
+    }
+}
+
 fn is_basemap_auto(draft: &AppConfig) -> bool {
     matches!(draft.map.basemap.trim().to_ascii_lowercase().as_str(), "auto" | "")
 }
@@ -1141,6 +1215,7 @@ fn tab_display(s: &str) -> String {
     match s.to_ascii_lowercase().as_str() {
         "records" | "record" => "速报".into(),
         "station" => "测站".into(),
+        "volcano" => "火山".into(),
         _ => "预警".into(),
     }
 }
@@ -1244,6 +1319,37 @@ fn draw_general(
                     }
                 });
         });
+        row_divider(ui);
+        control_row(ui, "地图投影", "平面或立体球；球体使用矢量底图", "\u{25d0}", |ui| {
+            egui::ComboBox::from_id_salt("set_projection")
+                .selected_text(projection_label(draft))
+                .width(160.0)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(is_projection_flat(draft), "平面")
+                        .clicked()
+                    {
+                        draft.map.projection = "flat".into();
+                    }
+                    if ui
+                        .selectable_label(
+                            draft.map.projection.eq_ignore_ascii_case("globe"),
+                            "球体",
+                        )
+                        .clicked()
+                    {
+                        draft.map.projection = "globe".into();
+                    }
+                });
+        });
+        if draft.map.projection.eq_ignore_ascii_case("globe") {
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new("球体模式使用矢量底图（瓦片暂不贴球）")
+                    .small()
+                    .color(egui::Color32::from_rgb(0x9C, 0xA3, 0xAF)),
+            );
+        }
     });
 
     section(ui, "窗口", "\u{25a3}", |ui| {
@@ -1290,6 +1396,11 @@ fn draw_general(
                         &mut draft.ui.sidebar_default_tab,
                         "station".into(),
                         "测站",
+                    );
+                    ui.selectable_value(
+                        &mut draft.ui.sidebar_default_tab,
+                        "volcano".into(),
+                        "火山",
                     );
                 });
         });
@@ -1457,7 +1568,7 @@ fn jma_station_src_label(s: &str) -> String {
 
 fn snet_station_src_label(s: &str) -> String {
     match s.trim().to_ascii_lowercase().as_str() {
-        "original" => "原版（开发中）".into(),
+        "original" => "原版 MSIL 切片".into(),
         _ => "Jian 中转 /s-net".into(),
     }
 }
@@ -1488,6 +1599,7 @@ fn draw_about(ui: &mut Ui) {
         ui.label(
             RichText::new(
                 "\u{00b7} Jian Project API（预警 / 速报 / 测站中转）\n\
+                \u{00b7} PancakesAPI（GQ / USGS / JMA / NMEFC / CMA）\n\
 \u{00b7} Wolfx（JMA EEW、台网速报）\n\
 \u{00b7} P2PQuake（气象厅地震情报）\n\
 \u{00b7} NIED kmoni / lmoni 原版测站图像（可选）",

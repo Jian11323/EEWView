@@ -1,22 +1,26 @@
 //! 地图视口：GeoJSON 矢量底图（默认）/ 可选 XYZ 瓦片 + 走时表驱动 P/S 叠加层。
 
 mod camera;
+mod globe;
 mod marker_icons;
 mod overlay;
 mod projection;
 mod tile_cache;
 mod topojson;
+mod tsunami_coast;
 mod vector_basemap;
 
 pub use camera::{fit_events, zoom_to_fit_radius_km, CameraFlight};
-pub use projection::{clamp_lat, km_to_pixels, lonlat_to_screen, normalize_lon};
+pub use projection::{clamp_lat, km_to_pixels, lonlat_to_screen, normalize_lon, ProjectionMode};
 pub use tile_cache::TileCache;
 pub use vector_basemap::{BasemapLoadState, BasemapMode, VectorBasemap, VectorStyle};
 
-use egui::{Color32, Rect, Sense, Ui};
-use jian_core::{EewReport, EqRecord, StationSample};
+use egui::{Color32, Sense, Stroke, Ui};
+use jian_core::{EewReport, EqRecord, StationSample, TsunamiInfo};
 use jian_travel::TravelEngine;
 use marker_icons::MarkerIcons;
+use projection::ViewCtx;
+use tsunami_coast::TsunamiCoast;
 use tile_cache::TileCache as Cache;
 use vector_basemap::OCEAN;
 
@@ -28,16 +32,20 @@ pub struct MapViewport {
     pub center_lat: f64,
     pub zoom: f64,
     pub basemap: BasemapMode,
+    pub projection_mode: ProjectionMode,
     ocean_fill: Color32,
     vector_style: VectorStyle,
     cache: Cache,
     vector: VectorBasemap,
+    tsunami_coast: TsunamiCoast,
     markers: MarkerIcons,
     flight: Option<CameraFlight>,
     /// 飞跃刚结束后抑制波圈自动缩放，避免落地瞬间被二次改 zoom「弹一下」
     post_flight_cooldown: f64,
     /// 用户拖拽/滚轮后暂停自动跟焦缩放，直到下一次主动飞跃
     pub user_camera_override: bool,
+    /// 最近一帧视口短边（px），供跟焦时按波圈估 zoom
+    pub last_viewport_min_px: f32,
 }
 
 impl Default for MapViewport {
@@ -47,6 +55,7 @@ impl Default for MapViewport {
             center_lat: 35.0,
             zoom: 5.0,
             basemap: BasemapMode::Vector,
+            projection_mode: ProjectionMode::Flat,
             ocean_fill: OCEAN,
             vector_style: VectorStyle::dark(),
             cache: Cache::new(
@@ -54,15 +63,21 @@ impl Default for MapViewport {
                 "arcwob".into(),
             ),
             vector: VectorBasemap::default(),
+            tsunami_coast: TsunamiCoast::default(),
             markers: MarkerIcons::default(),
             flight: None,
             post_flight_cooldown: 0.0,
             user_camera_override: false,
+            last_viewport_min_px: 720.0,
         }
     }
 }
 
 impl MapViewport {
+    pub fn set_projection_mode(&mut self, mode: ProjectionMode) {
+        self.projection_mode = mode;
+    }
+
     pub fn configure(
         &mut self,
         basemap: BasemapMode,
@@ -73,10 +88,13 @@ impl MapViewport {
         self.basemap = basemap;
         self.cache
             .set_source(tile_base.into(), tile_source.into());
-        if basemap.show_vector() {
-            if let Some(dir) = geodata_dir {
+        if let Some(dir) = geodata_dir {
+            // 球体强制矢量；平面按底图模式
+            if basemap.show_vector() || self.projection_mode.is_globe() {
                 self.vector.load_dir(dir);
             }
+            // 海啸沿岸与底图模式无关，始终尝试加载
+            self.tsunami_coast.load_dir(dir);
         }
     }
 
@@ -138,8 +156,8 @@ impl MapViewport {
             self.center_lat = elat;
             self.zoom = ez;
             self.flight = None;
-            // 落地后短暂冻结自动缩放，防止与波圈 fit 抢 zoom
-            self.post_flight_cooldown = 0.85;
+            // 落地后冻结自动缩放，避免「平移后再二次缩」
+            self.post_flight_cooldown = 1.6;
         }
         !done
     }
@@ -153,15 +171,18 @@ impl MapViewport {
         self.flight.is_some() || self.post_flight_cooldown > 0.0 || self.user_camera_override
     }
 
-    /// 按波圈半径平滑跟缩放（不改中心）。
+    /// 仅在波圈扩大需要「缩小视野」时平滑跟 zoom（禁止二次放大/乱缩）。
     pub fn apply_auto_zoom(&mut self, zoom: f64, smooth: f64) {
         if self.blocks_auto_zoom() {
             return;
         }
         let z = zoom.clamp(ZOOM_MIN, ZOOM_MAX);
+        // 只跟波圈长大而 zoom-out；略放大或抖动一律忽略
+        if z >= self.zoom - 0.12 {
+            return;
+        }
         let t = smooth.clamp(0.0, 1.0);
         let next = self.zoom + (z - self.zoom) * t;
-        // 差距很小时直接贴齐，避免长期微抖
         self.zoom = if (z - next).abs() < 0.01 { z } else { next };
     }
 
@@ -197,39 +218,68 @@ impl MapViewport {
         stations: &[StationSample],
         records: &[EqRecord],
         home: Option<(f64, f64)>,
+        tsunami: Option<&TsunamiInfo>,
     ) -> Option<(f64, f64)> {
         if self.vector.poll() {
-            ui.ctx().request_repaint();
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(50));
         }
         self.markers.ensure(ui.ctx());
 
         let dt = ui.input(|i| i.stable_dt) as f64;
         if self.tick_flight(dt) || self.post_flight_cooldown > 0.0 {
-            ui.ctx().request_repaint();
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(16));
         }
 
         let (resp, _) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let rect = resp.rect;
+        self.last_viewport_min_px = rect.width().min(rect.height()).max(120.0);
+
+        let view = ViewCtx::new(
+            self.projection_mode,
+            self.center_lon,
+            self.center_lat,
+            self.zoom,
+            rect,
+        );
+        let globe = self.projection_mode.is_globe();
 
         ui.painter().rect_filled(rect, 0.0, self.ocean_fill);
 
-        if self.basemap.show_tiles() {
+        if globe {
+            if let Some(r) = view.horizon_radius() {
+                // 球体外遮罩：地平线外用略深色，勾出球轮廓
+                ui.painter().circle_filled(rect.center(), r, self.ocean_fill);
+                ui.painter().circle_stroke(
+                    rect.center(),
+                    r,
+                    Stroke::new(1.2_f32, Color32::from_rgb(0x55, 0x58, 0x60)),
+                );
+            }
+        }
+
+        // 球体暂不贴瓦片
+        if !globe && self.basemap.show_tiles() {
             self.cache
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
 
-        if self.basemap.show_vector() {
-            // vector 模式填陆地；叠在瓦片上时只描边界以免盖住影像
-            let fill_land = self.basemap == BasemapMode::Vector;
+        if globe || self.basemap.show_vector() {
+            let fill_land = globe || self.basemap == BasemapMode::Vector;
             self.vector.paint(
                 ui,
-                rect,
-                self.center_lon,
-                self.center_lat,
-                self.zoom,
+                &view,
                 fill_land,
                 self.vector_style,
             );
+        }
+
+        // JMA 海啸：按沿岸预报区描边闪烁（不对中日外轮廓整圈描边）
+        if let Some(t) = tsunami {
+            if !t.cancelled && !t.grade.eq_ignore_ascii_case("Cancel") {
+                self.tsunami_coast.paint(ui, &view, &t.areas_list, now_ms);
+            }
         }
 
         {
@@ -240,51 +290,20 @@ impl MapViewport {
                     .strip_prefix("record:")
                     .map(|_| e.place.as_str())
             });
-            overlay::paint_stations(
-                ui,
-                rect,
-                self.center_lon,
-                self.center_lat,
-                self.zoom,
-                stations,
-                selected_station,
-            );
-            overlay::paint_records(
-                ui,
-                rect,
-                self.center_lon,
-                self.center_lat,
-                self.zoom,
-                records,
-                selected_record,
-                icons,
-            );
+            let eew_active = active.is_some_and(|e| {
+                !e.event_id.starts_with("station:")
+                    && !e.event_id.starts_with("record:")
+                    && !e.is_cancel
+            });
+            overlay::paint_stations(ui, &view, stations, selected_station, icons, eew_active);
+            overlay::paint_records(ui, &view, records, selected_record, icons);
 
             if let Some((hlon, hlat)) = home {
-                overlay::paint_home(
-                    ui,
-                    rect,
-                    self.center_lon,
-                    self.center_lat,
-                    self.zoom,
-                    hlon,
-                    hlat,
-                    icons,
-                );
+                overlay::paint_home(ui, &view, hlon, hlat, icons);
             }
 
             let active_key = active.map(|e| (e.agency.0.as_str(), e.event_id.as_str()));
-            // 各源最新预警叉标；传播中的事件随后由波圈层覆盖绘制
-            overlay::paint_eew_markers(
-                ui,
-                rect,
-                self.center_lon,
-                self.center_lat,
-                self.zoom,
-                eew_markers,
-                active_key,
-                icons,
-            );
+            overlay::paint_eew_markers(ui, &view, eew_markers, active_key, icons);
 
             if show_waves {
                 let mut painted_active = false;
@@ -300,10 +319,7 @@ impl MapViewport {
                     }
                     overlay::paint_wave_overlay(
                         ui,
-                        rect,
-                        self.center_lon,
-                        self.center_lat,
-                        self.zoom,
+                        &view,
                         Some(ev),
                         travel,
                         elapsed,
@@ -317,10 +333,7 @@ impl MapViewport {
                     }) {
                         overlay::paint_wave_overlay(
                             ui,
-                            rect,
-                            self.center_lon,
-                            self.center_lat,
-                            self.zoom,
+                            &view,
                             Some(ev),
                             travel,
                             event_elapsed_s(ev, now_ms),
@@ -336,15 +349,7 @@ impl MapViewport {
                     m.agency.0 == ev.agency.0 && m.event_id == ev.event_id
                 });
                 if !already {
-                    overlay::paint_marker_only(
-                        ui,
-                        rect,
-                        self.center_lon,
-                        self.center_lat,
-                        self.zoom,
-                        ev,
-                        icons,
-                    );
+                    overlay::paint_marker_only(ui, &view, ev, icons);
                 }
             }
         }
@@ -354,13 +359,7 @@ impl MapViewport {
             self.post_flight_cooldown = 0.0;
             self.user_camera_override = true;
             let d = resp.drag_delta();
-            let (lon, lat) = projection::pan_by_screen_delta(
-                self.center_lon,
-                self.center_lat,
-                self.zoom,
-                d.x,
-                d.y,
-            );
+            let (lon, lat) = view.pan_by_delta(d.x, d.y);
             self.center_lon = lon;
             self.center_lat = lat;
         }
@@ -375,21 +374,21 @@ impl MapViewport {
                 let after = (before + scroll as f64 * 0.002).clamp(ZOOM_MIN, ZOOM_MAX);
                 if (after - before).abs() > 1e-9 {
                     if let Some(pos) = resp.hover_pos() {
-                        let (lon, lat) = screen_to_lonlat(
-                            pos,
-                            rect,
-                            self.center_lon,
-                            self.center_lat,
-                            before,
-                        );
-                        self.zoom = after;
-                        let dx = (pos.x - rect.center().x) as f64;
-                        let dy = (pos.y - rect.center().y) as f64;
-                        let (wx, wy) = projection::lonlat_to_world(lon, lat, after);
-                        let (nlon, nlat) =
-                            projection::world_to_lonlat(wx - dx, wy - dy, after);
-                        self.center_lon = projection::normalize_lon(nlon);
-                        self.center_lat = projection::clamp_lat(nlat);
+                        if globe {
+                            // 球体：缩放只改相机高度，中心经纬不变
+                            let _ = pos;
+                            self.zoom = after;
+                        } else {
+                            let (lon, lat) = view.screen_to_lonlat(pos);
+                            self.zoom = after;
+                            let dx = (pos.x - rect.center().x) as f64;
+                            let dy = (pos.y - rect.center().y) as f64;
+                            let (wx, wy) = projection::lonlat_to_world(lon, lat, after);
+                            let (nlon, nlat) =
+                                projection::world_to_lonlat(wx - dx, wy - dy, after);
+                            self.center_lon = projection::normalize_lon(nlon);
+                            self.center_lat = projection::clamp_lat(nlat);
+                        }
                     } else {
                         self.zoom = after;
                     }
@@ -400,8 +399,7 @@ impl MapViewport {
         let mut picked = None;
         if resp.clicked() {
             if let Some(pos) = resp.interact_pointer_pos() {
-                let (lon, lat) =
-                    screen_to_lonlat(pos, rect, self.center_lon, self.center_lat, self.zoom);
+                let (lon, lat) = view.screen_to_lonlat(pos);
                 picked = Some((
                     projection::normalize_lon(lon),
                     projection::clamp_lat(lat),
@@ -420,19 +418,6 @@ fn haversine_approx_deg(lon0: f64, lat0: f64, lon1: f64, lat1: f64) -> f64 {
     }
     let dlat = (lat1 - lat0).abs();
     (dlon * dlon + dlat * dlat).sqrt()
-}
-
-fn screen_to_lonlat(
-    pos: egui::Pos2,
-    rect: Rect,
-    center_lon: f64,
-    center_lat: f64,
-    zoom: f64,
-) -> (f64, f64) {
-    let (cx, cy) = projection::lonlat_to_world(center_lon, center_lat, zoom);
-    let wx = cx + (pos.x - rect.center().x) as f64;
-    let wy = cy + (pos.y - rect.center().y) as f64;
-    projection::world_to_lonlat(wx, wy, zoom)
 }
 
 fn event_elapsed_s(ev: &EewReport, now_ms: i64) -> f64 {

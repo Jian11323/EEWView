@@ -48,6 +48,9 @@ pub struct MapConfig {
     /// 底图：`vector`（默认 GeoJSON）| `tiles`（XYZ 瓦片）| `both`（瓦片+矢量边界）
     #[serde(default = "default_basemap")]
     pub basemap: String,
+    /// 投影：`flat`（平面）| `globe`（球体）
+    #[serde(default = "default_projection")]
+    pub projection: String,
     /// 相对仓库根或绝对路径；`vector` / `both` 时加载
     #[serde(default = "default_geodata_dir")]
     pub geodata_dir: String,
@@ -60,6 +63,9 @@ pub struct MapConfig {
 
 fn default_basemap() -> String {
     "auto".into()
+}
+fn default_projection() -> String {
+    "flat".into()
 }
 fn default_geodata_dir() -> String {
     "geodata".into()
@@ -92,9 +98,75 @@ pub struct SourcesConfig {
     pub jian: JianSourceConfig,
     pub wolfx: WolfxSourceConfig,
     pub p2pquake: P2pSourceConfig,
+    /// PancakesAPI（api.aloys23.link）全灾害源
+    #[serde(default)]
+    pub pancakes: PancakesSourceConfig,
     /// 测站网：JMA（kmoni/lmoni/中转）、S-Net、KMA
     #[serde(default)]
     pub stations: StationsConfig,
+}
+
+
+/// PancakesAPI：地震 / 海洋 / 气象 / 火山。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PancakesSourceConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// 使用 `/api/v1/alert/ws/all` 聚合通道
+    #[serde(default = "default_true")]
+    pub use_all: bool,
+    #[serde(default = "default_pancakes_base")]
+    pub base_url: String,
+    #[serde(default = "default_pancakes_ws")]
+    pub ws_url: String,
+    #[serde(default = "default_pancakes_client")]
+    pub client_id: String,
+    /// GlobalQuake 最低震级（0=不过滤）
+    #[serde(default = "default_gq_min_mag")]
+    pub gq_min_magnitude: f64,
+    #[serde(default = "default_true")]
+    pub gq: bool,
+    #[serde(default = "default_true")]
+    pub usgs: bool,
+    #[serde(default = "default_true")]
+    pub jma_eew: bool,
+    #[serde(default = "default_true")]
+    pub jma_eqlist: bool,
+    #[serde(default = "default_true")]
+    pub nmefc: bool,
+    #[serde(default = "default_true")]
+    pub nmefc_wave: bool,
+    #[serde(default = "default_true")]
+    pub nmefc_surge: bool,
+    #[serde(default = "default_true")]
+    pub jma_tsunami: bool,
+    #[serde(default = "default_true")]
+    pub cma: bool,
+    #[serde(default = "default_true")]
+    pub jma_volcano: bool,
+}
+
+impl Default for PancakesSourceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            use_all: true,
+            base_url: default_pancakes_base(),
+            ws_url: default_pancakes_ws(),
+            client_id: default_pancakes_client(),
+            gq_min_magnitude: default_gq_min_mag(),
+            gq: true,
+            usgs: true,
+            jma_eew: true,
+            jma_eqlist: true,
+            nmefc: true,
+            nmefc_wave: true,
+            nmefc_surge: true,
+            jma_tsunami: true,
+            cma: true,
+            jma_volcano: true,
+        }
+    }
 }
 
 /// 实时测站源选择（用户可切换原版 / Jian 中转）。
@@ -276,6 +348,18 @@ fn default_p2p_ws() -> String {
 fn default_p2p_poll() -> u64 {
     30
 }
+fn default_pancakes_base() -> String {
+    "https://api.aloys23.link".into()
+}
+fn default_pancakes_ws() -> String {
+    "wss://api.aloys23.link".into()
+}
+fn default_pancakes_client() -> String {
+    "eewview".into()
+}
+fn default_gq_min_mag() -> f64 {
+    3.0
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -293,6 +377,7 @@ impl Default for AppConfig {
             },
             map: MapConfig {
                 basemap: default_basemap(),
+                projection: default_projection(),
                 geodata_dir: default_geodata_dir(),
                 tile_base: "https://tilemap.sismotide.top".into(),
                 tile_source: "arcwob".into(),
@@ -339,6 +424,7 @@ impl Default for AppConfig {
                     ws_url: default_p2p_ws(),
                     poll_secs: default_p2p_poll(),
                 },
+                pancakes: PancakesSourceConfig::default(),
                 stations: StationsConfig::default(),
             },
             filters: FiltersConfig::default(),
@@ -466,6 +552,7 @@ impl AppConfig {
             || (self.sources.wolfx.enabled
                 && (self.sources.wolfx.eew_enabled || self.sources.wolfx.eqlist_enabled))
             || self.sources.p2pquake.enabled
+            || self.sources.pancakes.enabled
     }
 
     pub fn sources_runtime_equal(&self, other: &Self) -> bool {
@@ -492,6 +579,22 @@ impl AppConfig {
             && self.sources.p2pquake.http_history == other.sources.p2pquake.http_history
             && self.sources.p2pquake.ws_url == other.sources.p2pquake.ws_url
             && self.sources.p2pquake.poll_secs == other.sources.p2pquake.poll_secs
+            && self.sources.pancakes.enabled == other.sources.pancakes.enabled
+            && self.sources.pancakes.use_all == other.sources.pancakes.use_all
+            && self.sources.pancakes.base_url == other.sources.pancakes.base_url
+            && self.sources.pancakes.ws_url == other.sources.pancakes.ws_url
+            && self.sources.pancakes.client_id == other.sources.pancakes.client_id
+            && self.sources.pancakes.gq_min_magnitude == other.sources.pancakes.gq_min_magnitude
+            && self.sources.pancakes.gq == other.sources.pancakes.gq
+            && self.sources.pancakes.usgs == other.sources.pancakes.usgs
+            && self.sources.pancakes.jma_eew == other.sources.pancakes.jma_eew
+            && self.sources.pancakes.jma_eqlist == other.sources.pancakes.jma_eqlist
+            && self.sources.pancakes.nmefc == other.sources.pancakes.nmefc
+            && self.sources.pancakes.nmefc_wave == other.sources.pancakes.nmefc_wave
+            && self.sources.pancakes.nmefc_surge == other.sources.pancakes.nmefc_surge
+            && self.sources.pancakes.jma_tsunami == other.sources.pancakes.jma_tsunami
+            && self.sources.pancakes.cma == other.sources.pancakes.cma
+            && self.sources.pancakes.jma_volcano == other.sources.pancakes.jma_volcano
     }
 }
 

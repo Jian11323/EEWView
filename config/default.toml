@@ -12,6 +12,8 @@ show_legend = true
 [map]
 # auto = 暗色要石矢量 / 亮色地形瓦片；也可强制 vector | tiles | both
 basemap = "auto"
+# flat = 平面 Web Mercator；globe = 立体球（矢量）
+projection = "flat"
 geodata_dir = "geodata"
 tile_base = "https://tilemap.sismotide.top"
 # 自有海洋地形底图（亮色模式）
@@ -61,6 +63,22 @@ eqlist_enabled = true
 [sources.p2pquake]
 enabled = true
 
+[sources.pancakes]
+enabled = true
+use_all = true
+# GlobalQuake 最低震级（0=不过滤）
+gq_min_magnitude = 3.0
+gq = true
+usgs = true
+jma_eew = true
+jma_eqlist = true
+nmefc = true
+nmefc_wave = true
+nmefc_surge = true
+jma_tsunami = true
+cma = true
+jma_volcano = true
+
 [filters]
 place_whitelist = ""
 
@@ -71,6 +89,7 @@ cwa = true
 kma = true
 sa = true
 early_est = true
+gq = true
 
 [filters.record_mag]
 cenc = 0.0
