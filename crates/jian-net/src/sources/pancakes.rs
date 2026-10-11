@@ -1,5 +1,5 @@
-//! PancakesAPI（api.aloys23.link）：默认只连 GlobalQuake（gq）专用通道。
-//! 维护者说明：其余子源已在上游关闭；可选开关仅作兼容保留。
+//! PancakesAPI（api.aloys23.link）：默认 GQ + JMA 火山；通道 `/ws/all`。
+//! 维护者：其余子源上游已关；火山情报可用。
 
 use jian_config::PancakesSourceConfig;
 use jian_core::HealthStatus;
@@ -29,7 +29,7 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
         cfg.client_id.trim().to_string()
     };
 
-    // HTTP：冷启动 / 可选速报轮询（默认仅 gq）
+    // HTTP：冷启动 / 可选速报轮询（默认 gq + 火山）
     if needs_http(&cfg) {
         let cold = cfg.clone();
         let tx_http = tx.clone();
@@ -40,14 +40,10 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
     }
 
     let ws_base = cfg.ws_url.trim_end_matches('/').to_string();
-    // 维护者：单独连 GQ；`use_all` 仅兼容旧聚合通道
-    if cfg.gq || cfg.use_all {
-        let url = if cfg.use_all {
-            format!("{ws_base}/api/v1/alert/ws/all?clientId={client_id}")
-        } else {
-            format!("{ws_base}/api/v1/alert/ws/gq?clientId={client_id}")
-        };
-        info!(%url, use_all = cfg.use_all, "pancakes: spawn ws");
+    // 公开通道 `/ws/all`；默认 ingest gq + jma_volcano。
+    if any_pancakes_subsource(&cfg) || cfg.use_all {
+        let url = format!("{ws_base}/api/v1/alert/ws/all?clientId={client_id}");
+        info!(%url, gq = cfg.gq, use_all = cfg.use_all, "pancakes: spawn ws");
         let filter = cfg.clone();
         let tx_ws = tx.clone();
         tasks.push(tokio::spawn(async move {
@@ -66,13 +62,13 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
             .await;
         }));
     } else {
-        warn!("pancakes: enabled but gq off and use_all off → no websocket");
+        warn!("pancakes: enabled but no sub-source on → no websocket");
     }
 
     tasks
 }
 
-fn needs_http(cfg: &PancakesSourceConfig) -> bool {
+fn any_pancakes_subsource(cfg: &PancakesSourceConfig) -> bool {
     cfg.gq
         || cfg.usgs
         || cfg.jma_eew
@@ -83,6 +79,10 @@ fn needs_http(cfg: &PancakesSourceConfig) -> bool {
         || cfg.jma_tsunami
         || cfg.cma
         || cfg.jma_volcano
+}
+
+fn needs_http(cfg: &PancakesSourceConfig) -> bool {
+    any_pancakes_subsource(cfg)
 }
 
 async fn poll_and_cold(tx: NetTx, base: String, cfg: PancakesSourceConfig) {

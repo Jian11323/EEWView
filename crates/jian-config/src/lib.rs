@@ -155,12 +155,12 @@ pub struct SourcesConfig {
 }
 
 
-/// PancakesAPI：默认只接 GlobalQuake（gq）；其余子源上游已关，开关仅兼容保留。
+/// PancakesAPI：默认 GlobalQuake + JMA 火山；其余子源上游已关。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PancakesSourceConfig {
     #[serde(default)]
     pub enabled: bool,
-    /// `true` → `/api/v1/alert/ws/all`；`false`（默认）→ 专用 `/api/v1/alert/ws/gq`
+    /// 兼容项；通道均为 `/ws/all`，按各子源开关 ingest
     #[serde(default)]
     pub use_all: bool,
     #[serde(default = "default_pancakes_base")]
@@ -191,7 +191,8 @@ pub struct PancakesSourceConfig {
     pub jma_tsunami: bool,
     #[serde(default)]
     pub cma: bool,
-    #[serde(default)]
+    /// JMA 火山（维护者：可用）
+    #[serde(default = "default_true")]
     pub jma_volcano: bool,
 }
 
@@ -213,7 +214,7 @@ impl Default for PancakesSourceConfig {
             nmefc_surge: false,
             jma_tsunami: false,
             cma: false,
-            jma_volcano: false,
+            jma_volcano: true,
         }
     }
 }

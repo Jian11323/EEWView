@@ -77,11 +77,12 @@ enabled = true
 
 [sources.pancakes]
 enabled = true
-# false=专用 /ws/gq（推荐）；true=旧聚合 /ws/all
+# 通道均为 /ws/all；按下方开关 ingest
 use_all = false
 # GlobalQuake 最低震级（0=不过滤）
 gq_min_magnitude = 3.0
 gq = true
+jma_volcano = true
 # 其余子源上游已关，默认不连
 usgs = false
 jma_eew = false
@@ -91,7 +92,6 @@ nmefc_wave = false
 nmefc_surge = false
 jma_tsunami = false
 cma = false
-jma_volcano = false
 
 [filters]
 place_whitelist = ""

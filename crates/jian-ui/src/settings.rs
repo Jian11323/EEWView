@@ -1054,7 +1054,7 @@ fn draw_sources(
         });
         if draft.sources.pancakes.enabled {
             row_divider(ui);
-            control_row(ui, "GlobalQuake", "专用 /ws/gq；维护者推荐单独连接", "\u{26a1}", |ui| {
+            control_row(ui, "GlobalQuake", "维护者：仅开 GQ；通道为 /ws/all", "\u{26a1}", |ui| {
                 toggle(ui, &mut draft.sources.pancakes.gq);
             });
             row_divider(ui);
@@ -1067,12 +1067,12 @@ fn draw_sources(
                 );
             });
             row_divider(ui);
-            control_row(ui, "聚合通道 /ws/all", "默认关；仅兼容旧用法", "\u{25ce}", |ui| {
+            control_row(ui, "聚合通道 /ws/all", "兼容；与 /ws/all 同通道", "\u{25ce}", |ui| {
                 toggle(ui, &mut draft.sources.pancakes.use_all);
             });
             ui.add_space(8.0);
             ui.label(
-                RichText::new("以下子源上游·停，默认关闭；一般无需开启。")
+                RichText::new("默认开 GQ 与 JMA 火山；其余子源上游已停。")
                     .size(12.0)
                     .color(chrome().muted),
             );
@@ -1664,7 +1664,7 @@ fn draw_about(ui: &mut Ui) {
         ui.label(
             RichText::new(
                 "\u{00b7} Jian Project API（预警 / 速报 / 测站中转）\n\
-                \u{00b7} PancakesAPI（默认 GlobalQuake /ws/gq）\n\
+                \u{00b7} PancakesAPI（默认 GQ + JMA 火山）\n\
 \u{00b7} Wolfx（all_eew 预警与速报）\n\
 \u{00b7} P2PQuake（气象厅地震情报）\n\
 \u{00b7} NIED kmoni / lmoni 原版测站图像（可选）",
