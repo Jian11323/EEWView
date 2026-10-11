@@ -68,8 +68,9 @@ def write_usage(out: Path, ver: str) -> None:
 
 【首次使用】
 1. 打开后点「设置」→ API与数据源，用 lk_ 换票绑定 Jian（可选）。
-2. 未配置 Jian 时，Wolfx / P2P / Pancakes 仍可用；Jian 健康态为「异常」。
-3. 用户配置写到本机 AppData，不回写本目录。
+2. 未配置 Jian 时，Wolfx / P2P / Pancakes 仍可用；Jian 健·态为「异常」。
+3. 用·配置写到本机 AppData，不回写本目录。
+4. 运行日志在本目录 logs/（按日滚动）；设置 → 高级可打开。
 
 【版本规则】
 - PATCH（x.y.Z）：修 bug / 微调，无新能力
@@ -90,7 +91,7 @@ def zip_out(out: Path, ver: str) -> Path:
         for path in out.rglob("*"):
             if not path.is_file() or path.name in skip:
                 continue
-            # 跳过 travel/raw（若误拷入）
+            # ·过 travel/raw（若误·入）
             parts = set(path.parts)
             if "raw" in parts and "travel" in parts:
                 continue

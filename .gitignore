@@ -35,6 +35,8 @@ Desktop.ini
 .cache/
 tmp-*/
 tmp-rodio-probe/
+/logs/
+**/logs/eewview.log*
 
 # ===== 走时表原始包（体积大；运行时只用 *.json，见 ATTRIBUTION 重下说明）=====
 assets/travel/raw/

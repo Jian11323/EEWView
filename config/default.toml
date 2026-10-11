@@ -1,3 +1,14 @@
+[log]
+# error | warn | info | debug | trace（环境变量 RUST_LOG 优先）
+level = "info"
+# 相对资源根；便携包即 exe 同级 logs/
+dir = "logs"
+# release 便携默认不打 stderr（无控制台）；开发构建仍会输出
+console = false
+# 按修改时间清理旧日志；0=不清理
+keep_days = 14
+enabled = true
+
 [ui]
 theme = "dark"
 show_nied_clock = false

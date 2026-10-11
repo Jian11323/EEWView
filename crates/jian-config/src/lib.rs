@@ -18,6 +18,51 @@ pub struct AppConfig {
     /// 预警机构开关、速报震级阈值（对齐 RhythmQuake）
     #[serde(default)]
     pub filters: FiltersConfig,
+    /// 文件日志（便携版无控制台时仍写入资源根下 logs/）
+    #[serde(default)]
+    pub log: LogConfig,
+}
+
+/// 运行日志：等级、目录、是否同时打 stderr、保留天数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogConfig {
+    /// 是否写文件（关闭则仅依赖 `RUST_LOG` + 控制台层，若有）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// `error` | `warn` | `info` | `debug` | `trace`（可被环境变量 `RUST_LOG` 覆盖）
+    #[serde(default = "default_log_level")]
+    pub level: String,
+    /// 相对资源根或绝对路径；默认 `logs`
+    #[serde(default = "default_log_dir")]
+    pub dir: String,
+    /// 是否同时输出到 stderr（release 便携默认关；`cargo run` debug 构建仍会打控制台）
+    #[serde(default)]
+    pub console: bool,
+    /// 按修改时间清理旧日志文件的保留天数（0=不清理）
+    #[serde(default = "default_log_keep_days")]
+    pub keep_days: u64,
+}
+
+fn default_log_level() -> String {
+    "info".into()
+}
+fn default_log_dir() -> String {
+    "logs".into()
+}
+fn default_log_keep_days() -> u64 {
+    14
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            level: default_log_level(),
+            dir: default_log_dir(),
+            console: false,
+            keep_days: default_log_keep_days(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,10 +285,10 @@ pub struct JianSourceConfig {
 pub struct WolfxSourceConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Wolfx JMA EEW WebSocket
+    /// Wolfx `all_eew` 预警（JMA / 川闽渝 / CENC / CWA）
     #[serde(default = "default_true")]
     pub eew_enabled: bool,
-    /// Wolfx CENC 速报列表
+    /// Wolfx 速报列表（WS query + HTTP cenc_eqlist）
     #[serde(default = "default_true")]
     pub eqlist_enabled: bool,
     #[serde(default = "default_wolfx_ws")]
@@ -337,7 +382,7 @@ fn default_kma_station_ws() -> String {
     "wss://api.sismotide.top/kma-station".into()
 }
 fn default_wolfx_ws() -> Vec<String> {
-    vec!["wss://ws-api.wolfx.jp/jma_eew".into()]
+    vec!["wss://ws-api.wolfx.jp/all_eew".into()]
 }
 fn default_wolfx_eqlist() -> String {
     "https://api.wolfx.jp/cenc_eqlist.json".into()
@@ -432,6 +477,7 @@ impl Default for AppConfig {
                 stations: StationsConfig::default(),
             },
             filters: FiltersConfig::default(),
+            log: LogConfig::default(),
         }
     }
 }

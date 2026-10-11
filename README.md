@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-纯 Rust 地震预警 / 速报桌面客户端。  
+纯 Rust 地震预警 / 速报桌面客·端。  
 
 ---
 
@@ -10,17 +10,17 @@
 
 | 区域 | 内容 |
 |------|------|
-| 健康点 | `Jian` · `Wolfx` · `P2P` → **正常 / 波动 / 异常** |
+| 健·点 | `Jian` · `Wolfx` · `P2P` → **正常 / 波动 / 异常** |
 | 速报 | 速报历史（地名 / 时间 / M / 震度色块） |
 | 预警 | 预警列表（报数 / M / 最大震度） |
 | 测站 | NIED Kmoni 有感测站（列表 + 地图色点） |
 | 地图 | 暗色要石矢量 / 亮色地形瓦片 + 震中 + P/S 波圈（JMA2001 走时） |
-| 图例 / 时钟 | 左下烈度色标；右下本地时间（可加 JST） |
+| 图例 / 时钟 | ·下烈度色标；右下本地时间（可加 JST） |
 | 信息头 / 倒计时 | 当前事件；本机经纬有效时 S 波剩余秒叠在右下时钟上方 |
 | 主题 | 设置 → 显示：暗色 / 亮色（主界面色板 + auto 底图同步切换） |
 | 设置 | API与数据源 / 地图与显示 / 音频 / 高级 / 关于（RhythmQuake 玻璃面板布局） |
 
-点击列表项可将地图居中到对应事件或测站，并刷新信息头。
+点击列表项可将地图居中到对应事件或测站，并·新信息头。
 
 ---
 
@@ -32,7 +32,7 @@
 | **Wolfx** | JMA / CENC 等预警与列表补充 | `[sources.wolfx]` |
 | **P2PQuake** | 气象厅地震情报等 | `[sources.p2pquake]` |
 
-底图：`basemap = "auto"` 时暗色用 `geodata/kanameishi/` 要石矢量，亮色用自有海洋地形瓦片 `tilemap.sismotide.top/arcwob`（横向循环）。  
+底图：`basemap = "auto"` 时暗色用 `geodata/kanameishi/` 要石矢量，亮色用自有·洋地形瓦片 `tilemap.sismotide.top/arcwob`（横向循环）。  
 国外源地名按融合历史 FE 格网修正（`assets/place/`）；JMA / CWA / HKO / CENC 保留原文。  
 字段约定见 [`docs/数据源.md`](docs/数据源.md)；底图说明见 [`geodata/README.md`](geodata/README.md)。
 
@@ -46,7 +46,7 @@
 | 本地 S 波倒计时 | 地牛 Wake Up! | 非自由许可；发行前须授权或替换；默认不随仓库分发 |
 | 测站 / UI | 原创合成 | CC0 |
 
-路由表：`assets/sound/catalog.json`；说明见 [`docs/音效路由.md`](docs/音效路由.md)。
+·由表：`assets/sound/catalog.json`；说明见 [`docs/音效·由.md`](docs/音效·由.md)。
 
 ---
 
@@ -54,8 +54,8 @@
 
 | 项 | 说明 |
 |----|------|
-| 近距走时 | 气象厅 **JMA2001**（[`ATTRIBUTION`](assets/travel/ATTRIBUTION.md)） |
-| 远距走时 | IASPEI **ak135**（回退表） |
+| 近·走时 | 气象厅 **JMA2001**（[`ATTRIBUTION`](assets/travel/ATTRIBUTION.md)） |
+| 远·走时 | IASPEI **ak135**（回退表） |
 | 震度色 | 气象厅配色指针表２－２ |
 | 烈度色 | 按 GB/T 38226 制图规范摘录（见 `assets/palette/`） |
 
@@ -63,11 +63,11 @@
 
 ## 版本
 
-当前通道：**Beta**，版本号与 Cargo workspace 一致（现为 **1.0.0**）。界面展示为 `Beta x.y.z`。
+当前通道：**Beta**，版本·与 Cargo workspace 一致（现为 **1.0.0**）。界面展示为 `Beta x.y.z`。
 
 | 变更性质 | 递增位 | 示例 |
 |----------|--------|------|
-| 缺陷修复、文案/样式微调、性能小修、无对外行为变化 | **PATCH**（第三位） | 1.0.0 → 1.0.1 |
+| 缺·修复、文案/·式微调、性能小修、无对外行为变化 | **PATCH**（第三位） | 1.0.0 → 1.0.1 |
 | 新功能、新数据源/设置项、交互或展示行为有意变更 | **MINOR**（第二位） | 1.0.1 → 1.1.0 |
 | 配置/协议不兼容，或结束 Beta 转正式版 | **MAJOR**（第一位） | 1.x → 2.0.0；正式版可去掉 Beta 标 |
 
@@ -103,7 +103,7 @@ $env:JIAN_ACCESS_TOKEN = "at_…"
 cargo run -p jian-app
 ```
 
-未配置令牌时仍可使用 Wolfx 与 P2PQuake；Jian 健康态为「异常」。
+未配置令牌时仍可使用 Wolfx 与 P2PQuake；Jian 健·态为「异常」。
 
 Windows 预览目录（`jian.exe` 与 `assets/` `geodata/` `config/` 同级）：
 
@@ -115,18 +115,20 @@ python tools/pack_windows.py
 
 资源根默认是可执行文件所在目录（或其上级仓库根）；也可用环境变量 `EEWVIEW_ROOT` 指定。
 
+运行日志默认写到资源根下 `logs/eewview.log.YYYY-MM-DD`（按日滚动）；设置 → 高级 → 运行日志可改等级与打开目录。环境变量 `RUST_LOG` 优先于配置中的等级。
+
 ---
 
 ## 目录
 
-| 路径 | 说明 |
+| ·径 | 说明 |
 |------|------|
 | `crates/` | 应用、界面、地图、网络、音效、走时等 |
-| `assets/` | 音效、走时、色标、烈度图标、地图标记、品牌 |
+| `assets/` | 音效、走时、色标、烈度图标、地图标记、品牌、霞鹜文· |
 | `geodata/` | 暗色要石 TopoJSON；可选行政区 GeoJSON 回退 |
 | `config/default.toml` | 默认配置（密钥勿提交） |
 | `docs/` | 架构与接口说明 |
-| `tools/` | 走时表转换等工具 |
+| `tools/` | 走时表转换等·· |
 
 架构总览：[`docs/项目结构规划.md`](docs/项目结构规划.md)。
 

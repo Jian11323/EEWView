@@ -1,5 +1,5 @@
 //! 设置页：按 RhythmQuake `design/settings-page.html` + `SettingsControlStyle`
-//! 以 egui 重写（统一玻璃面板、左侧分类、扁平行；已获授权参考）。
+//! 以 egui 重写（统一玻璃面板、·侧分类、扁平行；··授权参考）。
 
 use egui::{
     Color32, Frame, Margin, Pos2, Rect, RichText, ScrollArea, Sense, Stroke, Ui, Vec2,
@@ -145,7 +145,7 @@ impl SettingsTab {
             Self::Sources => "接口开关、鉴权与连接状态",
             Self::General => "主题、底图、窗口与定位",
             Self::Audio => "音量、静音与音效包",
-            Self::Advanced => "走时表、缓存与配置路径",
+            Self::Advanced => "走时表、缓存与配置·径",
             Self::About => "版本、许可与署名",
         }
     }
@@ -183,6 +183,7 @@ pub enum SettingsAction {
         countdown_pack: String,
     },
     ClearTileCache,
+    OpenLogDir,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,7 +256,7 @@ impl SettingsSession {
             draft.map.default_lon = lon;
             draft.map.default_lat = lat;
             draft.map.default_zoom = zoom;
-            self.save_note = Some("已用当前视野写入默认视口".into());
+            self.save_note = Some("·用当前视野写入默认视口".into());
         }
         self.capture_view = false;
     }
@@ -276,12 +277,12 @@ impl SettingsSession {
                 draft.map.default_lon = lon;
                 draft.map.default_lat = lat;
                 draft.map.default_zoom = zoom;
-                self.save_note = Some("已用地图选点写入默认视口".into());
+                self.save_note = Some("·用地图选点写入默认视口".into());
             }
             MapPickKind::LocalLocation => {
                 draft.local.longitude = Some(lon);
                 draft.local.latitude = Some(lat);
-                self.save_note = Some("已用地图选点写入本机位置".into());
+                self.save_note = Some("·用地图选点写入本机位置".into());
             }
         }
         self.map_pick = None;
@@ -430,7 +431,7 @@ impl SettingsSession {
             d.sources.jian.refresh_token = refresh;
             d.sources.jian.refresh_expire_at = refresh_exp;
             self.draft = Some(d);
-            self.save_note = Some("已恢复默认（令牌保留）；点「保存全部」写入".into());
+            self.save_note = Some("·恢复默认（令牌保留）；点「保存全部」写入".into());
         }
 
         if close_requested {
@@ -444,6 +445,7 @@ impl SettingsSession {
             Some(SettingsAction::Saved { .. })
                 | Some(SettingsAction::TestSound { .. })
                 | Some(SettingsAction::ClearTileCache)
+                | Some(SettingsAction::OpenLogDir)
         ) {
             return action;
         }
@@ -485,7 +487,7 @@ fn draw_shell(
                                     .color(chrome().text),
                             );
                             ui.label(
-                                RichText::new("EEWView \u{00b7} 左侧分类与右侧内容合并为同一玻璃面板")
+                                RichText::new("EEWView \u{00b7} ·侧分类与右侧内容合并为同一玻璃面板")
                                     .size(12.0)
                                     .color(chrome().muted),
                             );
@@ -835,7 +837,7 @@ pub(super) fn row_divider(ui: &mut Ui) {
     ui.add_space(10.0);
 }
 
-/// RQ SettingsControlRow：左侧图标盒 + 标题副标题，右侧控件
+/// RQ SettingsControlRow：·侧图标盒 + 标题副标题，右侧控件
 pub(super) fn control_row(
     ui: &mut Ui,
     title: &str,
@@ -976,7 +978,7 @@ fn draw_sources(
             toggle(ui, &mut draft.sources.jian.enabled);
         });
         row_divider(ui);
-        control_row(ui, "登录密钥 lk_", "换取长期 Token rt_ 并写入用户配置", "\u{25ce}", |ui| {
+        control_row(ui, "登录密钥 lk_", "换取长期 Token rt_ 并写入用·配置", "\u{25ce}", |ui| {
             framed_edit(ui, login_key, 200.0);
         });
         ui.add_space(8.0);
@@ -1010,7 +1012,7 @@ fn draw_sources(
         }
         if draft.sources.jian.access_token.is_some() {
             ui.label(
-                RichText::new("短期 at_ 已由 JIAN_ACCESS_TOKEN 注入（不写入文件）。")
+                RichText::new("短期 at_ ·由 JIAN_ACCESS_TOKEN 注入（不写入文件）。")
                     .size(11.5)
                     .color(chrome().muted),
             );
@@ -1022,11 +1024,11 @@ fn draw_sources(
             toggle(ui, &mut draft.sources.wolfx.enabled);
         });
         row_divider(ui);
-        control_row(ui, "JMA EEW", "Wolfx 预警通道", "\u{26a1}", |ui| {
+        control_row(ui, "预警", "all_eew 各源预警", "\u{26a1}", |ui| {
             toggle(ui, &mut draft.sources.wolfx.eew_enabled);
         });
         row_divider(ui);
-        control_row(ui, "CENC 速报列表", "Wolfx 台网速报", "\u{25ce}", |ui| {
+        control_row(ui, "速报列表", "CENC / JMA 列表", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.sources.wolfx.eqlist_enabled);
         });
     });
@@ -1077,11 +1079,11 @@ fn draw_sources(
                 toggle(ui, &mut draft.sources.pancakes.jma_eqlist);
             });
             row_divider(ui);
-            control_row(ui, "NMEFC 海啸", "国家海洋环境预报中心", "\u{25ce}", |ui| {
+            control_row(ui, "NMEFC ·啸", "国家·洋环境预报中心", "\u{25ce}", |ui| {
                 toggle(ui, &mut draft.sources.pancakes.nmefc);
             });
             row_divider(ui);
-            control_row(ui, "NMEFC 海浪", "海浪警报", "\u{25ce}", |ui| {
+            control_row(ui, "NMEFC ·浪", "·浪警报", "\u{25ce}", |ui| {
                 toggle(ui, &mut draft.sources.pancakes.nmefc_wave);
             });
             row_divider(ui);
@@ -1089,7 +1091,7 @@ fn draw_sources(
                 toggle(ui, &mut draft.sources.pancakes.nmefc_surge);
             });
             row_divider(ui);
-            control_row(ui, "JMA 海啸", "津波预报/注意报/警报", "\u{25ce}", |ui| {
+            control_row(ui, "JMA ·啸", "津波预报/注意报/警报", "\u{25ce}", |ui| {
                 toggle(ui, &mut draft.sources.pancakes.jma_tsunami);
             });
             row_divider(ui);
@@ -1134,7 +1136,7 @@ fn draw_sources(
             });
         }
         row_divider(ui);
-        control_row(ui, "S-Net", "海上强震网（中转 / 原版 MSIL）", "\u{25ce}", |ui| {
+        control_row(ui, "S-Net", "·上强震网（中转 / 原版 MSIL）", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.sources.stations.snet_enabled);
         });
         if draft.sources.stations.snet_enabled {
@@ -1207,7 +1209,7 @@ fn basemap_preset_label(draft: &AppConfig) -> String {
     match draft.map.basemap.trim().to_ascii_lowercase().as_str() {
         "vector" => "矢量地图".into(),
         "tiles" | "both" => "地形地图".into(),
-        _ => "跟随主题（推荐）".into(),
+        _ => "·随主题（推荐）".into(),
     }
 }
 
@@ -1279,7 +1281,7 @@ fn draw_general(
     capture_view: &mut bool,
 ) {
     section(ui, "外观", "\u{25d0}", |ui| {
-        control_row(ui, "界面主题", "切换后设置页立即跟随；保存后应用到主界面", "\u{25d0}", |ui| {
+        control_row(ui, "界面主题", "切换后设置页立即·随；保存后应用到主界面", "\u{25d0}", |ui| {
             egui::ComboBox::from_id_salt("set_theme")
                 .selected_text(theme_display(&draft.ui.theme))
                 .width(120.0)
@@ -1289,13 +1291,13 @@ fn draw_general(
                 });
         });
         row_divider(ui);
-        control_row(ui, "地图底图", "跟随主题，或固定矢量 / 地形地图", "\u{25a3}", |ui| {
+        control_row(ui, "地图底图", "·随主题，或固定矢量 / 地形地图", "\u{25a3}", |ui| {
             egui::ComboBox::from_id_salt("set_basemap_preset")
                 .selected_text(basemap_preset_label(draft))
                 .width(200.0)
                 .show_ui(ui, |ui| {
                     if ui
-                        .selectable_label(is_basemap_auto(draft), "跟随主题（推荐）")
+                        .selectable_label(is_basemap_auto(draft), "·随主题（推荐）")
                         .clicked()
                     {
                         draft.map.basemap = "auto".into();
@@ -1359,7 +1361,7 @@ fn draw_general(
     });
 
     section(ui, "地图显示", "\u{25a3}", |ui| {
-        control_row(ui, "预警自动跟焦", "新预警或报数更新时地图移到震中", "\u{25ce}", |ui| {
+        control_row(ui, "预警自动·焦", "新预警或报数更新时地图移到震中", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.auto_follow_eew);
         });
         row_divider(ui);
@@ -1371,7 +1373,7 @@ fn draw_general(
             toggle(ui, &mut draft.ui.show_wave_rings);
         });
         row_divider(ui);
-        control_row(ui, "烈度图例", "地图左下角显示烈度色标", "\u{25ce}", |ui| {
+        control_row(ui, "烈度图例", "地图·下角显示烈度色标", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_legend);
         });
         row_divider(ui);
@@ -1447,7 +1449,7 @@ fn draw_general(
         row_divider(ui);
         let picking = matches!(*map_pick, Some(MapPickKind::DefaultViewport));
         let sub = if picking {
-            "请点击主窗口地图选点，Esc 取消"
+            "·点击主窗口地图选点，Esc 取消"
         } else {
             "在主地图单击选点，或采用当前视野中心"
         };
@@ -1491,7 +1493,7 @@ fn draw_general(
             row_divider(ui);
             let picking = matches!(*map_pick, Some(MapPickKind::LocalLocation));
             let sub = if picking {
-                "请点击主窗口地图选点，Esc 取消"
+                "·点击主窗口地图选点，Esc 取消"
             } else {
                 "在主地图单击设置本机位置"
             };
@@ -1506,7 +1508,7 @@ fn draw_general(
 
 fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<SettingsAction>) {
     section(ui, "走时表", "\u{25ce}", |ui| {
-        control_row(ui, "主表（近距）", "默认 JMA2001", "\u{25ce}", |ui| {
+        control_row(ui, "主表（近·）", "默认 JMA2001", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("adv_travel_primary")
                 .selected_text(draft.travel.primary.clone())
                 .width(140.0)
@@ -1516,7 +1518,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
                 });
         });
         row_divider(ui);
-        control_row(ui, "远距回退", "主表插值失败时使用", "\u{25ce}", |ui| {
+        control_row(ui, "远·回退", "主表插值失败时使用", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("adv_travel_fallback")
                 .selected_text(draft.travel.fallback.clone())
                 .width(140.0)
@@ -1539,23 +1541,68 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
         });
     });
 
+    section(ui, "运行日志", "\u{25ce}", |ui| {
+        control_row(ui, "写入文件", "关闭后仅控制台（若有）", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.log.enabled);
+        });
+        row_divider(ui);
+        control_row(ui, "日志等级", "保存后下次启动生效；也可设 RUST_LOG", "\u{25ce}", |ui| {
+            egui::ComboBox::from_id_salt("adv_log_level")
+                .selected_text(draft.log.level.clone())
+                .width(120.0)
+                .show_ui(ui, |ui| {
+                    for lv in ["error", "warn", "info", "debug", "trace"] {
+                        ui.selectable_value(&mut draft.log.level, lv.to_string(), lv);
+                    }
+                });
+        });
+        row_divider(ui);
+        control_row(ui, "同时输出 stderr", "便携 release 无黑窗；开发构建默认已开", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.log.console);
+        });
+        row_divider(ui);
+        control_row(ui, "保留天数", "按文件修改时间清理旧日志；0=不清理", "\u{25ce}", |ui| {
+            ui.add(
+                egui::DragValue::new(&mut draft.log.keep_days)
+                    .range(0..=365)
+                    .speed(1.0),
+            );
+        });
+        row_divider(ui);
+        control_row(ui, "日志目录", "相对资源根或绝对路径", "\u{25ce}", |ui| {
+            framed_edit(ui, &mut draft.log.dir, 180.0);
+        });
+        row_divider(ui);
+        control_row(ui, "打开目录", "在资源管理器中查看 eewview.log.*", "\u{25ce}", |ui| {
+            if glass_btn(ui, "打开日志文件夹", false).clicked() {
+                *action = Some(SettingsAction::OpenLogDir);
+            }
+        });
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new("等级与目录等项保存后需重启应用才会应用到写入器。")
+                .size(12.0)
+                .color(chrome().muted),
+        );
+    });
+
     section(ui, "配置文件", "\u{25ce}", |ui| {
         if let Some(path) = AppConfig::user_config_path() {
             ui.label(
-                RichText::new(format!("用户覆盖：{}", path.display()))
+                RichText::new(format!("用·覆盖：{}", path.display()))
                     .size(12.0)
                     .color(chrome().muted),
             );
         } else {
             ui.label(
-                RichText::new("未能解析用户配置目录。")
+                RichText::new("未能解析用·配置目录。")
                     .size(12.0)
                     .color(chrome().muted),
             );
         }
         ui.add_space(6.0);
         ui.label(
-            RichText::new("WebSocket 等开发向端点请直接编辑配置文件；访问令牌不会写入覆盖文件。")
+            RichText::new("WebSocket 等开发向端点·直接编辑配置文件；访问令牌不会写入覆盖文件。")
                 .size(12.0)
                 .color(chrome().muted),
         );
@@ -1590,7 +1637,7 @@ fn draw_about(ui: &mut Ui) {
         ui.add_space(8.0);
         ui.label(
             RichText::new(
-                "跨平台地震预警与速报视监客户端。聚合多源实时情报，在地图上展示震中、\
+                "·平台地震预警与速报视监客·端。聚合多源实时情报，在地图上展示震中、\
 走时波圈与测站烈度，并提供本机倒计时与音效播报。",
             )
             .size(13.0)
@@ -1607,7 +1654,7 @@ fn draw_about(ui: &mut Ui) {
             RichText::new(
                 "\u{00b7} Jian Project API（预警 / 速报 / 测站中转）\n\
                 \u{00b7} PancakesAPI（GQ / USGS / JMA / NMEFC / CMA）\n\
-\u{00b7} Wolfx（JMA EEW、台网速报）\n\
+\u{00b7} Wolfx（all_eew 预警与速报）\n\
 \u{00b7} P2PQuake（气象厅地震情报）\n\
 \u{00b7} NIED kmoni / lmoni 原版测站图像（可选）",
             )
@@ -1623,7 +1670,7 @@ fn draw_about(ui: &mut Ui) {
         );
         ui.label(
             RichText::new(
-                "界面布局参考 RhythmQuake（已获授权）。地图标记 SVG 与部分交互参考 eewcn（已获授权）。\
+                "界面布局参考 RhythmQuake（··授权）。地图标记 SVG 与部分交互参考 eewcn（··授权）。\
 音效包 srev 采用 CC BY-SA 2.0。底图与走时表等第三方数据按其各自许可使用。",
             )
             .size(12.0)
@@ -1638,8 +1685,8 @@ fn draw_about(ui: &mut Ui) {
         );
         ui.label(
             RichText::new(
-                "本软件仅供信息展示与学习研究，不构成官方预警渠道。请以各国气象/地震主管部门发布为准；\
-紧急情况下请遵从当地防灾指引。开发者不保证数据的实时性、完整性与准确性。",
+                "本软件仅供信息展示与学习研究，不构成官方预警渠道。·以各国气象/地震主管部门发布为准；\
+紧急情况下·遵从当地防灾指引。开发者不保证数据的实时性、完整性与准确性。",
             )
             .size(12.0)
             .color(chrome().muted),

@@ -1,17 +1,23 @@
 //! EEWView（地震视监器）桌面客户端入口。
 
+// release：GUI 子系统，双击不弹控制台；debug：保留控制台便于看日志
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod logging;
+
 use anyhow::Result;
 use eframe::egui;
 use jian_audio::{AudioCue, AudioEngine, TsunamiCueKind};
 use jian_config::AppConfig;
 use jian_core::{live_wave_eews, AppSnapshot, HealthStatus, IntensityKind};
 use jian_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
-use jian_travel::{max_s_wave_spread_km, TravelEngine, Wave};
+use jian_travel::{max_s_wave_spread_km, s_wave_still_spreading, TravelEngine, Wave};
 use jian_map::{zoom_to_fit_radius_km, BasemapMode, ProjectionMode};
 use jian_ui::{MainShell, SettingsAction};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokio::runtime::Runtime;
+use tracing_appender::non_blocking::WorkerGuard;
 
 fn looks_like_resource_root(dir: &Path) -> bool {
     dir.join("assets").is_dir()
@@ -55,74 +61,30 @@ fn resolve_geodata_dir(configured: &str) -> PathBuf {
     }
 }
 
-/// 加载系统 CJK 字体链：中文优先、日文回退，避免「・」等显示为方框。
+/// 编译嵌入霞鹜文楷 Regular（约 25MB；不另嵌 Mono、不读系统字体，加快编译与启动）。
 fn install_cjk_fonts(ctx: &egui::Context) {
-    let chinese = [
-        // Windows
-        r"C:\Windows\Fonts\msyh.ttc",
-        r"C:\Windows\Fonts\simhei.ttf",
-        r"C:\Windows\Fonts\simsun.ttc",
-        r"C:\Windows\Fonts\msyhbd.ttc",
-        // macOS
-        "/System/Library/Fonts/PingFang.ttc",
-        "/System/Library/Fonts/Hiragino Sans GB.ttc",
-        // Linux
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-    ];
-    let japanese = [
-        // Windows：游ゴシック / 明朝 / ゴシック（含片假名中点・）
-        r"C:\Windows\Fonts\YuGothR.ttc",
-        r"C:\Windows\Fonts\YuGothM.ttc",
-        r"C:\Windows\Fonts\msgothic.ttc",
-        r"C:\Windows\Fonts\meiryo.ttc",
-        r"C:\Windows\Fonts\meiryob.ttc",
-        r"C:\Windows\Fonts\yugothr.ttc",
-        // macOS
-        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-        "/System/Library/Fonts/Hiragino Sans GB.ttc",
-        "/Library/Fonts/Arial Unicode.ttf",
-        // Linux
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-    ];
+    const LXGW_WENKAI: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/lxgw-wenkai-v1.522/LXGWWenKai-Regular.ttf"
+    ));
 
     let mut fonts = egui::FontDefinitions::default();
-    let mut chain: Vec<String> = Vec::new();
-
-    for (name, paths) in [("cjk_cn", &chinese[..]), ("cjk_jp", &japanese[..])] {
-        for path in paths {
-            let Ok(bytes) = std::fs::read(path) else {
-                continue;
-            };
-            fonts.font_data.insert(
-                name.to_string(),
-                egui::FontData::from_owned(bytes).into(),
-            );
-            chain.push(name.to_string());
-            tracing::info!(path, name, "CJK font loaded");
-            break;
-        }
-    }
-
-    if chain.is_empty() {
-        tracing::warn!("未找到系统 CJK 字体，界面汉字/假名可能显示为方框");
-        return;
-    }
-
+    fonts.font_data.insert(
+        "lxgw_wenkai".to_string(),
+        egui::FontData::from_static(LXGW_WENKAI).into(),
+    );
+    fonts.families.insert(
+        egui::FontFamily::Name("lxgw_wenkai".into()),
+        vec!["lxgw_wenkai".to_string()],
+    );
     if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-        for (i, name) in chain.iter().enumerate() {
-            fam.insert(i, name.clone());
-        }
+        fam.insert(0, "lxgw_wenkai".to_string());
     }
     if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-        for name in &chain {
-            fam.push(name.clone());
-        }
+        fam.insert(0, "lxgw_wenkai".to_string());
     }
     ctx.set_fonts(fonts);
+    tracing::info!(bytes = LXGW_WENKAI.len(), "embedded LXGW WenKai");
 }
 
 /// JMA intensity_level 0–9 → catalog shindo_0…7
@@ -136,17 +98,15 @@ fn shindo_file_level(level: u8) -> u8 {
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
-        )
-        .init();
-
     let root = resource_root();
-    tracing::info!(root = %root.display(), "resource root");
     let assets = assets_root();
     let cfg = AppConfig::load_merged(root.join("config/default.toml"));
+    let log_guard = logging::init_logging(&root, &cfg.log);
+    tracing::info!(
+        root = %root.display(),
+        version = env!("CARGO_PKG_VERSION"),
+        "resource root"
+    );
     let basemap = BasemapMode::resolve(&cfg.map.basemap, &cfg.ui.theme);
     let geodata_dir = resolve_geodata_dir(&cfg.map.geodata_dir);
     tracing::info!(
@@ -279,6 +239,8 @@ fn main() -> Result<()> {
         Box::new(move |cc| {
             install_cjk_fonts(&cc.egui_ctx);
             Ok(Box::new(JianApp {
+                _log_guard: log_guard,
+                resource_root: root,
                 snap,
                 shell,
                 travel,
@@ -294,6 +256,7 @@ fn main() -> Result<()> {
                 audio,
                 auto_center_pending: live,
                 last_follow_key: None,
+                last_record_follow_key: None,
                 cinema_idx: 0,
                 cinema_next_at: Instant::now(),
                 cinema_seen_key: String::new(),
@@ -311,6 +274,12 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn clear_countdown(snap: &mut AppSnapshot) {
+    snap.countdown_s = None;
+    snap.countdown_local_level = 0;
+    snap.countdown_local_text.clear();
+}
+
 fn refresh_countdown(
     snap: &mut AppSnapshot,
     travel: Option<&TravelEngine>,
@@ -321,25 +290,52 @@ fn refresh_countdown(
     let (Some(eng), Some(lat), Some(lon), Some(ev)) =
         (travel, local_lat, local_lon, snap.active.as_ref())
     else {
-        if (local_lat.is_none() || local_lon.is_none()) && snap.active.is_none() {
-            snap.countdown_s = None;
+        if local_lat.is_none() || local_lon.is_none() || snap.active.is_none() {
+            clear_countdown(snap);
         }
         return;
     };
     if ev.is_cancel || (ev.origin_ms <= 0 && elapsed.is_none()) {
-        snap.countdown_s = None;
+        clear_countdown(snap);
+        return;
+    }
+    let elapsed_s = if let Some(e) = elapsed {
+        e
+    } else if ev.origin_ms > 0 {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        ((now_ms - ev.origin_ms) as f64 / 1000.0).max(0.0)
+    } else {
+        0.0
+    };
+    // PS 波走完最大传播距离后停止并隐藏（与地图波圈同一条件）
+    if !s_wave_still_spreading(eng, ev.magnitude, ev.depth_km, elapsed_s) {
+        clear_countdown(snap);
         return;
     }
     let total = eng.eta_s_to_site(ev.longitude, ev.latitude, ev.depth_km, lon, lat);
-    let remain = if let Some(e) = elapsed {
-        (total - e).ceil() as i32
-    } else {
-        total.ceil() as i32
-    };
-    snap.countdown_s = Some(remain.max(0));
+    let remain = (total - elapsed_s).ceil() as i32;
+    // EEWCN：到达本机后倒计时隐藏（不再挂 0 秒）
+    if remain <= 0 {
+        clear_countdown(snap);
+        return;
+    }
+    let surface = jian_util::haversine_km(ev.longitude, ev.latitude, lon, lat);
+    let (lv, text) = jian_core::estimate_at_site(
+        ev.intensity_kind,
+        ev.magnitude,
+        ev.depth_km,
+        surface,
+    );
+    snap.countdown_s = Some(remain);
+    snap.countdown_local_kind = ev.intensity_kind;
+    snap.countdown_local_level = lv;
+    snap.countdown_local_text = text;
 }
 
 struct JianApp {
+    /// 保持非阻塞日志 worker 存活至退出
+    _log_guard: WorkerGuard,
+    resource_root: PathBuf,
     snap: AppSnapshot,
     shell: MainShell,
     travel: Option<TravelEngine>,
@@ -356,6 +352,7 @@ struct JianApp {
     auto_center_pending: bool,
     /// 已跟焦的预警 (event_id, serial)，避免每帧重复居中
     last_follow_key: Option<(String, u32)>,
+    last_record_follow_key: Option<String>,
     /// 多震 cinema 轮播：当前索引与下次切换时刻
     cinema_idx: usize,
     cinema_next_at: Instant,
@@ -435,16 +432,18 @@ impl eframe::App for JianApp {
                         self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
                     }
                 }
-            } else if !self.snap.eew_list.is_empty()
-                || self.started.elapsed().as_secs_f64() >= 4.0
-            {
-                // 超时仍无预警则放弃自动居中，避免空等
+            } else if self.started.elapsed().as_secs_f64() >= 4.0 {
+                // 超时无预警：改跟最新速报
                 if self.snap.eew_list.is_empty() {
+                    if let Some((lon, lat, zoom, key)) = self.snap.focus_latest_record() {
+                        self.shell.map.fly_to(lon, lat, Some(zoom), 1.0);
+                        self.last_record_follow_key = Some(key);
+                    }
                     self.auto_center_pending = false;
                 }
             }
         } else if self.cfg.ui.auto_follow_eew {
-            // GQ CinemaHandler + eewcn 多震轮播：新震立刻跳；多震按间隔切换；报数更新跟焦
+            // 多震轮播：新震立刻跳；到点切换；更新报只刷数据，不打断停留计时
             let browsing_other = self.snap.active.as_ref().is_some_and(|e| {
                 e.event_id.starts_with("record:") || e.event_id.starts_with("station:")
             });
@@ -461,7 +460,10 @@ impl eframe::App for JianApp {
                 } else if live.len() == 1 {
                     let ev = live[0];
                     let key = (ev.event_id.clone(), ev.serial);
-                    if self.last_follow_key.as_ref() != Some(&key) {
+                    let same_event = self.snap.active.as_ref().is_some_and(|a| {
+                        a.event_id == ev.event_id && a.agency == ev.agency
+                    });
+                    if !same_event {
                         let z = gq_jump_zoom(
                             ev,
                             now,
@@ -475,6 +477,10 @@ impl eframe::App for JianApp {
                         self.snap.active = Some(ev.clone());
                         self.snap.tab = jian_core::SidebarTab::Eew;
                         self.snap.overlay_mode = jian_core::OverlayMode::Wave;
+                    } else if self.last_follow_key.as_ref() != Some(&key) {
+                        // 同震更新报：刷新 active，不重飞
+                        self.last_follow_key = Some(key);
+                        self.snap.active = Some(ev.clone());
                     }
                 } else {
                     let mut jump_idx: Option<usize> = None;
@@ -492,18 +498,18 @@ impl eframe::App for JianApp {
                             }
                         }
                         if jump_idx.is_none() {
-                            jump_idx = Some(0);
+                            // 集合变化（有震结束）时夹紧索引，不立刻重飞除非当前项已消失
+                            let idx = self.cinema_idx.min(live.len() - 1);
+                            let cur_id = format!("{}|{}", live[idx].agency.0, live[idx].event_id);
+                            if self.cinema_seen_key.is_empty() || !seen_key.contains(&cur_id) {
+                                jump_idx = Some(idx);
+                            } else {
+                                self.cinema_idx = idx;
+                            }
                         }
                         self.cinema_seen_key = seen_key;
                     } else if Instant::now() >= self.cinema_next_at {
                         jump_idx = Some((self.cinema_idx + 1) % live.len());
-                    } else {
-                        let idx = self.cinema_idx.min(live.len() - 1);
-                        let ev = live[idx];
-                        let key = (ev.event_id.clone(), ev.serial);
-                        if self.last_follow_key.as_ref() != Some(&key) {
-                            jump_idx = Some(idx);
-                        }
                     }
                     if let Some(idx) = jump_idx {
                         let ev = live[idx];
@@ -522,20 +528,53 @@ impl eframe::App for JianApp {
                         self.snap.active = Some(ev.clone());
                         self.snap.tab = jian_core::SidebarTab::Eew;
                         self.snap.overlay_mode = jian_core::OverlayMode::Wave;
+                    } else {
+                        // 停留中：同步当前震中最新报文，绝不因 serial 重置计时或跳转
+                        let idx = self.cinema_idx.min(live.len() - 1);
+                        let ev = live[idx];
+                        let key = (ev.event_id.clone(), ev.serial);
+                        if self.last_follow_key.as_ref() != Some(&key)
+                            || self.snap.active.as_ref().map(|a| a.serial) != Some(ev.serial)
+                        {
+                            self.last_follow_key = Some(key);
+                            self.snap.active = Some(ev.clone());
+                            self.snap.tab = jian_core::SidebarTab::Eew;
+                            self.snap.overlay_mode = jian_core::OverlayMode::Wave;
+                        }
                     }
                 }
             }
         }
-        // 新速报：启动汇聚结束后跳转；有活跃预警时让路，避免盖过震中跟焦
+        // 海啸预报到期自动清除（注意报/警报等靠解除报文）
+        {
+            let now = chrono::Utc::now().timestamp_millis();
+            self.snap.prune_expired_tsunami(now);
+        }
+
+        // 无预警：相机始终聚焦最新一条速报
         if !self.auto_center_pending && self.started.elapsed().as_secs_f64() >= 2.5 {
-            let eew_active = self.snap.active.as_ref().is_some_and(|e| {
-                !e.event_id.starts_with("record:") && !e.event_id.starts_with("station:")
-            });
-            if eew_active {
+            let now = chrono::Utc::now().timestamp_millis();
+            let eew_live = !jian_core::live_wave_eews(&self.snap.eew_list, now, 30 * 60 * 1000)
+                .is_empty();
+            let browsing_station = self
+                .snap
+                .active
+                .as_ref()
+                .is_some_and(|e| e.event_id.starts_with("station:"));
+            if eew_live {
                 self.snap.pending_record_fly = None;
-            } else if let Some((lon, lat, zoom)) = self.snap.pending_record_fly.take() {
-                if lat.abs() > 0.01 || lon.abs() > 0.01 {
-                    self.shell.map.fly_to(lon, lat, Some(zoom), 1.0);
+                self.last_record_follow_key = None;
+            } else if !browsing_station && !self.shell.map.user_camera_override {
+                if let Some((lon, lat, zoom)) = self.snap.pending_record_fly.take() {
+                    if lat.abs() > 0.01 || lon.abs() > 0.01 {
+                        self.shell.map.fly_to(lon, lat, Some(zoom), 1.0);
+                    }
+                }
+                if let Some((lon, lat, zoom, key)) = self.snap.latest_record_camera() {
+                    if self.last_record_follow_key.as_ref() != Some(&key) {
+                        self.shell.map.fly_to(lon, lat, Some(zoom), 1.0);
+                        self.last_record_follow_key = Some(key);
+                    }
                 }
             }
         } else {
@@ -560,7 +599,7 @@ impl eframe::App for JianApp {
                     Some(elapsed),
                 );
             } else {
-                self.snap.countdown_s = None;
+                clear_countdown(&mut self.snap);
             }
         }
 
@@ -633,6 +672,19 @@ impl eframe::App for JianApp {
                     self.shell
                         .settings
                         .set_save_note("已清除内存瓦片缓存");
+                }
+                SettingsAction::OpenLogDir => {
+                    let dir = logging::resolve_log_dir(&self.resource_root, &self.cfg.log);
+                    match logging::open_log_dir(&dir) {
+                        Ok(()) => self
+                            .shell
+                            .settings
+                            .set_save_note(format!("已打开日志目录 {}", dir.display())),
+                        Err(e) => self
+                            .shell
+                            .settings
+                            .set_save_note(format!("打开日志目录失败：{e}")),
+                    }
                 }
             }
         }
