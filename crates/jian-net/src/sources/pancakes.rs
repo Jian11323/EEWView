@@ -1,19 +1,14 @@
-//! PancakesAPI（api.aloys23.link）：默认 GQ + JMA 火山；通道 `/ws/all`。
-//! 维护者：其余子源上游已关；火山情报可用。
+//! PancakesAPI（api.aloys23.link）：仅 GQ + JMA-Atom（jma_volcano）；通道 `/ws/all`。
 
 use jian_config::PancakesSourceConfig;
 use jian_core::HealthStatus;
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tokio::time::sleep;
 use tracing::{info, warn};
 
 use crate::adapter::ingest_pancakes_event;
 use crate::bus::{emit_health, NetTx};
 use crate::sources::ws::{run_ws_loop, WsLoopOpts};
-
-/// 速报类 HTTP 列表轮询间隔（秒）。
-const RECORD_POLL_SECS: u64 = 45;
 
 pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
     if !cfg.enabled {
@@ -29,21 +24,19 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
         cfg.client_id.trim().to_string()
     };
 
-    // HTTP：冷启动 / 可选速报轮询（默认 gq + 火山）
-    if needs_http(&cfg) {
+    if cfg.gq || cfg.jma_volcano {
         let cold = cfg.clone();
         let tx_http = tx.clone();
         let base_http = base.clone();
         tasks.push(tokio::spawn(async move {
-            poll_and_cold(tx_http, base_http, cold).await;
+            cold_start(tx_http, base_http, cold).await;
         }));
     }
 
-    let ws_base = cfg.ws_url.trim_end_matches('/').to_string();
-    // 公开通道 `/ws/all`；默认 ingest gq + jma_volcano。
-    if any_pancakes_subsource(&cfg) || cfg.use_all {
+    if cfg.gq || cfg.jma_volcano {
+        let ws_base = cfg.ws_url.trim_end_matches('/').to_string();
         let url = format!("{ws_base}/api/v1/alert/ws/all?clientId={client_id}");
-        info!(%url, gq = cfg.gq, use_all = cfg.use_all, "pancakes: spawn ws");
+        info!(%url, gq = cfg.gq, jma_atom = cfg.jma_volcano, "pancakes: spawn ws");
         let filter = cfg.clone();
         let tx_ws = tx.clone();
         tasks.push(tokio::spawn(async move {
@@ -68,24 +61,7 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
     tasks
 }
 
-fn any_pancakes_subsource(cfg: &PancakesSourceConfig) -> bool {
-    cfg.gq
-        || cfg.usgs
-        || cfg.jma_eew
-        || cfg.jma_eqlist
-        || cfg.nmefc
-        || cfg.nmefc_wave
-        || cfg.nmefc_surge
-        || cfg.jma_tsunami
-        || cfg.cma
-        || cfg.jma_volcano
-}
-
-fn needs_http(cfg: &PancakesSourceConfig) -> bool {
-    any_pancakes_subsource(cfg)
-}
-
-async fn poll_and_cold(tx: NetTx, base: String, cfg: PancakesSourceConfig) {
+async fn cold_start(tx: NetTx, base: String, cfg: PancakesSourceConfig) {
     let client = match reqwest::Client::builder()
         .user_agent(concat!(
             "EEWView/",
@@ -102,39 +78,14 @@ async fn poll_and_cold(tx: NetTx, base: String, cfg: PancakesSourceConfig) {
         }
     };
 
-    // 非速报：冷启动一次（默认仅 gq）
     let once: &[(&str, bool)] = &[
         ("/api/v1/alert/quake/gq", cfg.gq),
-        ("/api/v1/alert/quake/jma_eew", cfg.jma_eew),
-        ("/api/v1/alert/ocean/nmefc", cfg.nmefc),
-        ("/api/v1/alert/ocean/nmefc-wave", cfg.nmefc_wave),
-        ("/api/v1/alert/ocean/nmefc-surge", cfg.nmefc_surge),
-        ("/api/v1/alert/ocean/jma_tsunami", cfg.jma_tsunami),
-        ("/api/v1/alert/weather/cma", cfg.cma),
         ("/api/v1/alert/volcano/jma", cfg.jma_volcano),
     ];
     for (path, on) in once {
         if *on {
             fetch_path(&client, &tx, &base, path, &cfg).await;
         }
-    }
-
-    // 速报：仅当对应开关开启时周期轮询（默认全关）
-    let record_paths: &[(&str, bool)] = &[
-        ("/api/v1/alert/quake/usgs", cfg.usgs),
-        ("/api/v1/alert/quake/jma_eqlist", cfg.jma_eqlist),
-    ];
-    if !record_paths.iter().any(|(_, on)| *on) {
-        return;
-    }
-    info!(poll_secs = RECORD_POLL_SECS, "pancakes: spawn record list poll");
-    loop {
-        for (path, on) in record_paths {
-            if *on {
-                fetch_path(&client, &tx, &base, path, &cfg).await;
-            }
-        }
-        sleep(Duration::from_secs(RECORD_POLL_SECS)).await;
     }
 }
 
@@ -162,14 +113,6 @@ async fn fetch_path(
 fn source_from_path(path: &str) -> &'static str {
     match path.rsplit('/').next().unwrap_or("") {
         "gq" => "gq",
-        "usgs" => "usgs",
-        "jma_eew" => "jma_eew",
-        "jma_eqlist" => "jma_eqlist",
-        "nmefc" => "nmefc",
-        "nmefc-wave" => "nmefc-wave",
-        "nmefc-surge" => "nmefc-surge",
-        "jma_tsunami" => "jma_tsunami",
-        "cma" => "cma",
         "jma" => "jma_volcano",
         other if other.contains("volcano") => "jma_volcano",
         _ => "",
@@ -202,7 +145,11 @@ fn ingest_http_list(
         let typ = item
             .get("type")
             .and_then(|x| x.as_str())
-            .unwrap_or(default_type_for_source(&source))
+            .unwrap_or(if source == "jma_volcano" {
+                "volcano"
+            } else {
+                "earthquake"
+            })
             .to_string();
         let payload = item.get("payload").cloned().unwrap_or_else(|| item.clone());
         let envelope = serde_json::json!({
@@ -219,15 +166,5 @@ fn ingest_http_list(
     }
     if n > 0 {
         info!(source = fallback_source, n, "pancakes: http list ingested");
-    }
-}
-
-fn default_type_for_source(source: &str) -> &'static str {
-    match source {
-        "nmefc" | "jma_tsunami" => "tsunami",
-        "nmefc-wave" | "nmefc-surge" => "alert",
-        "cma" => "weather",
-        "jma_volcano" => "volcano",
-        _ => "earthquake",
     }
 }

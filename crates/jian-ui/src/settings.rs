@@ -1055,12 +1055,12 @@ fn draw_sources(
 
 
     section(ui, "PancakesAPI", "\u{25ce}", |ui| {
-        control_row(ui, "启用 Pancakes", "默认只连 GlobalQuake（gq）", "\u{26a1}", |ui| {
+        control_row(ui, "启用 Pancakes", "GlobalQuake 与 JMA-Atom", "\u{26a1}", |ui| {
             toggle(ui, &mut draft.sources.pancakes.enabled);
         });
         if draft.sources.pancakes.enabled {
             row_divider(ui);
-            control_row(ui, "GlobalQuake", "维护者：仅开 GQ；通道为 /ws/all", "\u{26a1}", |ui| {
+            control_row(ui, "GlobalQuake", "全球地震测算推送", "\u{26a1}", |ui| {
                 toggle(ui, &mut draft.sources.pancakes.gq);
             });
             row_divider(ui);
@@ -1073,49 +1073,7 @@ fn draw_sources(
                 );
             });
             row_divider(ui);
-            control_row(ui, "聚合通道 /ws/all", "兼容；与 /ws/all 同通道", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.pancakes.use_all);
-            });
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new("默认开 GQ 与 JMA 火山；其余子源上游·停。")
-                    .size(12.0)
-                    .color(chrome().muted),
-            );
-            row_divider(ui);
-            control_row(ui, "USGS", "美国地质调查局速报", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.pancakes.usgs);
-            });
-            row_divider(ui);
-            control_row(ui, "JMA EEW", "紧急地震速报", "\u{26a1}", |ui| {
-                toggle(ui, &mut draft.sources.pancakes.jma_eew);
-            });
-            row_divider(ui);
-            control_row(ui, "JMA 速报列表", "VXSE51/52/53", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.pancakes.jma_eqlist);
-            });
-            row_divider(ui);
-            control_row(ui, "NMEFC ·啸", "国家·洋环境预报中心", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.pancakes.nmefc);
-            });
-            row_divider(ui);
-            control_row(ui, "NMEFC ·浪", "·浪警报", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.pancakes.nmefc_wave);
-            });
-            row_divider(ui);
-            control_row(ui, "NMEFC 风暴潮", "风暴潮警报", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.pancakes.nmefc_surge);
-            });
-            row_divider(ui);
-            control_row(ui, "JMA ·啸", "津波预报/注意报/警报", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.pancakes.jma_tsunami);
-            });
-            row_divider(ui);
-            control_row(ui, "CMA 气象", "中国气象局预警", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.pancakes.cma);
-            });
-            row_divider(ui);
-            control_row(ui, "JMA 火山", "火山活动情报", "\u{25ce}", |ui| {
+            control_row(ui, "JMA-Atom", "火山活动情报", "\u{25ce}", |ui| {
                 toggle(ui, &mut draft.sources.pancakes.jma_volcano);
             });
         }
@@ -1665,7 +1623,7 @@ fn draw_about(ui: &mut Ui) {
         ui.label(
             RichText::new(
                 "\u{00b7} Jian Project API（预警 / 速报 / 测站中转）\n\
-                \u{00b7} PancakesAPI（默认 GQ + JMA 火山）\n\
+                \u{00b7} PancakesAPI（GQ + JMA-Atom）\n\
 \u{00b7} Wolfx（all_eew 预警与速报）\n\
 \u{00b7} P2PQuake（气象厅地震情报）\n\
 \u{00b7} NIED kmoni / lmoni 原版测站图像（可选）",

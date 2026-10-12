@@ -155,14 +155,11 @@ pub struct SourcesConfig {
 }
 
 
-/// PancakesAPI：默认 GlobalQuake + JMA 火山；其余子源上游已关。
+/// PancakesAPI：仅 GlobalQuake（gq）与 JMA-Atom（上游 source=`jma_volcano`）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PancakesSourceConfig {
     #[serde(default)]
     pub enabled: bool,
-    /// 兼容项；通道均为 `/ws/all`，按各子源开关 ingest
-    #[serde(default)]
-    pub use_all: bool,
     #[serde(default = "default_pancakes_base")]
     pub base_url: String,
     #[serde(default = "default_pancakes_ws")]
@@ -174,25 +171,8 @@ pub struct PancakesSourceConfig {
     pub gq_min_magnitude: f64,
     #[serde(default = "default_true")]
     pub gq: bool,
-    /// 以下子源默认关（维护者：上游已停）；保留开关便于兼容
-    #[serde(default)]
-    pub usgs: bool,
-    #[serde(default)]
-    pub jma_eew: bool,
-    #[serde(default)]
-    pub jma_eqlist: bool,
-    #[serde(default)]
-    pub nmefc: bool,
-    #[serde(default)]
-    pub nmefc_wave: bool,
-    #[serde(default)]
-    pub nmefc_surge: bool,
-    #[serde(default)]
-    pub jma_tsunami: bool,
-    #[serde(default)]
-    pub cma: bool,
-    /// JMA 火山（维护者：可用）
-    #[serde(default = "default_true")]
+    /// JMA-Atom（火山情报；上游 `jma_volcano`）
+    #[serde(default = "default_true", alias = "jma_atom")]
     pub jma_volcano: bool,
 }
 
@@ -200,20 +180,11 @@ impl Default for PancakesSourceConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            use_all: false,
             base_url: default_pancakes_base(),
             ws_url: default_pancakes_ws(),
             client_id: default_pancakes_client(),
             gq_min_magnitude: default_gq_min_mag(),
             gq: true,
-            usgs: false,
-            jma_eew: false,
-            jma_eqlist: false,
-            nmefc: false,
-            nmefc_wave: false,
-            nmefc_surge: false,
-            jma_tsunami: false,
-            cma: false,
             jma_volcano: true,
         }
     }
@@ -628,20 +599,11 @@ impl AppConfig {
             && self.sources.p2pquake.ws_url == other.sources.p2pquake.ws_url
             && self.sources.p2pquake.poll_secs == other.sources.p2pquake.poll_secs
             && self.sources.pancakes.enabled == other.sources.pancakes.enabled
-            && self.sources.pancakes.use_all == other.sources.pancakes.use_all
             && self.sources.pancakes.base_url == other.sources.pancakes.base_url
             && self.sources.pancakes.ws_url == other.sources.pancakes.ws_url
             && self.sources.pancakes.client_id == other.sources.pancakes.client_id
             && self.sources.pancakes.gq_min_magnitude == other.sources.pancakes.gq_min_magnitude
             && self.sources.pancakes.gq == other.sources.pancakes.gq
-            && self.sources.pancakes.usgs == other.sources.pancakes.usgs
-            && self.sources.pancakes.jma_eew == other.sources.pancakes.jma_eew
-            && self.sources.pancakes.jma_eqlist == other.sources.pancakes.jma_eqlist
-            && self.sources.pancakes.nmefc == other.sources.pancakes.nmefc
-            && self.sources.pancakes.nmefc_wave == other.sources.pancakes.nmefc_wave
-            && self.sources.pancakes.nmefc_surge == other.sources.pancakes.nmefc_surge
-            && self.sources.pancakes.jma_tsunami == other.sources.pancakes.jma_tsunami
-            && self.sources.pancakes.cma == other.sources.pancakes.cma
             && self.sources.pancakes.jma_volcano == other.sources.pancakes.jma_volcano
     }
 }

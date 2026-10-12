@@ -1333,7 +1333,7 @@ fn draw_sidebar(
                                         ui,
                                         p,
                                         "暂无火山情报",
-                                        "启用 Pancakes JMA 火山后，降灰预报等会出现在此列表。",
+                                        "启用 Pancakes JMA-Atom 后，降灰预报等会出现在此列表。",
                                     );
                                 }
                                 for (i, v) in snap.volcanoes.iter().enumerate() {
