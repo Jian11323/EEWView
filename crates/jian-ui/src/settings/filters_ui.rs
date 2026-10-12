@@ -15,34 +15,35 @@ fn mag_label(v: f64) -> String {
     }
 }
 
-pub fn draw_record_filters(ui: &mut Ui, draft: &mut AppConfig) {
-    section(ui, "信息事件源开关", "\u{25ce}", |ui| {
-        ui.label(
-            RichText::new("各机构速报独立开关；关闭后该源整条丢弃。与下方震级阈值无关。")
-                .size(12.0)
-                .color(muted()),
-        );
-        ui.add_space(10.0);
-        let mut first = true;
-        for fam in RECORD_FILTER_FAMILIES {
-            if !first {
-                row_divider(ui);
-            }
-            first = false;
-            let key = fam.as_filter_key();
-            let mut on = draft.filters.record_source_enabled(key);
-            let subtitle = if *fam == AgencyFamily::Other {
-                "未登记机构的信息事件；默认关闭"
-            } else {
-                fam.as_filter_key()
-            };
-            control_row(ui, fam.display_name(), subtitle, "\u{25ce}", |ui| {
-                toggle(ui, &mut on);
-            });
-            draft.filters.set_record_source_enabled(key, on);
+/// 各机构速报开关（挂在 Jian Project 区内，不再单独成块）。
+pub fn draw_record_source_switches(ui: &mut Ui, draft: &mut AppConfig) {
+    ui.label(
+        RichText::new("各机构速报独立开关；关闭后该源整条丢弃。与下方震级阈值无关。")
+            .size(12.0)
+            .color(muted()),
+    );
+    ui.add_space(10.0);
+    let mut first = true;
+    for fam in RECORD_FILTER_FAMILIES {
+        if !first {
+            row_divider(ui);
         }
-    });
+        first = false;
+        let key = fam.as_filter_key();
+        let mut on = draft.filters.record_source_enabled(key);
+        let subtitle = if *fam == AgencyFamily::Other {
+            "未登记机构的信息事件；默认关闭"
+        } else {
+            fam.as_filter_key()
+        };
+        control_row(ui, fam.display_name(), subtitle, "\u{25ce}", |ui| {
+            toggle(ui, &mut on);
+        });
+        draft.filters.set_record_source_enabled(key, on);
+    }
+}
 
+pub fn draw_record_mag_filters(ui: &mut Ui, draft: &mut AppConfig) {
     section(ui, "信息事件震级过滤", "\u{25ce}", |ui| {
         ui.label(
             RichText::new("仅按震级阈值过滤已开启的源：不过滤，或最低震级。白名单可绕过震级，不能绕过已关闭的源开关。")

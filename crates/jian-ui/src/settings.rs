@@ -350,22 +350,18 @@ impl SettingsSession {
                 }
             });
 
-        // 限制在主窗口内；固定默认尺寸上限，内容只用 max 约束，避免 avail 反馈抬升
+        // 定死尺寸：禁止内容/avail 反馈抬升（先长高再拉宽的根因）
         let max_w = (screen.width() - 48.0).clamp(400.0, 1100.0);
         let max_h = (screen.height() - 48.0).clamp(320.0, 720.0);
-        let def_w = 960.0_f32.min(max_w);
-        let def_h = 600.0_f32.min(max_h);
-        let min_w = 720.0_f32.min(max_w);
-        let min_h = 480.0_f32.min(max_h);
+        let win_w = 960.0_f32.min(max_w);
+        let win_h = 600.0_f32.min(max_h);
 
         let mut still_open = self.open;
         egui::Window::new("EEW View \u{00b7} 设置")
             .id(egui::Id::new(("eewview_settings_embedded", self.open_gen)))
             .open(&mut still_open)
-            .default_size([def_w, def_h])
-            .min_size([min_w, min_h])
-            .max_size([max_w, max_h])
-            .resizable(true)
+            .fixed_size([win_w, win_h])
+            .resizable(false)
             .collapsible(false)
             .constrain(true)
             .pivot(egui::Align2::CENTER_CENTER)
@@ -379,9 +375,8 @@ impl SettingsSession {
                     .corner_radius(14.0),
             )
             .show(ctx, |ui| {
-                // 锁死本帧可用区：只设 max，绝不按 avail 抬 min（否则会逐帧线性撑大）
-                let panel = ui.available_size();
-                ui.set_max_size(panel);
+                ui.set_min_size(Vec2::new(win_w, win_h));
+                ui.set_max_size(Vec2::new(win_w, win_h));
                 draw_shell(
                     ui,
                     self,
@@ -854,8 +849,8 @@ pub(super) fn section(ui: &mut Ui, title: &str, glyph: &str, add: impl FnOnce(&m
 
 pub(super) fn row_divider(ui: &mut Ui) {
     ui.add_space(10.0);
-    let w = ui.available_width();
-    let (r, _) = ui.allocate_exact_size(Vec2::new(w, 1.0), Sense::hover());
+    let w = ui.available_width().max(1.0);
+    let (r, _) = ui.allocate_exact_size(Vec2::new(w.min(900.0), 1.0), Sense::hover());
     ui.painter().rect_filled(r, 0.0, chrome().divider);
     ui.add_space(10.0);
 }
@@ -881,8 +876,8 @@ pub(super) fn control_row(
         });
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.set_min_width(220.0);
-            ui.set_max_width(330.0);
+            // 禁止 set_min_width：会把窗体逐帧撑宽
+            ui.set_max_width(280.0);
             right(ui);
         });
     });
@@ -1084,13 +1079,18 @@ fn draw_sources(
                     .color(chrome().muted),
             );
         }
-        ui.add_space(8.0);
+        ui.add_space(10.0);
         ui.label(
-            RichText::new("预警子源开关在本区；各机构速报开关见下方「信息事件源开关」，震级阈值见「信息事件震级过滤」。")
-                .size(12.0)
-                .color(chrome().muted),
+            RichText::new("速报（信息事件）源开关")
+                .strong()
+                .size(14.0)
+                .color(chrome().text),
         );
+        ui.add_space(6.0);
+        filters_ui::draw_record_source_switches(ui, draft);
     });
+
+    filters_ui::draw_record_mag_filters(ui, draft);
 
     section(ui, "Wolfx", "\u{25ce}", |ui| {
         control_row(ui, "启用 Wolfx", "连接 Wolfx 通道", "\u{26a1}", |ui| {
@@ -1231,8 +1231,6 @@ fn draw_sources(
         });
     });
 
-
-    filters_ui::draw_record_filters(ui, draft);
 
     exchange
 }

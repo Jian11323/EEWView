@@ -242,14 +242,14 @@ impl MainShell {
                         };
                         let r = s_km
                             .min(max_s_wave_spread_km(ev.magnitude))
-                            .max(18.0);
+                            .max(8.0);
                         let z = zoom_to_fit_radius_km(
                             ev.latitude,
                             r,
                             map_rect.width().min(map_rect.height()),
-                            0.52,
+                            0.34,
                         )
-                        .clamp(8.0, 12.5);
+                        .clamp(9.0, 13.8);
                         self.map.apply_linear_zoom_out(z, 0.10);
                         ctx.request_repaint_after(std::time::Duration::from_millis(
                             cfg.performance.repaint_interval_ms(),
@@ -266,7 +266,7 @@ impl MainShell {
                 if cfg.ui.show_legend {
                     draw_legend_bar(ui, &p);
                 }
-                draw_countdown_hud(ui, &p, snap, self.show_nied_clock);
+                draw_countdown_hud(ui, &p, snap, self.show_nied_clock, map_rect);
             });
 
         if let Some(act) = side_action {
@@ -321,11 +321,11 @@ impl MainShell {
                                 self.map.user_camera_override = true;
                             }
                             SidebarTab::Station => {
-                                self.map.fly_to(lon, lat, Some(zoom.max(8.5)), 0.7);
+                                self.map.fly_to(lon, lat, Some(zoom.max(9.5)), 0.7);
                                 self.map.user_camera_override = true;
                             }
                             SidebarTab::Volcano => {
-                                self.map.fly_to(lon, lat, Some(zoom.max(7.5)), 0.85);
+                                self.map.fly_to(lon, lat, Some(zoom.max(9.0)), 0.85);
                                 self.map.user_camera_override = true;
                             }
                         }
@@ -1014,7 +1014,13 @@ fn draw_legend_bar(ui: &mut Ui, p: &ThemePalette) {
         });
 }
 
-fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_nied: bool) {
+fn draw_countdown_hud(
+    ui: &mut Ui,
+    p: &ThemePalette,
+    snap: &AppSnapshot,
+    show_nied: bool,
+    map_rect: egui::Rect,
+) {
     let local = Local::now();
     let clock = local.format("%Y/%m/%d %H:%M:%S").to_string();
     let jst_clock = if show_nied {
@@ -1029,10 +1035,10 @@ fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_ni
         None
     };
 
-    // 留足右边/底边距，避免 BST 与时间贴边裁切
-    let br = ui.max_rect().right_bottom() + Vec2::new(-14.0, -12.0);
-    let hud_w = 340.0_f32;
-    let hud_h = if snap.countdown_s.is_some() { 148.0 } else { 88.0 };
+    // 贴地图视口右下角（勿用 ui.max_rect，易被其它分配挤偏）
+    let br = map_rect.right_bottom() + Vec2::new(-6.0, -6.0);
+    let hud_w = 300.0_f32;
+    let hud_h = if snap.countdown_s.is_some() { 148.0 } else { 78.0 };
     let rect = egui::Rect::from_min_size(
         egui::pos2(br.x - hud_w, br.y - hud_h),
         Vec2::new(hud_w, hud_h),

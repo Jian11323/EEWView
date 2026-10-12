@@ -12,7 +12,9 @@ pub use agency::{
     agency_bracket, agency_family, cea_pr_agency_id, cea_pr_province, eew_feed_priority,
     place_with_agency, AgencyFamily, EEW_FILTER_FAMILIES, RECORD_FILTER_FAMILIES,
 };
-pub use tts::{agency_tts_name, build_eew_tts_script, build_record_tts_script};
+pub use tts::{
+    agency_tts_name, build_eew_tts_script, build_record_tts_script, should_play_eew_tts,
+};
 pub use estimate::{
     calc_csis, calc_jma_instrumental, estimate_at_site, estimate_epicentral, fill_intensity,
     hypocentral_km,

@@ -10,9 +10,12 @@ use eframe::egui;
 use jian_audio::{speak_async, AudioCue, AudioEngine, TsunamiCueKind};
 use jian_config::AppConfig;
 use jian_core::{
-    agency_family, build_eew_tts_script, build_record_tts_script, live_wave_eews_spread,
-    AgencyFamily, AppSnapshot, HealthStatus, IntensityKind,
+    agency_family, build_eew_tts_script, build_record_tts_script, eew_sidebar_entries,
+    eew_sidebar_group_key, eew_wave_active_spread, latest_eew_per_source, live_wave_eews_spread,
+    same_eew_event, should_play_eew_tts, AgencyFamily, AppSnapshot, EewReport, HealthStatus,
+    IntensityKind,
 };
+use std::collections::HashMap;
 use jian_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
 use jian_travel::{max_s_wave_spread_km, s_wave_still_spreading, TravelEngine, Wave};
 use jian_map::{zoom_to_fit_radius_km, BasemapMode, ProjectionMode};
@@ -265,6 +268,7 @@ fn main() -> Result<()> {
                 auto_center_pending: live,
                 last_follow_key: None,
                 last_record_follow_key: None,
+                last_eew_tts: HashMap::new(),
                 cinema_idx: 0,
                 cinema_next_at: Instant::now(),
                 cinema_seen_key: String::new(),
@@ -402,6 +406,8 @@ struct JianApp {
     /// 已跟焦的预警 (event_id, serial)，避免每帧重复居中
     last_follow_key: Option<(String, u32)>,
     last_record_follow_key: Option<String>,
+    /// 各侧栏源槽上次已播 TTS 的报文（对齐 eewcn last_report_data_dict）
+    last_eew_tts: HashMap<String, EewReport>,
     /// 多震 cinema 轮播：当前索引与下次切换时刻
     cinema_idx: usize,
     cinema_next_at: Instant,
@@ -421,6 +427,10 @@ impl eframe::App for JianApp {
 
         if let Some(rx) = self.net_rx.as_mut() {
             while let Ok(ev) = rx.try_recv() {
+                let eew_for_tts = match &ev {
+                    NetEvent::Eew(report) => Some(report.clone()),
+                    _ => None,
+                };
                 if let NetEvent::Eew(ref report) = ev {
                     // SREV 仅 JMA（对齐要石：issue/update/final/cancel + caution/warn）
                     if agency_family(&report.agency.0) == AgencyFamily::Jma {
@@ -439,15 +449,37 @@ impl eframe::App for JianApp {
                             );
                         }
                     }
-                    if self.cfg.audio.tts_enabled && !self.cfg.audio.mute && !report.is_cancel {
-                        speak_async(build_eew_tts_script(report));
-                    }
                 }
                 jian_net::apply_event_filtered(
                     &mut self.snap,
                     ev,
                     Some(&self.cfg.filters),
                 );
+                // 预警 TTS：只读侧栏当前展示条 + eewcn 内容去重（列表显示啥读啥）
+                if let Some(report) = eew_for_tts {
+                    if self.cfg.audio.tts_enabled
+                        && !self.cfg.audio.mute
+                        && !report.is_cancel
+                    {
+                        if let Some((_, shown)) = eew_sidebar_entries(&self.snap.eew_list)
+                            .into_iter()
+                            .find(|(_, e)| same_eew_event(e, &report))
+                        {
+                            // 被 upsert 拒绝的低优先级报不读
+                            let accepted = shown.serial == report.serial
+                                && (shown.magnitude - report.magnitude).abs() < 0.05
+                                && shown.agency.0 == report.agency.0;
+                            if accepted {
+                                let slot = eew_sidebar_group_key(&shown.agency.0);
+                                let last = self.last_eew_tts.get(&slot);
+                                if should_play_eew_tts(last, shown) {
+                                    speak_async(build_eew_tts_script(shown));
+                                    self.last_eew_tts.insert(slot, shown.clone());
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -492,14 +524,14 @@ impl eframe::App for JianApp {
                         };
                         let r = s_km
                             .min(max_s_wave_spread_km(ev.magnitude))
-                            .max(18.0);
+                            .max(8.0);
                         zoom_to_fit_radius_km(
                             ev.latitude,
                             r,
                             self.shell.map.last_viewport_min_px,
-                            0.52,
+                            0.34,
                         )
-                        .clamp(8.0, 12.5)
+                        .clamp(9.0, 13.8)
                     } else {
                         8.5
                     };
@@ -528,7 +560,11 @@ impl eframe::App for JianApp {
                 .as_ref()
                 .is_some_and(|e| e.event_id.starts_with("station:"));
             let now = chrono::Utc::now().timestamp_millis();
-            let live = live_wave_eews_spread(&self.snap.eew_list, now, &self.snap.wave_spread_km);
+            // 跟焦/轮播只认侧栏源槽最新一条（与列表、TTS 一致；多 GQ 不再各自乱跳）
+            let live: Vec<&EewReport> = latest_eew_per_source(&self.snap.eew_list)
+                .into_iter()
+                .filter(|e| eew_wave_active_spread(e, now, &self.snap.wave_spread_km))
+                .collect();
             // 新预警必须打断测站浏览；仅轮播停留时保留测站锁定
             let allow_follow = !browsing_station || !live.is_empty();
             if allow_follow {
@@ -1033,19 +1069,19 @@ fn gq_jump_zoom(
     } else {
         elapsed * 5.0
     };
-    // 视野再拉近：S 圈约占短边 52%（越小越近）；早期最小半径也收紧
+    // 视野再拉近：S 圈约占短边 34%（越小越近）
     let r = s_km
         .min(max_s_wave_spread_km(ev.magnitude))
-        .max(12.0);
-    let fit_s = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.52);
+        .max(8.0);
+    let fit_s = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.34);
     let age_min = if ev.origin_ms > 0 {
         ((now_ms - ev.origin_ms) as f64 / 60_000.0).max(0.0)
     } else {
         0.0
     };
     let scroll = (age_min / 5.0).clamp(0.05, 1.2);
-    let prefer = (13.2 - scroll * 1.6).clamp(8.2, 12.5);
-    prefer.min(fit_s).clamp(8.0, 12.5)
+    let prefer = (14.5 - scroll * 1.4).clamp(9.2, 13.8);
+    prefer.min(fit_s).clamp(9.0, 13.8)
 }
 
 fn tsunami_audio_grade(grade: &str) -> u8 {

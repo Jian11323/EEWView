@@ -166,6 +166,37 @@ fn intensity_phrase(kind: IntensityKind, text: &str, level: u8, eew_style: bool)
     }
 }
 
+/// 对齐 eewcn `should_play_eew_tts`：同槽内容未变则不重读。
+pub fn should_play_eew_tts(last: Option<&EewReport>, data: &EewReport) -> bool {
+    let Some(last) = last else {
+        return true;
+    };
+    if last.event_id != data.event_id {
+        return true;
+    }
+    if (last.origin_ms - data.origin_ms).abs() > 10_000 {
+        return true;
+    }
+    if last.place != data.place {
+        return true;
+    }
+    if last.max_intensity_text != data.max_intensity_text
+        || last.intensity_level != data.intensity_level
+    {
+        return true;
+    }
+    if last.serial != data.serial {
+        return true;
+    }
+    if (last.magnitude - data.magnitude).abs() > 0.01 {
+        return true;
+    }
+    if (last.depth_km as i32) != (data.depth_km as i32) {
+        return true;
+    }
+    false
+}
+
 /// 预警 TTS：`source[预警]第N报，place发生M级地震。预估最大烈度/推定最大震度…`
 pub fn build_eew_tts_script(ev: &EewReport) -> String {
     let src = agency_tts_name(&ev.agency.0, true, ev.is_warn);
@@ -248,6 +279,33 @@ pub fn build_record_tts_script(rec: &EqRecord) -> String {
 mod tests {
     use super::*;
     use crate::AgencyId;
+
+    #[test]
+    fn should_play_skips_identical_update() {
+        let ev = EewReport {
+            agency: AgencyId("gq".into()),
+            event_id: "gq-1".into(),
+            serial: 6,
+            place: "阿拉斯加州南部".into(),
+            magnitude: 2.1,
+            depth_km: 9.0,
+            latitude: 60.0,
+            longitude: -150.0,
+            origin_ms: 1_700_000_000_000,
+            max_intensity_text: "1".into(),
+            intensity_kind: IntensityKind::CnIntensity,
+            intensity_level: 1,
+            is_final: false,
+            is_cancel: false,
+            is_assumption: false,
+            is_warn: false,
+            final_at_ms: 0,
+        };
+        assert!(!should_play_eew_tts(Some(&ev), &ev));
+        let mut next = ev.clone();
+        next.serial = 7;
+        assert!(should_play_eew_tts(Some(&ev), &next));
+    }
 
     #[test]
     fn jma_eew_no_extra_yujing() {
