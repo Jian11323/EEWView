@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub ui: UiConfig,
+    #[serde(default)]
+    pub performance: PerformanceConfig,
     pub map: MapConfig,
     pub audio: AudioConfig,
     pub travel: TravelConfig,
@@ -91,6 +93,40 @@ pub struct UiConfig {
     pub show_volcanoes: bool,
 }
 
+/// 渲染设备与性能档位（改渲染后端需重启后生效）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceConfig {
+    /// `cpu` = 软渲染；`gpu` = 硬件加速
+    #[serde(default = "default_perf_device")]
+    pub device: String,
+    /// GPU API：`opengl` | `vulkan`（仅 device=gpu）
+    #[serde(default = "default_perf_gpu_api")]
+    pub gpu_api: String,
+    /// `eco` 节能 | `normal` 正常 | `extreme` 极致
+    #[serde(default = "default_perf_profile")]
+    pub profile: String,
+}
+
+fn default_perf_device() -> String {
+    "gpu".into()
+}
+fn default_perf_gpu_api() -> String {
+    "vulkan".into()
+}
+fn default_perf_profile() -> String {
+    "normal".into()
+}
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            device: default_perf_device(),
+            gpu_api: default_perf_gpu_api(),
+            profile: default_perf_profile(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MapConfig {
     /// 底图：`vector`（默认 GeoJSON）| `tiles`（XYZ 瓦片）| `both`（瓦片+矢量边界）
@@ -131,10 +167,36 @@ pub struct AudioConfig {
     pub tts_enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 自定义震级区间 → 最大 S 波传播距离。
+/// 兼容旧键 `magnitude`（视为最小震级，最大默认为 9.5）。
+#[derive(Debug, Clone, Serialize)]
 pub struct MagSpreadPoint {
-    pub magnitude: f64,
+    pub min_magnitude: f64,
+    pub max_magnitude: f64,
     pub max_km: f64,
+}
+
+impl<'de> serde::Deserialize<'de> for MagSpreadPoint {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Raw {
+            min_magnitude: Option<f64>,
+            max_magnitude: Option<f64>,
+            magnitude: Option<f64>,
+            max_km: f64,
+        }
+        let r = Raw::deserialize(deserializer)?;
+        let min_m = r
+            .min_magnitude
+            .or(r.magnitude)
+            .ok_or_else(|| serde::de::Error::missing_field("min_magnitude"))?;
+        let max_m = r.max_magnitude.unwrap_or(9.5);
+        Ok(Self {
+            min_magnitude: min_m,
+            max_magnitude: max_m,
+            max_km: r.max_km,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,7 +204,7 @@ pub struct TravelConfig {
     pub primary: String,
     pub fallback: String,
     pub linear_last_resort: bool,
-    /// 震级→最大 S 波传播距离（km）；空则用内置表
+    /// 震级区间→最大 S 波传播距离（km）；空则用内置表
     #[serde(default)]
     pub mag_spread_km: Vec<MagSpreadPoint>,
 }
@@ -440,6 +502,7 @@ impl Default for AppConfig {
                 show_legend: true,
                 show_volcanoes: true,
             },
+            performance: PerformanceConfig::default(),
             map: MapConfig {
                 basemap: default_basemap(),
                 projection: default_projection(),

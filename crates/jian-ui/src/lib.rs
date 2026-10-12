@@ -513,10 +513,30 @@ fn draw_map_load_banner(ui: &mut Ui, p: &ThemePalette, state: BasemapLoadState, 
 /// 左上预警框与右上实时震度卡共用顶边。
 const OVERLAY_TOP_Y: f32 = 12.0;
 
-/// 左上角堆叠条：仍在传播的预警（EEWCN 向下堆叠，不切换单条）。
+/// 左上预警条：GQ 只保留当前焦点一条（镜头切换）；其余数据源仍向下堆叠。
 fn header_live_eews(snap: &AppSnapshot) -> Vec<&jian_core::EewReport> {
     let now_ms = chrono::Utc::now().timestamp_millis();
-    live_wave_eews_spread(&snap.eew_list, now_ms, &snap.wave_spread_km)
+    let live = live_wave_eews_spread(&snap.eew_list, now_ms, &snap.wave_spread_km);
+    let mut gq = Vec::new();
+    let mut others = Vec::new();
+    for e in live {
+        if jian_core::agency_family(&e.agency.0) == jian_core::AgencyFamily::Gq {
+            gq.push(e);
+        } else {
+            others.push(e);
+        }
+    }
+    let mut out = Vec::new();
+    if !gq.is_empty() {
+        let focused = snap.active.as_ref().and_then(|a| {
+            gq.iter()
+                .copied()
+                .find(|e| e.agency.0 == a.agency.0 && e.event_id == a.event_id)
+        });
+        out.push(focused.unwrap_or(gq[0]));
+    }
+    out.extend(others);
+    out
 }
 
 /// 左上角预警条总高度（海啸条避让）。

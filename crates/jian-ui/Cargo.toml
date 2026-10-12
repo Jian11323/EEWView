@@ -14,3 +14,4 @@ jian-config = { workspace = true }
 jian-map = { workspace = true }
 jian-travel = { workspace = true }
 jian-net = { workspace = true }
+jian-util = { workspace = true }

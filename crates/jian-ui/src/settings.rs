@@ -211,6 +211,10 @@ pub struct SettingsSession {
     pub map_pick: Option<MapPickKind>,
     /// 下一帧用主地图中心写入默认视口
     pub capture_view: bool,
+    /// 打开时刻（忽略短时虚假 close）
+    opened_at: Option<std::time::Instant>,
+    /// 性能诊断文案
+    perf_diag: Option<String>,
 }
 
 impl Default for SettingsSession {
@@ -225,6 +229,8 @@ impl Default for SettingsSession {
             auth_busy: false,
             map_pick: None,
             capture_view: false,
+            opened_at: None,
+            perf_diag: None,
         }
     }
 }
@@ -239,6 +245,8 @@ impl SettingsSession {
         self.auth_busy = false;
         self.map_pick = None;
         self.capture_view = false;
+        self.opened_at = Some(std::time::Instant::now());
+        self.perf_diag = None;
     }
 
     pub fn set_save_note(&mut self, note: impl Into<String>) {
@@ -248,6 +256,7 @@ impl SettingsSession {
     pub fn close_after_save(&mut self) {
         self.open = false;
         self.draft = None;
+        self.opened_at = None;
     }
 
     /// 用主地图当前中心写入默认视口
@@ -301,104 +310,56 @@ impl SettingsSession {
             self.draft = Some(live.clone());
         }
 
-        ctx.set_embed_viewports(false);
-
         let mut action = None;
         let mut restore = false;
         let mut do_exchange = false;
         let mut close_requested = false;
 
-        let viewport_id = egui::ViewportId::from_hash_of("eewview_settings");
-        ctx.show_viewport_immediate(
-            viewport_id,
-            {
-                let mut vb = egui::ViewportBuilder::default()
-                    .with_title("EEW View \u{00b7} 设置")
-                    // 对齐 RQ 原型约 1180x660 比例，略收以适应常见桌面
-                    .with_inner_size([1080.0, 640.0])
-                    .with_min_inner_size([860.0, 520.0])
-                    .with_max_inner_size([1280.0, 900.0])
-                    .with_resizable(true);
-                if let Some(icon) = crate::app_icon_data() {
-                    vb = vb.with_icon(icon);
-                }
-                vb
-            },
-            |ctx, class| {
-                if ctx.input(|i| i.viewport().close_requested()) {
-                    close_requested = true;
-                }
+        // 主窗口内嵌设置窗：避免独立 viewport 在部分环境下点不开
+        let theme_key = self
+            .draft
+            .as_ref()
+            .map(|d| d.ui.theme.as_str())
+            .unwrap_or("dark");
+        let c = SettingsChrome::for_theme(theme_key);
+        set_chrome(c);
 
-                let theme_key = self
-                    .draft
-                    .as_ref()
-                    .map(|d| d.ui.theme.as_str())
-                    .unwrap_or("dark");
-                let c = SettingsChrome::for_theme(theme_key);
-                set_chrome(c);
-                let light = theme_key.eq_ignore_ascii_case("light");
-                let mut visuals = if light {
-                    egui::Visuals::light()
-                } else {
-                    egui::Visuals::dark()
-                };
-                visuals.dark_mode = !light;
-                visuals.override_text_color = Some(c.text);
-                visuals.panel_fill = c.page_bg;
-                visuals.window_fill = c.page_bg;
-                visuals.extreme_bg_color = c.page_bg;
-                visuals.widgets.noninteractive.fg_stroke.color = c.text70;
-                visuals.widgets.inactive.fg_stroke.color = c.text70;
-                visuals.widgets.hovered.fg_stroke.color = c.text;
-                visuals.widgets.active.fg_stroke.color = c.text;
-                visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(
-                    c.accent.r(),
-                    c.accent.g(),
-                    c.accent.b(),
-                    60,
+        egui::Window::new("EEW View \u{00b7} 设置")
+            .id(egui::Id::new("eewview_settings_embedded"))
+            .default_size([1080.0, 640.0])
+            .min_size([860.0, 520.0])
+            .resizable(true)
+            .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(ctx.screen_rect().center())
+            .order(egui::Order::Foreground)
+            .frame(
+                Frame::NONE
+                    .fill(chrome().page_bg)
+                    .stroke(Stroke::new(1.0_f32, chrome().border))
+                    .inner_margin(Margin::ZERO)
+                    .corner_radius(14.0),
+            )
+            .show(ctx, |ui| {
+                draw_shell(
+                    ui,
+                    self,
+                    health,
+                    &mut action,
+                    &mut restore,
+                    &mut do_exchange,
                 );
-                ctx.set_visuals(visuals);
+            });
 
-                if class == egui::ViewportClass::Embedded {
-                    egui::Window::new("设置")
-                        .id(egui::Id::new("eewview_settings_embedded"))
-                        .default_size([1080.0, 620.0])
-                        .min_size([860.0, 500.0])
-                        .resizable(true)
-                        .collapsible(false)
-                        .frame(
-                            Frame::NONE
-                                .fill(chrome().page_bg)
-                                .stroke(Stroke::new(1.0_f32, chrome().border))
-                                .inner_margin(Margin::ZERO)
-                                .corner_radius(14.0),
-                        )
-                        .show(ctx, |ui| {
-                            draw_shell(
-                                ui,
-                                self,
-                                health,
-                                &mut action,
-                                &mut restore,
-                                &mut do_exchange,
-                            );
-                        });
-                } else {
-                    egui::CentralPanel::default()
-                        .frame(Frame::NONE.fill(chrome().page_bg).inner_margin(Margin::ZERO))
-                        .show(ctx, |ui| {
-                            draw_shell(
-                                ui,
-                                self,
-                                health,
-                                &mut action,
-                                &mut restore,
-                                &mut do_exchange,
-                            );
-                        });
-                }
-            },
-        );
+        // Esc 关闭（打开后短暂忽略）；选点模式留给主界面 Esc
+        let grace_ok = self
+            .opened_at
+            .map(|t0| t0.elapsed().as_millis() > 400)
+            .unwrap_or(true);
+        if grace_ok && self.map_pick.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            close_requested = true;
+        }
+
 
         if do_exchange {
             self.auth_busy = true;
@@ -443,6 +404,7 @@ impl SettingsSession {
         if close_requested {
             self.open = false;
             self.draft = None;
+            self.opened_at = None;
             return Some(SettingsAction::Cancelled);
         }
 
@@ -458,6 +420,7 @@ impl SettingsSession {
         if matches!(action, Some(SettingsAction::Cancelled)) {
             self.open = false;
             self.draft = None;
+            self.opened_at = None;
             return action;
         }
         None
@@ -796,6 +759,7 @@ fn draw_content(
     let auth_busy = session.auth_busy;
     let mut map_pick = session.map_pick;
     let mut capture_view = session.capture_view;
+    let mut perf_diag = session.perf_diag.take();
     {
         let draft = session.draft.as_mut().unwrap();
         let login_key = &mut session.login_key;
@@ -805,7 +769,9 @@ fn draw_content(
                     *do_exchange = true;
                 }
             }
-            SettingsTab::General => draw_general(ui, draft, &mut map_pick, &mut capture_view),
+            SettingsTab::General => {
+                draw_general(ui, draft, &mut map_pick, &mut capture_view, &mut perf_diag);
+            }
             SettingsTab::Audio => {
                 if draw_audio(ui, draft) {
                     *action = Some(SettingsAction::TestSound {
@@ -823,6 +789,7 @@ fn draw_content(
     }
     session.map_pick = map_pick;
     session.capture_view = capture_view;
+    session.perf_diag = perf_diag;
 }
 
 pub(super) fn section(ui: &mut Ui, title: &str, glyph: &str, add: impl FnOnce(&mut Ui)) {
@@ -1284,6 +1251,30 @@ fn tab_display(s: &str) -> String {
     }
 }
 
+fn perf_device_label(v: &str) -> &'static str {
+    if v.eq_ignore_ascii_case("cpu") {
+        "CPU 模式"
+    } else {
+        "GPU 模式"
+    }
+}
+
+fn perf_gpu_api_label(v: &str) -> &'static str {
+    if v.eq_ignore_ascii_case("opengl") || v.eq_ignore_ascii_case("gl") {
+        "OpenGL"
+    } else {
+        "Vulkan"
+    }
+}
+
+fn perf_profile_label(v: &str) -> &'static str {
+    match v.to_ascii_lowercase().as_str() {
+        "eco" | "节能" => "节能模式",
+        "extreme" | "极致" => "极致模式",
+        _ => "正常模式",
+    }
+}
+
 fn theme_display(s: &str) -> String {
     if s.eq_ignore_ascii_case("light") {
         "亮色".into()
@@ -1336,6 +1327,7 @@ fn draw_general(
     draft: &mut AppConfig,
     map_pick: &mut Option<MapPickKind>,
     capture_view: &mut bool,
+    perf_diag: &mut Option<String>,
 ) {
     section(ui, "外观", "\u{25d0}", |ui| {
         control_row(ui, "界面主题", "切换后设置页立即·随；保存后应用到主界面", "\u{25d0}", |ui| {
@@ -1522,6 +1514,71 @@ fn draw_general(
         });
     });
 
+    section(ui, "性能与渲染", "\u{25ce}", |ui| {
+        control_row(ui, "渲染设备", "CPU 软渲染 / GPU 硬件加速（改后需重启）", "\u{25ce}", |ui| {
+            egui::ComboBox::from_id_salt("set_perf_device")
+                .selected_text(perf_device_label(&draft.performance.device))
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut draft.performance.device, "cpu".into(), "CPU 模式");
+                    ui.selectable_value(&mut draft.performance.device, "gpu".into(), "GPU 模式");
+                });
+        });
+        if draft.performance.device.eq_ignore_ascii_case("gpu") {
+            row_divider(ui);
+            control_row(ui, "GPU 接口", "OpenGL 或 Vulkan（wgpu）", "\u{25ce}", |ui| {
+                egui::ComboBox::from_id_salt("set_perf_gpu_api")
+                    .selected_text(perf_gpu_api_label(&draft.performance.gpu_api))
+                    .width(140.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut draft.performance.gpu_api,
+                            "opengl".into(),
+                            "OpenGL",
+                        );
+                        ui.selectable_value(
+                            &mut draft.performance.gpu_api,
+                            "vulkan".into(),
+                            "Vulkan",
+                        );
+                    });
+            });
+        }
+        row_divider(ui);
+        control_row(ui, "性能模式", "节能 / 正常 / 极致", "\u{25ce}", |ui| {
+            egui::ComboBox::from_id_salt("set_perf_profile")
+                .selected_text(perf_profile_label(&draft.performance.profile))
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut draft.performance.profile, "eco".into(), "节能模式");
+                    ui.selectable_value(
+                        &mut draft.performance.profile,
+                        "normal".into(),
+                        "正常模式",
+                    );
+                    ui.selectable_value(
+                        &mut draft.performance.profile,
+                        "extreme".into(),
+                        "极致模式",
+                    );
+                });
+        });
+        row_divider(ui);
+        control_row(ui, "性能诊断", "按 CPU/内存估分推荐配置", "\u{25ce}", |ui| {
+            if glass_btn(ui, "开始诊断", true).clicked() {
+                let d = jian_util::perf::diagnose();
+                draft.performance.device = d.device;
+                draft.performance.gpu_api = d.gpu_api;
+                draft.performance.profile = d.profile;
+                *perf_diag = Some(d.summary);
+            }
+        });
+        if let Some(note) = perf_diag.as_ref() {
+            ui.add_space(8.0);
+            ui.label(RichText::new(note).size(12.0).color(chrome().muted));
+        }
+    });
+
     section(ui, "本机位置", "\u{25ce}", |ui| {
         let mut has_local = draft.local.latitude.is_some() && draft.local.longitude.is_some();
         control_row(ui, "启用本机经纬", "倒计时与 Home 标记", "\u{25ce}", |ui| {
@@ -1566,7 +1623,7 @@ fn draw_general(
 fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<SettingsAction>) {
     section(ui, "震级传播距离", "\u{25ce}", |ui| {
         ui.label(
-            RichText::new("自定义震级→最大 S 波传播距离(km)；留空用内置表。")
+            RichText::new("自定义：最小震级、最大震级、传播距离(km)；留空用内置表。")
                 .size(12.0)
                 .color(chrome().muted),
         );
@@ -1577,13 +1634,20 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
                 row_divider(ui);
             }
             let title = format!("档位 {}", i + 1);
-            control_row(ui, &title, "震级 / 最大距离 km", "\u{25ce}", |ui| {
+            control_row(ui, &title, "最小震级 / 最大震级 / 传播距离", "\u{25ce}", |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::DragValue::new(&mut pt.magnitude)
+                        egui::DragValue::new(&mut pt.min_magnitude)
                             .speed(0.1)
                             .range(0.0..=9.5)
-                            .prefix("M ")
+                            .prefix("min M")
+                            .fixed_decimals(1),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut pt.max_magnitude)
+                            .speed(0.1)
+                            .range(0.0..=9.5)
+                            .prefix("max M")
                             .fixed_decimals(1),
                     );
                     ui.add(
@@ -1602,16 +1666,17 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
             draft.travel.mag_spread_km.remove(i);
         }
         row_divider(ui);
-        control_row(ui, "添加档位", "按震级升序生效", "\u{25ce}", |ui| {
+        control_row(ui, "添加档位", "命中区间则用该档距离", "\u{25ce}", |ui| {
             if glass_btn(ui, "添加", false).clicked() {
-                let last_m = draft
+                let last_hi = draft
                     .travel
                     .mag_spread_km
                     .last()
-                    .map(|p| p.magnitude + 0.5)
-                    .unwrap_or(3.0);
+                    .map(|p| p.max_magnitude)
+                    .unwrap_or(2.5);
                 draft.travel.mag_spread_km.push(jian_config::MagSpreadPoint {
-                    magnitude: last_m,
+                    min_magnitude: last_hi,
+                    max_magnitude: (last_hi + 1.0).min(9.5),
                     max_km: 500.0,
                 });
             }

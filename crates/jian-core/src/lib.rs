@@ -64,7 +64,7 @@ pub struct EewReport {
     /// 紧急地震速报（警报）（Wolfx `isWarn` 或震度≥5弱）
     #[serde(default)]
     pub is_warn: bool,
-    /// 收到最终报的本地时刻 unix ms（0=尚未最终）；GQ 用此在最终报后继续画波约 3 分钟
+    /// 收到最终报的本地时刻 unix ms（0=尚未最终）
     #[serde(default)]
     pub final_at_ms: i64,
 }
@@ -303,8 +303,8 @@ pub struct AppSnapshot {
     pub pending_record_fly: Option<(f64, f64, f64)>,
     /// 待朗读速报（预警中不跳转时仍可 TTS；主循环 take）
     pub pending_tts_record: Option<EqRecord>,
-    /// 自定义震级→最大传播距离(km)；空则用内置表
-    pub wave_spread_km: Vec<(f64, f64)>,
+    /// 自定义震级区间→最大传播距离(km)：(min_mag, max_mag, max_km)；空则用内置表
+    pub wave_spread_km: Vec<(f64, f64, f64)>,
 }
 
 impl AppSnapshot {
@@ -979,30 +979,29 @@ fn approx_max_s_km(magnitude: f64) -> f64 {
 }
 
 /// 按自定义表或内置表取 S 波最大传播距离（km）。
-pub fn max_s_spread_km(magnitude: f64, custom: &[(f64, f64)]) -> f64 {
+/// `custom`：(min_mag, max_mag, max_km)；命中区间则用该档，否则回退内置表。
+pub fn max_s_spread_km(magnitude: f64, custom: &[(f64, f64, f64)]) -> f64 {
     if custom.is_empty() {
         return approx_max_s_km(magnitude);
     }
-    // custom: (magnitude, max_km)，按震级升序；取不超过当前震级的最大档
-    let mut best = custom[0].1;
-    for &(m, km) in custom {
-        if magnitude + 1e-9 >= m {
-            best = km;
-        } else {
-            break;
+    for &(lo, hi, km) in custom {
+        let a = lo.min(hi);
+        let b = lo.max(hi);
+        if magnitude + 1e-9 >= a && magnitude <= b + 1e-9 {
+            return km;
         }
     }
-    best
+    approx_max_s_km(magnitude)
 }
 
 /// S 波是否仍在传播（地表等效约 5 km/s，与走时兜底一致；走完即视为结束）。
-/// GQ：收到最终报后额外保留波圈至 `final_at_ms + 3min`（以较晚者为准）。
+/// 与 GlobalQuake 一致：不按「最终报 + N 分钟」人为延长，波走完即结束。
 pub fn eew_wave_active(e: &EewReport, now_ms: i64) -> bool {
     eew_wave_active_spread(e, now_ms, &[])
 }
 
-/// 同 [`eew_wave_active`]，可传入自定义震级→传播距离表。
-pub fn eew_wave_active_spread(e: &EewReport, now_ms: i64, custom: &[(f64, f64)]) -> bool {
+/// 同 [`eew_wave_active`]，可传入自定义震级区间→传播距离表。
+pub fn eew_wave_active_spread(e: &EewReport, now_ms: i64, custom: &[(f64, f64, f64)]) -> bool {
     if !is_wave_candidate(e) {
         return false;
     }
@@ -1015,18 +1014,7 @@ pub fn eew_wave_active_spread(e: &EewReport, now_ms: i64, custom: &[(f64, f64)])
     }
     let elapsed_s = (age_ms as f64 / 1000.0).max(0.0);
     let max_km = max_s_spread_km(e.magnitude, custom);
-    let by_travel = elapsed_s * 5.0 < max_km * 1.05;
-    // GlobalQuake：最终报后仍画 PS 波 3 分钟
-    if agency_family(&e.agency.0) == AgencyFamily::Gq && e.is_final {
-        let final_at = if e.final_at_ms > 0 {
-            e.final_at_ms
-        } else {
-            now_ms
-        };
-        let within_grace = now_ms < final_at + 3 * 60 * 1000;
-        return by_travel || within_grace;
-    }
-    by_travel
+    elapsed_s * 5.0 < max_km * 1.05
 }
 
 /// 仍在传播中的多震：PS 走完即排除（不按 30 分钟挂着）。`max_age_ms` 仅兜底。
@@ -1037,7 +1025,7 @@ pub fn live_wave_eews(list: &[EewReport], now_ms: i64, _max_age_ms: i64) -> Vec<
 pub fn live_wave_eews_spread<'a>(
     list: &'a [EewReport],
     now_ms: i64,
-    spread: &[(f64, f64)],
+    spread: &[(f64, f64, f64)],
 ) -> Vec<&'a EewReport> {
     list.iter()
         .filter(|e| eew_wave_active_spread(e, now_ms, spread))
@@ -1052,7 +1040,7 @@ pub fn eew_map_markers(list: &[EewReport], now_ms: i64) -> Vec<&EewReport> {
 pub fn eew_map_markers_spread<'a>(
     list: &'a [EewReport],
     now_ms: i64,
-    spread: &[(f64, f64)],
+    spread: &[(f64, f64, f64)],
 ) -> Vec<&'a EewReport> {
     live_wave_eews_spread(list, now_ms, spread)
 }

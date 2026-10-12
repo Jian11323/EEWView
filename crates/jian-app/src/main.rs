@@ -222,10 +222,7 @@ fn main() -> Result<()> {
     if cfg.ui.always_on_top {
         viewport = viewport.with_always_on_top();
     }
-    let options = eframe::NativeOptions {
-        viewport,
-        ..Default::default()
-    };
+    let options = build_native_options(viewport, &cfg.performance);
 
     let started = Instant::now();
     let has_local = cfg.local.latitude.is_some() && cfg.local.longitude.is_some();
@@ -271,7 +268,62 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn build_native_options(
+    viewport: egui::ViewportBuilder,
+    perf: &jian_config::PerformanceConfig,
+) -> eframe::NativeOptions {
+    let device = perf.device.to_ascii_lowercase();
+    let api = perf.gpu_api.to_ascii_lowercase();
+    let profile = perf.profile.to_ascii_lowercase();
+
+    let (renderer, hw) = if device == "cpu" {
+        // CPU：强制软渲染（无硬件加速）
+        (
+            eframe::Renderer::Glow,
+            eframe::HardwareAcceleration::Off,
+        )
+    } else if api == "opengl" || api == "gl" {
+        (
+            eframe::Renderer::Glow,
+            eframe::HardwareAcceleration::Preferred,
+        )
+    } else {
+        // GPU + Vulkan：走 wgpu
+        (
+            eframe::Renderer::Wgpu,
+            eframe::HardwareAcceleration::Preferred,
+        )
+    };
+
+    let vsync = profile != "extreme";
+    let mut options = eframe::NativeOptions {
+        viewport,
+        vsync,
+        hardware_acceleration: hw,
+        renderer,
+        ..Default::default()
+    };
+    if matches!(renderer, eframe::Renderer::Wgpu) {
+        let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::default();
+        // 优先 Vulkan；Windows 无 Vulkan 时回退 DX12
+        setup.instance_descriptor.backends =
+            eframe::wgpu::Backends::VULKAN | eframe::wgpu::Backends::DX12;
+        options.wgpu_options.wgpu_setup = eframe::egui_wgpu::WgpuSetup::CreateNew(setup);
+    }
+    options
+}
+
+/// 性能档位 → 空闲重绘间隔（毫秒）。设置窗打开时强制高刷。
+fn idle_repaint_ms(profile: &str) -> u64 {
+    match profile.to_ascii_lowercase().as_str() {
+        "eco" | "节能" => 100,
+        "extreme" | "极致" => 16,
+        _ => 250,
+    }
+}
+
 fn clear_countdown(snap: &mut AppSnapshot) {
+
     snap.countdown_s = None;
     snap.countdown_local_level = 0;
     snap.countdown_local_text.clear();
@@ -410,7 +462,7 @@ impl eframe::App for JianApp {
             .travel
             .mag_spread_km
             .iter()
-            .map(|p| (p.magnitude, p.max_km))
+            .map(|p| (p.min_magnitude, p.max_magnitude, p.max_km))
             .collect();
         self.snap.wave_spread_km.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -555,9 +607,9 @@ impl eframe::App for JianApp {
                             self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 1.6);
                             self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
                             self.cinema_idx = idx;
-                            let hold = (2.5 + ev.magnitude * 0.8).clamp(5.0, 8.0);
+                            // GlobalQuake cinemaModeSwitchTime 默认 10 秒
                             self.cinema_next_at =
-                                Instant::now() + std::time::Duration::from_secs_f64(hold);
+                                Instant::now() + std::time::Duration::from_secs_f64(10.0);
                             self.snap.active = Some(ev.clone());
                             self.snap.tab = jian_core::SidebarTab::Eew;
                             self.snap.overlay_mode = jian_core::OverlayMode::Wave;
@@ -722,11 +774,12 @@ impl eframe::App for JianApp {
                 }
             }
         }
-        // 空闲降频；波圈/飞跃由 UI·地图侧按需 60fps 请求，此处不因列表非空常驻高刷
-        if self.shell.map.is_flying() {
+        // 空闲降频；设置窗打开或极致模式保持高刷
+        if self.shell.map.is_flying() || self.shell.settings.open {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         } else {
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            let ms = idle_repaint_ms(&self.cfg.performance.profile);
+            ctx.request_repaint_after(std::time::Duration::from_millis(ms));
         }
     }
 }

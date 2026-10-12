@@ -21,6 +21,15 @@ show_wave_rings = true
 show_legend = true
 show_volcanoes = true
 
+
+[performance]
+# cpu = 软渲染；gpu = 硬件加速（改后需重启）
+device = "gpu"
+# opengl | vulkan（仅 gpu）
+gpu_api = "vulkan"
+# eco 节能 | normal 正常 | extreme 极致
+profile = "normal"
+
 [map]
 # auto = 暗色要石矢量 / 亮色地形瓦片；也可强制 vector | tiles | both
 basemap = "auto"
@@ -47,8 +56,8 @@ tts_enabled = false
 primary = "jma2001"
 fallback = "ak135"
 linear_last_resort = true
-# 自定义震级→最大传播距离(km)；留空用内置表
-# mag_spread_km = [{ magnitude = 3.0, max_km = 500.0 }, { magnitude = 5.0, max_km = 1600.0 }]
+# 自定义震级区间→最大传播距离(km)；留空用内置表
+# mag_spread_km = [{ min_magnitude = 3.0, max_magnitude = 4.9, max_km = 500.0 }, { min_magnitude = 5.0, max_magnitude = 9.5, max_km = 1600.0 }]
 
 [local]
 # latitude = 35.68
