@@ -205,6 +205,16 @@ impl ViewCtx {
         }
     }
 
+    /// 陆地填色投影（球体放宽地平线）。
+    pub fn project_fill(&self, lon: f64, lat: f64) -> Option<Pos2> {
+        match self.mode {
+            ProjectionMode::Flat => self.project(lon, lat),
+            ProjectionMode::Globe => {
+                self.globe.and_then(|c| c.try_project_fill(lon, lat, self.rect))
+            }
+        }
+    }
+
     pub fn pan_by_delta(&self, dx_px: f32, dy_px: f32) -> (f64, f64) {
         match self.mode {
             ProjectionMode::Flat => {

@@ -20,6 +20,7 @@
 | brand/favicon.svg | 站点小图标 |
 | brand/app.png | 窗口/关于页位图（由 logo.svg 生成） |
 | brand/app.ico | Windows exe 图标（由 logo.svg 生成） |
+| brand/splash_bg.png | 启动界面背景（实机界面高斯模糊） |
 
 ## 烈度 / 震度图标（intensity/）
 

@@ -3,27 +3,59 @@
 mod brand;
 mod intensity_icons;
 mod settings;
+mod splash;
 mod theme;
 
 pub use brand::{app_icon_data, logo_texture, APP_DISPLAY_NAME};
+pub use splash::{draw_splash, SplashGate};
 
 use chrono::{FixedOffset, Local};
 use egui::{Color32, FontFamily, FontId, Frame, Margin, RichText, Sense, Stroke, Ui, Vec2};
 use intensity_icons::IntensityIcons;
 use jian_core::palette::color_for;
 use jian_core::{
-    agency_bracket, cn_intensity_text, instrumental_band_rgb, eew_map_markers_spread, eew_sidebar_entries, eew_wave_active_spread, live_wave_eews_spread, place_with_agency,
-    prefer_intensity_scale, AppSnapshot, IntensityKind, ListSelection, OverlayMode,
+    agency_bracket, cn_intensity_text, instrumental_band_rgb, eew_sidebar_entries,
+    eew_wave_active_spread, is_wave_candidate, max_s_spread_km, place_with_agency,
+    prefer_intensity_scale, AppSnapshot, EewReport, IntensityKind, ListSelection, OverlayMode,
     SidebarTab,
 };
 use jian_map::{zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, MapViewport, VectorStyle, ProjectionMode};
-use jian_travel::{max_s_wave_spread_km, TravelEngine, Wave};
+use jian_travel::{max_s_wave_spread_km, s_wave_still_spreading_to, TravelEngine, Wave};
 use std::path::Path;
 use theme::{ThemePalette, UiTheme};
 
 pub use settings::{MapPickKind, SettingsAction, SettingsSession, SourceHealthView};
 pub use theme::UiTheme as AppUiTheme;
 
+/// 左上预警条 / 波圈 / 叉标共用：有走时表时按表半径判定，与倒计时卸除条件一致。
+fn live_wave_eews_travel<'a>(
+    list: &'a [EewReport],
+    now_ms: i64,
+    spread: &[(f64, f64, f64)],
+    travel: Option<&TravelEngine>,
+) -> Vec<&'a EewReport> {
+    list.iter()
+        .filter(|e| {
+            if let Some(eng) = travel {
+                if !is_wave_candidate(e) {
+                    return false;
+                }
+                if e.origin_ms <= 0 {
+                    return true;
+                }
+                let age_ms = now_ms - e.origin_ms;
+                if age_ms < -60_000 {
+                    return false;
+                }
+                let elapsed = (age_ms as f64 / 1000.0).max(0.0);
+                let max_km = max_s_spread_km(e.magnitude, spread);
+                s_wave_still_spreading_to(eng, e.depth_km, elapsed, max_km)
+            } else {
+                eew_wave_active_spread(e, now_ms, spread)
+            }
+        })
+        .collect()
+}
 
 fn overlay_child<R>(
     ui: &mut Ui,
@@ -143,10 +175,10 @@ impl MainShell {
         let show_waves = snap.overlay_mode == OverlayMode::Wave && snap.show_wave_rings;
         let scale = self.intensity_scale.clone();
 
-        let live_refs = live_wave_eews_spread(&snap.eew_list, now_ms, &snap.wave_spread_km);
+        let live_refs =
+            live_wave_eews_travel(&snap.eew_list, now_ms, &snap.wave_spread_km, travel);
         let wave_owned: Vec<_> = live_refs.into_iter().cloned().collect();
-        let marker_refs = eew_map_markers_spread(&snap.eew_list, now_ms, &snap.wave_spread_km);
-        let marker_owned: Vec<_> = marker_refs.into_iter().cloned().collect();
+        let marker_owned = wave_owned.clone();
         // 演示样本：无有效发震时刻时用 map_elapsed 驱动波圈
         let sample_elapsed = self.map_elapsed % 120.0;
         let mut map_click = None;
@@ -260,8 +292,8 @@ impl MainShell {
                 if let Some(kind) = self.settings.map_pick {
                     draw_map_pick_banner(ui, &p, kind);
                 }
-                draw_event_header(ui, &p, snap, scale.as_str(), &self.intensity_icons);
-                draw_tsunami_banner(ui, &p, snap);
+                draw_event_header(ui, &p, snap, scale.as_str(), &self.intensity_icons, travel);
+                draw_tsunami_banner(ui, &p, snap, travel);
                 draw_realtime_intensity_card(ui, &p, snap, &self.intensity_icons);
                 if cfg.ui.show_legend {
                     draw_legend_bar(ui, &p);
@@ -280,19 +312,27 @@ impl MainShell {
                             SidebarTab::Eew | SidebarTab::Records => {
                                 let r_km = if tab == SidebarTab::Eew {
                                     snap.eew_list.get(idx).map(|e| {
-                                        let live = eew_wave_active_spread(
-                                            e,
-                                            now_ms,
-                                            &snap.wave_spread_km,
-                                        );
-                                        if !live {
-                                            return 90.0;
-                                        }
+                                        let max_km =
+                                            max_s_spread_km(e.magnitude, &snap.wave_spread_km);
                                         let elapsed = if e.origin_ms > 0 {
                                             ((now_ms - e.origin_ms) as f64 / 1000.0).max(0.0)
                                         } else {
                                             0.0
                                         };
+                                        let live = if let Some(eng) = travel {
+                                            s_wave_still_spreading_to(
+                                                eng, e.depth_km, elapsed, max_km,
+                                            )
+                                        } else {
+                                            eew_wave_active_spread(
+                                                e,
+                                                now_ms,
+                                                &snap.wave_spread_km,
+                                            )
+                                        };
+                                        if !live {
+                                            return 90.0;
+                                        }
                                         let s_km = if let Some(eng) = travel {
                                             eng.surface_distance_for_elapsed(
                                                 Wave::S,
@@ -300,9 +340,9 @@ impl MainShell {
                                                 elapsed,
                                             )
                                         } else {
-                                            elapsed * 5.0
+                                            elapsed * 4.0
                                         };
-                                        s_km.min(max_s_wave_spread_km(e.magnitude)).max(18.0)
+                                        s_km.min(max_km).max(18.0)
                                     })
                                 } else {
                                     Some(55.0)
@@ -529,9 +569,12 @@ fn draw_map_load_banner(ui: &mut Ui, p: &ThemePalette, state: BasemapLoadState, 
 const OVERLAY_TOP_Y: f32 = 12.0;
 
 /// 左上预警条：GQ 只保留当前焦点一条（镜头切换）；其余数据源仍向下堆叠。
-fn header_live_eews(snap: &AppSnapshot) -> Vec<&jian_core::EewReport> {
+fn header_live_eews<'a>(
+    snap: &'a AppSnapshot,
+    travel: Option<&TravelEngine>,
+) -> Vec<&'a EewReport> {
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let live = live_wave_eews_spread(&snap.eew_list, now_ms, &snap.wave_spread_km);
+    let live = live_wave_eews_travel(&snap.eew_list, now_ms, &snap.wave_spread_km, travel);
     let mut gq = Vec::new();
     let mut others = Vec::new();
     for e in live {
@@ -555,8 +598,8 @@ fn header_live_eews(snap: &AppSnapshot) -> Vec<&jian_core::EewReport> {
 }
 
 /// 左上角预警条总高度（海啸条避让）。
-fn eew_header_stack_height(snap: &AppSnapshot) -> f32 {
-    let n = header_live_eews(snap).len();
+fn eew_header_stack_height(snap: &AppSnapshot, travel: Option<&TravelEngine>) -> f32 {
+    let n = header_live_eews(snap, travel).len();
     if n == 0 {
         return 0.0;
     }
@@ -570,8 +613,9 @@ fn draw_event_header(
     snap: &AppSnapshot,
     scale: &str,
     icons: &IntensityIcons,
+    travel: Option<&TravelEngine>,
 ) {
-    let live = header_live_eews(snap);
+    let live = header_live_eews(snap, travel);
     if live.is_empty() {
         return;
     }
@@ -692,7 +736,12 @@ fn circled_index(n: usize) -> char {
     }
 }
 
-fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
+fn draw_tsunami_banner(
+    ui: &mut Ui,
+    p: &ThemePalette,
+    snap: &AppSnapshot,
+    travel: Option<&TravelEngine>,
+) {
     let Some(t) = snap.tsunami.as_ref() else {
         return;
     };
@@ -739,7 +788,7 @@ fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
     };
     // 有预警信息头时下移（按堆叠条数）；无预警时贴到左上角
     let top_y = {
-        let h = eew_header_stack_height(snap);
+        let h = eew_header_stack_height(snap, travel);
         if h > 0.0 {
             OVERLAY_TOP_Y + h + 8.0
         } else {
@@ -1049,7 +1098,8 @@ fn draw_countdown_hud(
             // 整列从右侧往左排，避免 horizontal 撑满后内容靠左
             ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
                 if let Some(sec) = snap.countdown_s {
-                    outlined_label(ui, "S波即将到达", Color32::WHITE, 14.0, false);
+                    let title = if sec > 0 { "S波即将到达" } else { "S波已到达" };
+                    outlined_label(ui, title, Color32::WHITE, 14.0, false);
                     ui.allocate_ui_with_layout(
                         Vec2::new(ui.available_width(), 44.0),
                         egui::Layout::right_to_left(egui::Align::Center),

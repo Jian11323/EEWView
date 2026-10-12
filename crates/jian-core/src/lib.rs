@@ -1031,7 +1031,8 @@ pub fn eew_wave_active_spread(e: &EewReport, now_ms: i64, custom: &[(f64, f64, f
     }
     let elapsed_s = (age_ms as f64 / 1000.0).max(0.0);
     let max_km = max_s_spread_km(e.magnitude, custom);
-    elapsed_s * 5.0 < max_km * 1.05
+    // 无走时表时的近似：对齐 eewcn SWAVE_SPEED=4（勿用 5，否则左上条比波圈更早消失）
+    elapsed_s * 4.0 < max_km * 1.05
 }
 
 /// 仍在传播中的多震：PS 走完即排除（不按 30 分钟挂着）。`max_age_ms` 仅兜底。

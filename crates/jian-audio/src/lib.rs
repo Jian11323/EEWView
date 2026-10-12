@@ -101,6 +101,15 @@ impl AudioEngine {
         }
     }
 
+    /// 启动灌入时静默登记已见报，避免稍后把历史首报当新 issue 再播。
+    pub fn seed_eew_seen(&mut self, agency: &str, event_id: &str, serial: u32) {
+        let key = format!("{agency}|{event_id}");
+        let prev = self.eew_seen.get(&key).copied().unwrap_or(0);
+        if serial >= prev {
+            self.eew_seen.insert(key, serial);
+        }
+    }
+
     /// JMA EEW（对齐要石）：issue / update / final / cancel，另附 caution / warn。
     /// `is_warn`：警报；`play_caution`：震度≥3 且非警报附加 caution。
     pub fn on_eew(

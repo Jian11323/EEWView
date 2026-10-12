@@ -265,6 +265,16 @@ impl TravelEngine {
     }
 }
 
+/// 与地图波圈一致：当前 S 地表半径是否仍小于上限（未结束）。
+pub fn s_wave_still_spreading_to(
+    eng: &TravelEngine,
+    depth_km: f64,
+    elapsed_s: f64,
+    max_km: f64,
+) -> bool {
+    eng.surface_distance_for_elapsed(Wave::S, depth_km, elapsed_s) < max_km
+}
+
 /// 与地图波圈一致：当前 S 地表半径是否仍小于震级上限（未结束）。
 pub fn s_wave_still_spreading(
     eng: &TravelEngine,
@@ -272,8 +282,7 @@ pub fn s_wave_still_spreading(
     depth_km: f64,
     elapsed_s: f64,
 ) -> bool {
-    let max_km = max_s_wave_spread_km(magnitude);
-    eng.surface_distance_for_elapsed(Wave::S, depth_km, elapsed_s) < max_km
+    s_wave_still_spreading_to(eng, depth_km, elapsed_s, max_s_wave_spread_km(magnitude))
 }
 
 #[cfg(test)]
@@ -308,5 +317,30 @@ mod tests {
         assert_eq!(max_s_wave_spread_km(8.5), 7500.0);
         assert!(max_s_wave_spread_km(3.0) < max_s_wave_spread_km(5.0));
         assert!(max_s_wave_spread_km(5.0) < max_s_wave_spread_km(7.0));
+    }
+
+    #[test]
+    fn engine_falls_back_beyond_primary_max() {
+        let primary = TravelTable {
+            name: "jma".into(),
+            depths_km: vec![0.0, 10.0],
+            distances_km: vec![0.0, 1000.0, 2000.0],
+            p_times_s: vec![vec![0.0, 100.0, 200.0], vec![1.0, 101.0, 201.0]],
+            s_times_s: vec![vec![0.0, 180.0, 360.0], vec![2.0, 182.0, 362.0]],
+        };
+        let fallback = TravelTable {
+            name: "ak".into(),
+            depths_km: vec![0.0, 10.0],
+            distances_km: vec![0.0, 2000.0, 5000.0],
+            p_times_s: vec![vec![0.0, 200.0, 500.0], vec![1.0, 201.0, 501.0]],
+            s_times_s: vec![vec![0.0, 360.0, 900.0], vec![2.0, 362.0, 902.0]],
+        };
+        let eng = TravelEngine {
+            primary,
+            fallback: Some(fallback),
+            linear_last_resort: false,
+        };
+        let t = eng.travel_time(Wave::S, 5.0, 3000.0);
+        assert!(t.is_finite() && t > 360.0 && t < 900.0);
     }
 }

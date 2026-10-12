@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -12,19 +11,19 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+TOOLS = Path(__file__).resolve().parent
+ROOT = TOOLS.parent
+if str(TOOLS) not in sys.path:
+    sys.path.insert(0, str(TOOLS))
+
+from _pack_common import assert_brand_assets, workspace_version  # noqa: E402
+
 NSIS_URL = "https://sourceforge.net/projects/nsis/files/NSIS%203/3.10/nsis-3.10.zip/download"
 NSIS_CACHE = ROOT / "target" / "nsis-3.10"
 
 
 def log(msg: str) -> None:
     print(msg, flush=True)
-
-
-def workspace_version() -> str:
-    text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
-    m = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
-    return m.group(1) if m else "0.0.0"
 
 
 def find_makensis() -> Path | None:
@@ -49,7 +48,6 @@ def ensure_nsis() -> Path:
     zip_path = ROOT / "target" / "nsis-3.10.zip"
     if not zip_path.is_file():
         log(f"download NSIS -> {zip_path.name}")
-        # SourceForge / GitHub may need proxy from env
         req = urllib.request.Request(
             NSIS_URL,
             headers={"User-Agent": "EEWView-packager"},
@@ -61,10 +59,8 @@ def ensure_nsis() -> Path:
         shutil.rmtree(NSIS_CACHE)
     with zipfile.ZipFile(zip_path) as zf:
         zf.extractall(ROOT / "target")
-    # archive root is nsis-3.10/
     extracted = ROOT / "target" / "nsis-3.10"
     if not extracted.is_dir():
-        # some mirrors nest differently
         for p in (ROOT / "target").iterdir():
             if p.is_dir() and (p / "makensis.exe").is_file():
                 extracted = p
@@ -79,24 +75,34 @@ def ensure_nsis() -> Path:
     return exe
 
 
-def ensure_portable() -> Path:
+def ensure_portable(*, force: bool) -> Path:
     dist = ROOT / "dist" / "EEWView"
     exe = dist / "eewview.exe"
-    if exe.is_file() and (dist / "assets").is_dir():
+    splash = dist / "assets" / "brand" / "splash_bg.png"
+    need = force or (not exe.is_file()) or (not splash.is_file()) or (not (dist / "assets").is_dir())
+    if not need:
         return dist
-    log("portable dir missing → run pack_windows.py first")
+    log("组装便携目录 → run pack_windows.py")
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "pack_windows.py")], cwd=ROOT)
     if r.returncode != 0:
         raise SystemExit(r.returncode)
     if not exe.is_file():
         raise SystemExit(f"missing {exe}")
+    if not splash.is_file():
+        raise SystemExit(f"missing splash: {splash}")
     return dist
 
 
 def main() -> int:
-    ver = workspace_version()
+    force = "--force-portable" in sys.argv or "--rebuild" in sys.argv
+    # 默认强制重建，避免沿用旧 1.1.0 目录漏掉启动界面等新资源
+    if "--reuse-portable" not in sys.argv:
+        force = True
+
+    ver = workspace_version(ROOT)
     log(f"EEW View Beta {ver} Windows installer")
-    dist = ensure_portable()
+    assert_brand_assets(ROOT)
+    dist = ensure_portable(force=force)
     makensis = ensure_nsis()
     out = ROOT / "dist" / f"EEWView_Beta_{ver}_setup.exe"
     if out.exists():

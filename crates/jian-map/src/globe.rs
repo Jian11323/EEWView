@@ -115,9 +115,25 @@ impl GlobeCamera {
         d <= self.max_distance * 1.002
     }
 
+    /// 陆地填色用：略放宽地平线，减少边缘灰底整块掉线。
+    pub fn is_above_horizon_fill(&self, lon: f64, lat: f64) -> bool {
+        let (x, y, z) = lonlat_to_ecef(lon, lat, 0.0);
+        let d = dist3(self.camera_x, self.camera_y, self.camera_z, x, y, z);
+        d <= self.max_distance * 1.06
+    }
+
     /// 投影到屏幕；背面返回 `None`。
     pub fn try_project(&self, lon: f64, lat: f64, rect: Rect) -> Option<Pos2> {
         if !self.is_above_horizon(lon, lat) {
+            return None;
+        }
+        let (sx, sy) = self.project_lonlat_raw(lon, lat);
+        Some(Pos2::new(rect.left() + sx as f32, rect.top() + sy as f32))
+    }
+
+    /// 填色投影：放宽地平线，仍拒绝真正背面以免穿球。
+    pub fn try_project_fill(&self, lon: f64, lat: f64, rect: Rect) -> Option<Pos2> {
+        if !self.is_above_horizon_fill(lon, lat) {
             return None;
         }
         let (sx, sy) = self.project_lonlat_raw(lon, lat);

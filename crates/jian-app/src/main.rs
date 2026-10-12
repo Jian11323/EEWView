@@ -11,15 +11,17 @@ use jian_audio::{speak_async, AudioCue, AudioEngine, TsunamiCueKind};
 use jian_config::AppConfig;
 use jian_core::{
     agency_family, build_eew_tts_script, build_record_tts_script, eew_sidebar_entries,
-    eew_sidebar_group_key, eew_wave_active_spread, latest_eew_per_source, live_wave_eews_spread,
-    same_eew_event, should_play_eew_tts, AgencyFamily, AppSnapshot, EewReport, HealthStatus,
-    IntensityKind,
+    eew_sidebar_group_key, eew_wave_active_spread, is_wave_candidate, latest_eew_per_source,
+    max_s_spread_km, same_eew_event, should_play_eew_tts, AgencyFamily, AppSnapshot, EewReport,
+    HealthStatus, IntensityKind,
 };
 use std::collections::HashMap;
 use jian_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
-use jian_travel::{max_s_wave_spread_km, s_wave_still_spreading, TravelEngine, Wave};
+use jian_travel::{
+    max_s_wave_spread_km, s_wave_still_spreading_to, TravelEngine, Wave,
+};
 use jian_map::{zoom_to_fit_radius_km, BasemapMode, ProjectionMode};
-use jian_ui::{MainShell, SettingsAction};
+use jian_ui::{draw_splash, MainShell, SettingsAction, SplashGate, AppUiTheme};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokio::runtime::Runtime;
@@ -282,6 +284,7 @@ fn main() -> Result<()> {
                 prev_tsunami_key: String::new(),
                 window_geom_save_at: None,
                 last_window_geom: None,
+                splash: SplashGate::default(),
             }))
         }),
     )
@@ -350,30 +353,27 @@ fn refresh_countdown(
     } else {
         0.0
     };
-    // PS 波走完最大传播距离后停止并隐藏（与地图波圈同一条件）
-    if !s_wave_still_spreading(eng, ev.magnitude, ev.depth_km, elapsed_s) {
+    // PS 波走完最大传播距离后停止并隐藏（与地图波圈 / 左上预警条同一条件）
+    let max_km = max_s_spread_for(ev.magnitude, &snap.wave_spread_km);
+    if !s_wave_still_spreading_to(eng, ev.depth_km, elapsed_s, max_km) {
         clear_countdown(snap);
         return;
     }
     let surface = jian_util::haversine_km(ev.longitude, ev.latitude, lon, lat);
     // 本机已在该震级 S 波最大传播范围之外：波到不了，不显示倒计时
-    let max_reach = max_s_wave_spread_km(ev.magnitude);
+    let max_reach = max_s_spread_for(ev.magnitude, &snap.wave_spread_km);
     if surface > max_reach * 1.05 {
         clear_countdown(snap);
         return;
     }
+    // JMA2001 超 2000km 自动回退 ak135（再不行直线兜底）
     let total = eng.eta_s_to_site(ev.longitude, ev.latitude, ev.depth_km, lon, lat);
     if !total.is_finite() || total <= 0.0 {
         clear_countdown(snap);
         return;
     }
-    // 用 ceil：显示/语音与「还剩整秒」一致；音效侧按秒边界重启滴滴
-    let remain = (total - elapsed_s).ceil() as i32;
-    // EEWCN：到达本机后倒计时隐藏（不再挂 0 秒）
-    if remain <= 0 {
-        clear_countdown(snap);
-        return;
-    }
+    // 对齐 eewcn：到达后挂 0 秒，直到 PS 波圈走完才卸倒计时
+    let remain = (total - elapsed_s).ceil().max(0.0) as i32;
     let (lv, text) = jian_core::estimate_at_site(
         ev.intensity_kind,
         ev.magnitude,
@@ -384,6 +384,35 @@ fn refresh_countdown(
     snap.countdown_local_kind = ev.intensity_kind;
     snap.countdown_local_level = lv;
     snap.countdown_local_text = text;
+}
+
+fn max_s_spread_for(magnitude: f64, custom: &[(f64, f64, f64)]) -> f64 {
+    max_s_spread_km(magnitude, custom)
+}
+
+fn eew_wave_live(
+    e: &EewReport,
+    now_ms: i64,
+    spread: &[(f64, f64, f64)],
+    travel: Option<&TravelEngine>,
+) -> bool {
+    if let Some(eng) = travel {
+        if !is_wave_candidate(e) {
+            return false;
+        }
+        if e.origin_ms <= 0 {
+            return true;
+        }
+        let age_ms = now_ms - e.origin_ms;
+        if age_ms < -60_000 {
+            return false;
+        }
+        let elapsed = (age_ms as f64 / 1000.0).max(0.0);
+        let max_km = max_s_spread_km(e.magnitude, spread);
+        s_wave_still_spreading_to(eng, e.depth_km, elapsed, max_km)
+    } else {
+        eew_wave_active_spread(e, now_ms, spread)
+    }
 }
 
 struct JianApp {
@@ -421,6 +450,7 @@ struct JianApp {
     /// 窗口几何变更后延迟写入用户配置
     window_geom_save_at: Option<Instant>,
     last_window_geom: Option<(f32, f32, Option<f32>, Option<f32>, bool)>,
+    splash: SplashGate,
 }
 
 impl eframe::App for JianApp {
@@ -438,18 +468,29 @@ impl eframe::App for JianApp {
                     // SREV 仅 JMA（对齐要石：issue/update/final/cancel + caution/warn）
                     if agency_family(&report.agency.0) == AgencyFamily::Jma {
                         if let Some(audio) = self.audio.as_mut() {
-                            let play_caution = report.intensity_kind == IntensityKind::JmaShindo
-                                && report.intensity_level >= 3
-                                && !report.is_assumption;
-                            audio.on_eew(
-                                &report.agency.0,
-                                &report.event_id,
-                                report.serial,
-                                report.is_final,
-                                report.is_cancel,
-                                report.is_warn,
-                                play_caution,
-                            );
+                            // 启动数秒内历史灌入只登记不播，否则会听到 SREV issue
+                            let boot_mute = self.started.elapsed().as_secs_f64() < 5.0;
+                            if boot_mute {
+                                audio.seed_eew_seen(
+                                    &report.agency.0,
+                                    &report.event_id,
+                                    report.serial,
+                                );
+                            } else {
+                                let play_caution = report.intensity_kind
+                                    == IntensityKind::JmaShindo
+                                    && report.intensity_level >= 3
+                                    && !report.is_assumption;
+                                audio.on_eew(
+                                    &report.agency.0,
+                                    &report.event_id,
+                                    report.serial,
+                                    report.is_final,
+                                    report.is_cancel,
+                                    report.is_warn,
+                                    play_caution,
+                                );
+                            }
                         }
                     }
                 }
@@ -573,7 +614,9 @@ impl eframe::App for JianApp {
             // 跟焦/轮播只认侧栏源槽最新一条（与列表、TTS 一致；多 GQ 不再各自乱跳）
             let live: Vec<&EewReport> = latest_eew_per_source(&self.snap.eew_list)
                 .into_iter()
-                .filter(|e| eew_wave_active_spread(e, now, &self.snap.wave_spread_km))
+                .filter(|e| {
+                    eew_wave_live(e, now, &self.snap.wave_spread_km, self.travel.as_ref())
+                })
                 .collect();
             // 新预警必须打断测站浏览；仅轮播停留时保留测站锁定
             let allow_follow = !browsing_station || !live.is_empty();
@@ -702,8 +745,9 @@ impl eframe::App for JianApp {
         // 无预警：相机始终聚焦最新一条速报
         if !self.auto_center_pending && self.started.elapsed().as_secs_f64() >= 2.5 {
             let now = chrono::Utc::now().timestamp_millis();
-            let eew_live = !live_wave_eews_spread(&self.snap.eew_list, now, &self.snap.wave_spread_km)
-                .is_empty();
+            let eew_live = self.snap.eew_list.iter().any(|e| {
+                eew_wave_live(e, now, &self.snap.wave_spread_km, self.travel.as_ref())
+            });
             let browsing_station = self
                 .snap
                 .active
@@ -839,6 +883,20 @@ impl eframe::App for JianApp {
             }
         }
 
+        // 启动画面：底图可用后淡出关闭（最短展示 + 约 0.55s 淡出）
+        let load = self.shell.map.load_state();
+        if self.splash.tick(load) {
+            let theme = AppUiTheme::from_config(&self.cfg.ui.theme);
+            draw_splash(
+                ctx,
+                &theme.palette(),
+                self.shell.map.load_status(),
+                load,
+                self.splash.opacity(),
+            );
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
+
         // 有指针活动立即重绘，避免空闲降频把点击「吃掉」
         let pointer_busy = ctx.input(|i| {
             i.pointer.any_down()
@@ -847,7 +905,7 @@ impl eframe::App for JianApp {
                 || i.smooth_scroll_delta.length_sq() > 0.0
         });
         let fps_ms = idle_repaint_ms(&self.cfg.performance);
-        if pointer_busy || self.shell.map.is_flying() || self.shell.settings.open {
+        if pointer_busy || self.shell.map.is_flying() || self.shell.settings.open || self.splash.active() {
             // 交互/设置打开时至少按目标帧率刷新
             ctx.request_repaint_after(std::time::Duration::from_millis(fps_ms.min(16)));
         } else {
@@ -921,6 +979,11 @@ impl JianApp {
         if prev == cur {
             return;
         }
+        // 启动数秒内源从「全异常」变为接通会滴一声；与 TTS 一样静音，避免误扰
+        if self.started.elapsed().as_secs_f64() < 5.0 {
+            self.prev_health = cur;
+            return;
+        }
         let any_ok = |h: (HealthStatus, HealthStatus, HealthStatus, HealthStatus)| {
             matches!(h.0, HealthStatus::Normal)
                 || matches!(h.1, HealthStatus::Normal)
@@ -955,6 +1018,10 @@ impl JianApp {
         }
         let prev = self.prev_tsunami_key.clone();
         self.prev_tsunami_key = key.clone();
+        // 启动灌入的海啸状态不播 SREV 海啸音
+        if self.started.elapsed().as_secs_f64() < 5.0 {
+            return;
+        }
         let Some(audio) = self.audio.as_mut() else {
             return;
         };

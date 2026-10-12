@@ -2,7 +2,6 @@
 """Windows 便携包：release 构建 + 组装 + zip（纯 Python，避免 PS 卡死）。"""
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import sys
@@ -10,7 +9,12 @@ import time
 import zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+TOOLS = Path(__file__).resolve().parent
+ROOT = TOOLS.parent
+if str(TOOLS) not in sys.path:
+    sys.path.insert(0, str(TOOLS))
+
+from _pack_common import assert_brand_assets, copy_ignore_patterns, workspace_version  # noqa: E402
 
 
 def log(msg: str) -> None:
@@ -27,7 +31,6 @@ def rm_tree(path: Path) -> None:
         except OSError as e:
             log(f"remove retry {attempt + 1}: {e}")
             time.sleep(0.6)
-    # last resort: rename aside
     bak = path.with_name(path.name + f".old_{int(time.time())}")
     try:
         path.rename(bak)
@@ -41,26 +44,9 @@ def copy_tree(src: Path, dst: Path) -> None:
     shutil.copytree(
         src,
         dst,
-        ignore=shutil.ignore_patterns(
-            "__pycache__",
-            "*.pyc",
-            ".git",
-            "local.toml",
-            "Thumbs.db",
-            ".DS_Store",
-            # 仅嵌入 Regular；其它字重体积大且未使用
-            "LXGWWenKai-Light.ttf",
-            "LXGWWenKai-Medium.ttf",
-            "LXGWWenKaiMono-*.ttf",
-        ),
+        ignore=shutil.ignore_patterns(*copy_ignore_patterns()),
         dirs_exist_ok=False,
     )
-
-
-def workspace_version() -> str:
-    text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
-    m = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
-    return m.group(1) if m else "0.0.0"
 
 
 def write_usage(out: Path, ver: str) -> None:
@@ -69,11 +55,12 @@ def write_usage(out: Path, ver: str) -> None:
 
 版本：Beta {ver}
 双击 eewview.exe 即可运行（勿拆散 assets / geodata / config 相对位置）。
+启动时会显示启动界面，底图就绪后进入主界面。
 
 【首次使用】
 1. 打开后点「设置」→ API与数据源，用 lk_ 换票绑定 Jian（可选）。
-2. 未配置 Jian 时，Wolfx / P2P / Pancakes 仍可用；Jian 健·态为「异常」。
-3. 用·配置写到本机 AppData，不回写本目录。
+2. 未配置 Jian 时，Wolfx / P2P / Pancakes 仍可用；Jian 健康态为「异常」。
+3. 用户配置写到本机 AppData，不回写本目录。
 4. 运行日志在本目录 logs/（按日滚动）；设置 → 高级可打开。
 
 【版本规则】
@@ -95,7 +82,7 @@ def zip_out(out: Path, ver: str) -> Path:
         for path in out.rglob("*"):
             if not path.is_file() or path.name in skip:
                 continue
-            # ·过 travel/raw（若误·入）
+            # 跳过 travel/raw（若误拷入）
             parts = set(path.parts)
             if "raw" in parts and "travel" in parts:
                 continue
@@ -110,8 +97,9 @@ def zip_out(out: Path, ver: str) -> Path:
 
 
 def main() -> int:
-    ver = workspace_version()
+    ver = workspace_version(ROOT)
     log(f"EEW View Beta {ver} portable pack")
+    assert_brand_assets(ROOT)
 
     skip_build = "--skip-build" in sys.argv
     exe_src = ROOT / "target" / "release" / "eewview.exe"

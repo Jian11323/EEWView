@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import platform
-import re
 import shutil
 import subprocess
 import sys
@@ -11,17 +10,20 @@ import tarfile
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+TOOLS = Path(__file__).resolve().parent
+ROOT = TOOLS.parent
+if str(TOOLS) not in sys.path:
+    sys.path.insert(0, str(TOOLS))
+
+from _pack_common import assert_brand_assets, copy_ignore_patterns, workspace_version  # noqa: E402
+
+LINUX_TARGET = "x86_64-unknown-linux-gnu"
+# glibc 2.31+（Ubuntu 20.04 / Debian 11 一类）
+ZIG_TARGET = "x86_64-unknown-linux-gnu.2.31"
 
 
 def log(msg: str) -> None:
     print(msg, flush=True)
-
-
-def workspace_version() -> str:
-    text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
-    m = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
-    return m.group(1) if m else "0.0.0"
 
 
 def rm_tree(path: Path) -> None:
@@ -42,17 +44,7 @@ def copy_tree(src: Path, dst: Path) -> None:
     shutil.copytree(
         src,
         dst,
-        ignore=shutil.ignore_patterns(
-            "__pycache__",
-            "*.pyc",
-            ".git",
-            "local.toml",
-            "Thumbs.db",
-            ".DS_Store",
-            "LXGWWenKai-Light.ttf",
-            "LXGWWenKai-Medium.ttf",
-            "LXGWWenKaiMono-*.ttf",
-        ),
+        ignore=shutil.ignore_patterns(*copy_ignore_patterns()),
     )
 
 
@@ -63,6 +55,7 @@ def write_usage(out: Path, ver: str) -> None:
 版本：Beta {ver}
 解压后：chmod +x eewview && ./eewview
 （勿拆散 assets / geodata / config）
+启动时会显示启动界面，底图就绪后进入主界面。
 
 【依赖】Debian/Ubuntu 示例：
   sudo apt install libasound2 libxcb-render0 libxcb-shape0 libxcb-xfixes0 \\
@@ -71,7 +64,7 @@ def write_usage(out: Path, ver: str) -> None:
 【首次使用】
 1. 设置 → API与数据源，用 lk_ 换票绑定 Jian（可选）
 2. 未配置 Jian 时 Wolfx / P2P / Pancakes 仍可用
-3. 配置写在用·目录，不回写本包
+3. 配置写在用户目录，不回写本包
 
 【版本规则】
 - PATCH：修 bug / 微调
@@ -98,16 +91,31 @@ def find_bin(cli_bin: str | None) -> Path:
             raise SystemExit(f"binary not found: {p}")
         return p
     for c in (
-        ROOT / "target" / "x86_64-unknown-linux-gnu" / "release" / "eewview",
+        ROOT / "target" / LINUX_TARGET / "release" / "eewview",
         ROOT / "target" / "release" / "eewview",
     ):
         if c.is_file():
             return c
     raise SystemExit(
         "未找到 Linux 二进制。本机 Linux/WSL: cargo build -p jian-app --release\n"
-        "Windows 交叉: cargo zigbuild -p jian-app --release --target x86_64-unknown-linux-gnu.2.31\n"
+        f"Windows 交叉: cargo zigbuild -p jian-app --release --target {ZIG_TARGET}\n"
         "然后: python tools/pack_linux.py --skip-build --bin <path>"
     )
+
+
+def try_zigbuild() -> int:
+    """Windows 上优先 cargo zigbuild；失败返回非 0。"""
+    cmd = [
+        "cargo",
+        "zigbuild",
+        "-p",
+        "jian-app",
+        "--release",
+        "--target",
+        ZIG_TARGET,
+    ]
+    log(" ".join(cmd))
+    return subprocess.run(cmd, cwd=ROOT).returncode
 
 
 def main() -> int:
@@ -117,14 +125,24 @@ def main() -> int:
     if "--bin" in args:
         cli_bin = args[args.index("--bin") + 1]
 
-    ver = workspace_version()
+    ver = workspace_version(ROOT)
     log(f"EEW View Beta {ver} Linux x86_64 portable")
+    assert_brand_assets(ROOT)
 
-    if not skip_build and cli_bin is None and platform.system() == "Linux":
-        log("cargo build -p jian-app --release")
-        r = subprocess.run(["cargo", "build", "-p", "jian-app", "--release"], cwd=ROOT)
-        if r.returncode != 0:
-            return r.returncode
+    if not skip_build and cli_bin is None:
+        if platform.system() == "Linux":
+            log("cargo build -p jian-app --release")
+            r = subprocess.run(
+                ["cargo", "build", "-p", "jian-app", "--release"], cwd=ROOT
+            )
+            if r.returncode != 0:
+                return r.returncode
+        else:
+            # Windows / macOS：交叉编译
+            if try_zigbuild() != 0:
+                raise SystemExit(
+                    "cargo zigbuild 失败。请安装 Zig 并确保在 PATH 中，或手动指定 --bin"
+                )
 
     bin_src = find_bin(cli_bin)
     log(f"binary: {bin_src}")

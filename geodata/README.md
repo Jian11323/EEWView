@@ -8,11 +8,11 @@
 
 | 顺序 | 路径 | 说明 |
 |------|------|------|
-| 1 | `medium.global.modified.geo.json` | 精细全球国界（展开 GeoJSON；含藏南相关改边界） |
+| 1 | `medium.global.modified.geo.json` | 精细全球国界（展开 GeoJSON） |
 | 2 | `kanameishi/medium.global.modified.topo.json` | 要石 TopoJSON 同套边界 |
 | 3 | `Globalmap.geo.json` + `world/` | 旧全球轮廓回退 |
 
-世界层本身不含中国 / 日本外轮廓（由区划层绘制）。使用根目录精细 GeoJSON 或 Globalmap 时，会叠加 `world/cn_boundary_patches.geojson`（或内置藏南 / 钓鱼岛补丁）。
+世界层本身不含中国 / 日本外轮廓（由区划层绘制）。藏南由 `cn.province` 西藏面叠盖世界层，不另画凸包；钓鱼岛用内置点状。
 
 ### 区划层
 
@@ -34,5 +34,5 @@
 
 | 路径 | 内容 |
 |------|------|
-| `world/cn_boundary_patches.geojson` | 藏南、钓鱼岛等补丁 |
+| `world/cn_boundary_patches.geojson` | 历史补丁（运行时不加载；钓鱼岛已内置） |
 | `*/`、`日本/` | 中国地市 / 日本都道府县（无要石区划时） |

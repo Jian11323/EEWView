@@ -343,11 +343,12 @@ impl VectorBasemap {
                 }
 
                 let (mut regional_fine, r_files, r_skip) = load_regional_rings(&dir);
-                // 藏南等补丁并入中日外轮廓与区划，避免麦克马洪线把藏南画在境外
-                let patches = load_cn_boundary_patch_rings(&dir);
-                regional_fine.extend(patches.iter().cloned());
-                let mut national_fine = dissolve_national_outlines(&regional_fine);
-                national_fine.extend(patches);
+                // 藏南：不另画凸包；要石 cn.province 西藏面已含主张范围，区划/国界叠在世界层之上即可
+                let diaoyu = builtin_diaoyu_patches();
+                let mut dissolve_src = regional_fine.clone();
+                dissolve_src.extend(diaoyu.iter().cloned());
+                let national_fine = dissolve_national_outlines(&dissolve_src);
+                regional_fine.extend(diaoyu);
                 let regional_n = regional_fine.len();
                 let national_lods = LayerLods::from_fine(national_fine, 0.25, 0.08);
                 let regional_lods = LayerLods::from_fine(regional_fine, 0.05, 0.012);
@@ -482,27 +483,27 @@ impl VectorBasemap {
                     0.0,
                 );
             }
-            if zoom < ZOOM_REGIONAL {
-                if !self.national.fine.is_empty() {
-                    let rings = self.national.pick(zoom, 3.0, 4.0);
-                    paint_rings(
-                        &mut shapes,
-                        rings,
-                        view,
-                        min_lon,
-                        min_lat,
-                        max_lon,
-                        max_lat,
-                        2.2,
-                        max_jump_px,
-                        Stroke::new(0.95_f32, style.world_border),
-                        fill_land,
-                        false,
-                        style.land_fill,
-                        0.0,
-                    );
-                }
-            } else if !self.regional.fine.is_empty() {
+            // 远距只画中日外轮廓；近距外轮廓仍保留，再叠省界
+            if !self.national.fine.is_empty() {
+                let rings = self.national.pick(zoom, 3.0, 4.0);
+                paint_rings(
+                    &mut shapes,
+                    rings,
+                    view,
+                    min_lon,
+                    min_lat,
+                    max_lon,
+                    max_lat,
+                    2.2,
+                    max_jump_px,
+                    Stroke::new(0.95_f32, style.world_border),
+                    fill_land,
+                    false,
+                    style.land_fill,
+                    0.0,
+                );
+            }
+            if zoom >= ZOOM_REGIONAL && !self.regional.fine.is_empty() {
                 let rings = self
                     .regional
                     .pick(zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
@@ -577,28 +578,27 @@ impl VectorBasemap {
                 );
             }
 
-            if zoom < ZOOM_REGIONAL {
-                if !self.national.fine.is_empty() {
-                    let rings = self.national.pick(zoom, 3.0, 4.0);
-                    let stroke = Stroke::new(0.95_f32, style.world_border);
-                    paint_rings(
-                        &mut shapes,
-                        rings,
-                        view,
-                        min_lon + lon_shift,
-                        min_lat,
-                        max_lon + lon_shift,
-                        max_lat,
-                        2.2,
-                        max_jump_px,
-                        stroke,
-                        fill_land,
-                        false,
-                        style.land_fill,
-                        lon_shift,
-                    );
-                }
-            } else if !self.regional.fine.is_empty() {
+            if !self.national.fine.is_empty() {
+                let rings = self.national.pick(zoom, 3.0, 4.0);
+                let stroke = Stroke::new(0.95_f32, style.world_border);
+                paint_rings(
+                    &mut shapes,
+                    rings,
+                    view,
+                    min_lon + lon_shift,
+                    min_lat,
+                    max_lon + lon_shift,
+                    max_lat,
+                    2.2,
+                    max_jump_px,
+                    stroke,
+                    fill_land,
+                    false,
+                    style.land_fill,
+                    lon_shift,
+                );
+            }
+            if zoom >= ZOOM_REGIONAL && !self.regional.fine.is_empty() {
                 let rings = self
                     .regional
                     .pick(zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
@@ -656,11 +656,16 @@ fn paint_rings(
     land_fill: Color32,
     lon_shift: f64,
 ) {
-    // 先填后描：避免后画的陆地盖住先画的边界
+    // 先填后描。灰底在加载时预剖分，绘制时只投影；球体按三角形常驻裁剪，
+    // 不因整环有一点落在地平线后就整片丢弃。
     if fill {
         let mut land = egui::epaint::Mesh::default();
         for ring in rings {
             if ring.tris.is_empty() {
+                continue;
+            }
+            if view.mode.is_globe() {
+                append_globe_fill_tris(&mut land, ring, view, land_fill);
                 continue;
             }
             if !ring_visible(
@@ -672,19 +677,16 @@ fn paint_rings(
             ) {
                 continue;
             }
-            let Some(verts) =
-                project_fill_vertices(ring, view, max_jump_px, lon_shift)
-            else {
-                continue;
-            };
-            let base = land.vertices.len() as u32;
-            land.reserve_vertices(verts.len());
-            land.reserve_triangles(ring.tris.len() / 3);
-            for p in verts {
-                land.colored_vertex(p, land_fill);
-            }
-            for tri in ring.tris.chunks_exact(3) {
-                land.add_triangle(base + tri[0], base + tri[1], base + tri[2]);
+            if let Some(verts) = project_fill_vertices(ring, view, lon_shift) {
+                let base = land.vertices.len() as u32;
+                land.reserve_vertices(verts.len());
+                land.reserve_triangles(ring.tris.len() / 3);
+                for p in verts {
+                    land.colored_vertex(p, land_fill);
+                }
+                for tri in ring.tris.chunks_exact(3) {
+                    land.add_triangle(base + tri[0], base + tri[1], base + tri[2]);
+                }
             }
         }
         if !land.indices.is_empty() {
@@ -783,32 +785,65 @@ fn triangulate_ring(exterior: &[[f32; 2]], holes: &[Vec<[f32; 2]>]) -> Vec<u32> 
     }
 }
 
-/// 投影填色顶点；任一点不可见或屏幕跳变过大则放弃该环填色（仍可描边）。
+/// 球体填色：只提交三顶点均在地平线内的预剖分三角形。
+fn append_globe_fill_tris(
+    land: &mut egui::epaint::Mesh,
+    ring: &RingSet,
+    view: &ViewCtx,
+    land_fill: Color32,
+) {
+    let n = ring.exterior.len() + ring.holes.iter().map(|h| h.len()).sum::<usize>();
+    let mut screen: Vec<Option<Pos2>> = Vec::with_capacity(n);
+    for p in &ring.exterior {
+        screen.push(view.project_fill(p[0] as f64, p[1] as f64));
+    }
+    for hole in &ring.holes {
+        if hole.len() < 3 {
+            continue;
+        }
+        for p in hole {
+            screen.push(view.project_fill(p[0] as f64, p[1] as f64));
+        }
+    }
+    if screen.len() < 3 {
+        return;
+    }
+
+    land.reserve_triangles(ring.tris.len() / 3);
+    for tri in ring.tris.chunks_exact(3) {
+        let i0 = tri[0] as usize;
+        let i1 = tri[1] as usize;
+        let i2 = tri[2] as usize;
+        let (Some(a), Some(b), Some(c)) = (
+            screen.get(i0).copied().flatten(),
+            screen.get(i1).copied().flatten(),
+            screen.get(i2).copied().flatten(),
+        ) else {
+            continue;
+        };
+        let base = land.vertices.len() as u32;
+        land.colored_vertex(a, land_fill);
+        land.colored_vertex(b, land_fill);
+        land.colored_vertex(c, land_fill);
+        land.add_triangle(base, base + 1, base + 2);
+    }
+}
+
+/// 平面填色：整环连续解缠 + `lon_shift`，避免按点 wrap 在视口边缘撕环丢填色。
 fn project_fill_vertices(
     ring: &RingSet,
     view: &ViewCtx,
-    max_jump_px: f32,
     lon_shift: f64,
 ) -> Option<Vec<Pos2>> {
-    let jump2 = max_jump_px * max_jump_px;
     let mut out: Vec<Pos2> =
         Vec::with_capacity(ring.exterior.len() + ring.holes.iter().map(|h| h.len()).sum::<usize>());
 
     let push_ring = |pts: &[[f32; 2]], out: &mut Vec<Pos2>| -> bool {
-        let Some(projected) = project_ring_points(pts, view, lon_shift) else {
+        let Some(projected) = project_ring_points_fill(pts, view, lon_shift) else {
             return false;
         };
         if projected.len() != pts.len() {
             return false;
-        }
-        for i in 0..projected.len() {
-            let a = projected[i];
-            let b = projected[(i + 1) % projected.len()];
-            let dx = a.x - b.x;
-            let dy = a.y - b.y;
-            if dx * dx + dy * dy > jump2 {
-                return false;
-            }
         }
         out.extend(projected);
         true
@@ -831,48 +866,30 @@ fn project_fill_vertices(
     Some(out)
 }
 
-fn project_ring_points(
+fn project_ring_points_fill(
     ring: &[[f32; 2]],
     view: &ViewCtx,
     lon_shift: f64,
 ) -> Option<Vec<Pos2>> {
-    if ring.is_empty() {
+    if ring.len() < 3 {
         return None;
     }
 
-    if view.mode.is_globe() {
-        let mut out = Vec::with_capacity(ring.len());
-        for p in ring {
-            let sp = view.project(p[0] as f64, p[1] as f64)?;
-            out.push(sp);
-        }
-        return Some(out);
+    // 先解缠成连续经度轨迹，再整体加世界副本偏移；禁止对单点 wrap_lon_near，
+    // 否则大块陆地在中心移到环「背面」时会被撕成断环并丢弃填色。
+    let unwrapped = unwrap_ring(ring);
+    if unwrapped.len() != ring.len() {
+        return None;
     }
-
-    let center_lon = view.center_lon;
     let zoom = view.zoom;
     let rect = view.rect;
-    let (cx, cy) = projection::lonlat_to_world(center_lon, view.center_lat, zoom);
-    let mut out = Vec::with_capacity(ring.len());
-    let mut prev_lon: Option<f64> = None;
-
-    for p in ring {
+    let (cx, cy) = projection::lonlat_to_world(view.center_lon, view.center_lat, zoom);
+    let mut out = Vec::with_capacity(unwrapped.len());
+    for p in &unwrapped {
+        let lon = p[0] as f64 + lon_shift;
         let lat = p[1] as f64;
-        let mut lon = projection::wrap_lon_near(p[0] as f64, center_lon) + lon_shift;
-        if let Some(prev) = prev_lon {
-            while lon - prev > 180.0 {
-                lon -= 360.0;
-            }
-            while prev - lon > 180.0 {
-                lon += 360.0;
-            }
-            if (lon - prev).abs() > 180.0 {
-                return None;
-            }
-        }
         let (wx, wy) = projection::lonlat_to_world(lon, lat, zoom);
         out.push(rect.center() + egui::Vec2::new((wx - cx) as f32, (wy - cy) as f32));
-        prev_lon = Some(lon);
     }
     Some(out)
 }
@@ -988,7 +1005,7 @@ fn load_world_rings(dir: &Path) -> (Vec<RingSet>, usize, usize) {
                     "loaded kanameishi world basemap"
                 );
                 world_fine.extend(rings);
-                // 要石世界层不含中日；藏南/钓鱼岛仍用补丁叠盖争议弧
+                // 要石世界层不含中日外轮廓；钓鱼岛点状叠盖（藏南靠中国省界上层叠盖）
                 append_cn_boundary_patches(dir, &mut world_fine, &mut files, &mut skipped);
                 return (world_fine, files, skipped);
             }
@@ -1026,17 +1043,16 @@ fn load_world_rings(dir: &Path) -> (Vec<RingSet>, usize, usize) {
         Vec::new()
     };
 
-    let mut saw_patch = false;
     for entry in world_entries {
         if globalmap.as_ref().is_some_and(|g| g == &entry) {
             continue;
         }
-        let patch = is_cn_boundary_patch(&entry);
-        if use_globalmap && !patch {
+        // 补丁文件不加载（藏南碎块已废弃；钓鱼岛用内置点状）
+        if is_cn_boundary_patch(&entry) {
             continue;
         }
-        if patch {
-            saw_patch = true;
+        if use_globalmap {
+            continue;
         }
         files += 1;
         match load_file(&entry) {
@@ -1048,67 +1064,27 @@ fn load_world_rings(dir: &Path) -> (Vec<RingSet>, usize, usize) {
         }
     }
 
-    if !saw_patch {
-        world_fine.extend(builtin_cn_boundary_patches());
-        info!("using builtin cn boundary patches (藏南 / 钓鱼岛)");
-    }
+    world_fine.extend(builtin_diaoyu_patches());
 
     (world_fine, files, skipped)
 }
 
 
-/// 仅加载藏南 / 钓鱼岛补丁环（供并入国家外轮廓与区划层）。
-fn load_cn_boundary_patch_rings(dir: &Path) -> Vec<RingSet> {
-    let mut out = Vec::new();
-    let world_dir = dir.join("world");
-    let mut saw = false;
-    if world_dir.is_dir() {
-        for entry in walk_geojson(&world_dir) {
-            if !is_cn_boundary_patch(&entry) {
-                continue;
-            }
-            saw = true;
-            match load_file(&entry) {
-                Ok(rings) => out.extend(rings),
-                Err(e) => warn!(path = %entry.display(), error = %e, "跳过边界补丁"),
-            }
-        }
-    }
-    if !saw {
-        out.extend(builtin_cn_boundary_patches());
-    }
-    out
-}
-
-/// 加载 `world/cn_boundary_patches`；若无文件则用内置藏南 / 钓鱼岛补丁。
+/// 世界层只叠钓鱼岛（点状）。藏南不另描边，由中国省界叠盖。
 fn append_cn_boundary_patches(
     dir: &Path,
     world_fine: &mut Vec<RingSet>,
     files: &mut usize,
     skipped: &mut usize,
 ) {
-    let world_dir = dir.join("world");
-    let mut saw_patch = false;
-    if world_dir.is_dir() {
-        for entry in walk_geojson(&world_dir) {
-            if !is_cn_boundary_patch(&entry) {
-                continue;
-            }
-            saw_patch = true;
-            *files += 1;
-            match load_file(&entry) {
-                Ok(rings) => world_fine.extend(rings),
-                Err(e) => {
-                    *skipped += 1;
-                    warn!(path = %entry.display(), error = %e, "跳过边界补丁");
-                }
-            }
-        }
+    let _ = dir;
+    let diaoyu = builtin_diaoyu_patches();
+    if diaoyu.is_empty() {
+        *skipped += 1;
+        return;
     }
-    if !saw_patch {
-        world_fine.extend(builtin_cn_boundary_patches());
-        info!("using builtin cn boundary patches (藏南 / 钓鱼岛)");
-    }
+    *files += 1;
+    world_fine.extend(diaoyu);
 }
 
 /// 区划层：优先要石中/日省界；否则扫中国地市 + 日本都道府县。
@@ -1407,23 +1383,8 @@ fn is_geojson_path(path: &Path) -> bool {
         || (l.ends_with(".json") && !l.ends_with(".geo.json"))
 }
 
-/// 内置藏南 / 钓鱼岛补丁（无补丁文件时使用）。
-fn builtin_cn_boundary_patches() -> Vec<RingSet> {
-    let zangnan: &[[f32; 2]] = &[
-        [91.0, 28.15],
-        [92.2, 28.35],
-        [93.5, 28.45],
-        [95.0, 28.55],
-        [96.5, 28.35],
-        [97.35, 28.05],
-        [97.35, 27.2],
-        [96.2, 26.85],
-        [94.8, 26.7],
-        [93.2, 26.85],
-        [91.8, 27.05],
-        [91.0, 27.55],
-        [91.0, 28.15],
-    ];
+/// 钓鱼岛（点状，可描边）。
+fn builtin_diaoyu_patches() -> Vec<RingSet> {
     let diaoyu: &[&[[f32; 2]]] = &[
         &[
             [123.45, 25.73],
@@ -1448,9 +1409,6 @@ fn builtin_cn_boundary_patches() -> Vec<RingSet> {
         ],
     ];
     let mut out = Vec::new();
-    if let Some(r) = ringset_from_lonlat(zangnan) {
-        out.push(r);
-    }
     for island in diaoyu {
         if let Some(r) = ringset_from_lonlat(island) {
             out.push(r);
