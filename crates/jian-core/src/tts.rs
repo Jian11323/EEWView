@@ -166,7 +166,8 @@ fn intensity_phrase(kind: IntensityKind, text: &str, level: u8, eew_style: bool)
     }
 }
 
-/// 对齐 eewcn `should_play_eew_tts`：同槽内容未变则不重读。
+/// 对齐 eewcn：同槽实质未变则不重读。
+/// 同 event+报数时忽略地名抖动（format_place 重算），避免连环朗读。
 pub fn should_play_eew_tts(last: Option<&EewReport>, data: &EewReport) -> bool {
     let Some(last) = last else {
         return true;
@@ -174,24 +175,20 @@ pub fn should_play_eew_tts(last: Option<&EewReport>, data: &EewReport) -> bool {
     if last.event_id != data.event_id {
         return true;
     }
-    if (last.origin_ms - data.origin_ms).abs() > 10_000 {
-        return true;
-    }
-    if last.place != data.place {
-        return true;
-    }
-    if last.max_intensity_text != data.max_intensity_text
-        || last.intensity_level != data.intensity_level
-    {
-        return true;
-    }
     if last.serial != data.serial {
         return true;
     }
-    if (last.magnitude - data.magnitude).abs() > 0.01 {
+    // 同报：仅震级/深度/烈度实质变化才再读
+    if (last.magnitude - data.magnitude).abs() >= 0.1 {
         return true;
     }
     if (last.depth_km as i32) != (data.depth_km as i32) {
+        return true;
+    }
+    if last.intensity_level != data.intensity_level {
+        return true;
+    }
+    if last.max_intensity_text != data.max_intensity_text {
         return true;
     }
     false
@@ -302,6 +299,12 @@ mod tests {
             final_at_ms: 0,
         };
         assert!(!should_play_eew_tts(Some(&ev), &ev));
+        let mut place_jitter = ev.clone();
+        place_jitter.place = "别处".into();
+        assert!(
+            !should_play_eew_tts(Some(&ev), &place_jitter),
+            "同报地名抖动不应重读"
+        );
         let mut next = ev.clone();
         next.serial = 7;
         assert!(should_play_eew_tts(Some(&ev), &next));

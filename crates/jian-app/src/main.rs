@@ -269,6 +269,7 @@ fn main() -> Result<()> {
                 last_follow_key: None,
                 last_record_follow_key: None,
                 last_eew_tts: HashMap::new(),
+                last_eew_tts_script: HashMap::new(),
                 cinema_idx: 0,
                 cinema_next_at: Instant::now(),
                 cinema_seen_key: String::new(),
@@ -408,6 +409,8 @@ struct JianApp {
     last_record_follow_key: Option<String>,
     /// 各侧栏源槽上次已播 TTS 的报文（对齐 eewcn last_report_data_dict）
     last_eew_tts: HashMap<String, EewReport>,
+    /// 同槽上次朗读原文；文案相同绝不重读
+    last_eew_tts_script: HashMap<String, String>,
     /// 多震 cinema 轮播：当前索引与下次切换时刻
     cinema_idx: usize,
     cinema_next_at: Instant,
@@ -455,26 +458,33 @@ impl eframe::App for JianApp {
                     ev,
                     Some(&self.cfg.filters),
                 );
-                // 预警 TTS：只读侧栏当前展示条 + eewcn 内容去重（列表显示啥读啥）
+                // 预警 TTS：侧栏展示条 + 内容/文案去重；启动 5s 内不念历史灌入
                 if let Some(report) = eew_for_tts {
+                    let boot_mute = self.started.elapsed().as_secs_f64() < 5.0;
                     if self.cfg.audio.tts_enabled
                         && !self.cfg.audio.mute
                         && !report.is_cancel
+                        && !boot_mute
                     {
                         if let Some((_, shown)) = eew_sidebar_entries(&self.snap.eew_list)
                             .into_iter()
                             .find(|(_, e)| same_eew_event(e, &report))
                         {
-                            // 被 upsert 拒绝的低优先级报不读
                             let accepted = shown.serial == report.serial
                                 && (shown.magnitude - report.magnitude).abs() < 0.05
                                 && shown.agency.0 == report.agency.0;
                             if accepted {
                                 let slot = eew_sidebar_group_key(&shown.agency.0);
+                                let script = build_eew_tts_script(shown);
+                                let same_script = self
+                                    .last_eew_tts_script
+                                    .get(&slot)
+                                    .is_some_and(|s| s == &script);
                                 let last = self.last_eew_tts.get(&slot);
-                                if should_play_eew_tts(last, shown) {
-                                    speak_async(build_eew_tts_script(shown));
-                                    self.last_eew_tts.insert(slot, shown.clone());
+                                if !same_script && should_play_eew_tts(last, shown) {
+                                    speak_async(script.clone());
+                                    self.last_eew_tts.insert(slot.clone(), shown.clone());
+                                    self.last_eew_tts_script.insert(slot, script);
                                 }
                             }
                         }

@@ -17,10 +17,17 @@ fn ensure_worker() -> Option<Sender<String>> {
         .name("jian-tts".into())
         .spawn(move || {
             while let Ok(text) = rx.recv() {
-                if text.trim().is_empty() {
+                // 只念队列里最新一条，丢掉积压（预警多源连刷时否则会念很久）
+                let mut latest = text;
+                while let Ok(more) = rx.try_recv() {
+                    if !more.trim().is_empty() {
+                        latest = more;
+                    }
+                }
+                if latest.trim().is_empty() {
                     continue;
                 }
-                speak_blocking(&text);
+                speak_blocking(&latest);
             }
         })
         .ok()?;

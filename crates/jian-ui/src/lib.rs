@@ -1035,9 +1035,9 @@ fn draw_countdown_hud(
         None
     };
 
-    // 贴地图视口右下角（勿用 ui.max_rect，易被其它分配挤偏）
-    let br = map_rect.right_bottom() + Vec2::new(-6.0, -6.0);
-    let hud_w = 300.0_f32;
+    // 贴地图视口右下角
+    let br = map_rect.right_bottom() + Vec2::new(-4.0, -4.0);
+    let hud_w = 280.0_f32;
     let hud_h = if snap.countdown_s.is_some() { 148.0 } else { 78.0 };
     let rect = egui::Rect::from_min_size(
         egui::pos2(br.x - hud_w, br.y - hud_h),
@@ -1046,12 +1046,15 @@ fn draw_countdown_hud(
     overlay_child(ui, "countdown_hud", rect, |ui| {
             ui.spacing_mut().window_margin = Margin::ZERO;
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
-            ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
+            // 整列从右侧往左排，避免 horizontal 撑满后内容靠左
+            ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
                 if let Some(sec) = snap.countdown_s {
                     outlined_label(ui, "S波即将到达", Color32::WHITE, 14.0, false);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(ui.available_width(), 44.0),
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
                             let mm = sec / 60;
                             let ss = sec % 60;
                             let time_txt = format!("{mm}:{ss:02}");
@@ -1099,8 +1102,8 @@ fn draw_countdown_hud(
                                             .size(34.0),
                                     );
                                 });
-                        });
-                    });
+                        },
+                    );
                     ui.add_space(6.0);
                 }
                 draw_tz_clock_block(ui, "BST", "北京时间", &clock);
@@ -1112,26 +1115,29 @@ fn draw_countdown_hud(
 }
 
 fn draw_tz_clock_block(ui: &mut Ui, code: &str, title: &str, datetime: &str) {
-    // 整块右对齐；块内固定 LTR：BST/JST 在左，中文标题与时间在右（对齐图二）
-    ui.horizontal(|ui| {
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+    // 从右往左排：时间块贴右，BST/JST 在其左侧
+    ui.allocate_ui_with_layout(
+        Vec2::new(ui.available_width(), 40.0),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            let font = FontId::new(22.0, FontFamily::Name("lxgw_wenkai".into()));
-            ui.label(RichText::new(code).font(font).color(Color32::WHITE).strong());
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                ui.set_max_width(210.0);
-                let f1 = FontId::new(13.0, FontFamily::Name("lxgw_wenkai".into()));
-                let f2 = FontId::new(15.0, FontFamily::Name("lxgw_wenkai".into()));
-                ui.label(
-                    RichText::new(title)
-                        .font(f1)
-                        .color(Color32::from_rgb(0xCC, 0xCC, 0xCC)),
-                );
-                ui.label(RichText::new(datetime).font(f2).color(Color32::WHITE));
+                ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+                    let f1 = FontId::new(13.0, FontFamily::Name("lxgw_wenkai".into()));
+                    let f2 = FontId::new(15.0, FontFamily::Name("lxgw_wenkai".into()));
+                    ui.label(
+                        RichText::new(title)
+                            .font(f1)
+                            .color(Color32::from_rgb(0xCC, 0xCC, 0xCC)),
+                    );
+                    ui.label(RichText::new(datetime).font(f2).color(Color32::WHITE));
+                });
             });
-        });
-    });
+            let font = FontId::new(22.0, FontFamily::Name("lxgw_wenkai".into()));
+            ui.label(RichText::new(code).font(font).color(Color32::WHITE).strong());
+        },
+    );
 }
 
 fn intensity_fg(bg: Color32) -> Color32 {
