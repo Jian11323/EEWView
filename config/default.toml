@@ -23,12 +23,19 @@ show_volcanoes = true
 
 
 [performance]
-# cpu = 软渲染；gpu = 硬件加速（改后需重启）
+# cpu = 软渲染；gpu = 硬件加速（改设备/API 后需重启）
 device = "gpu"
-# opengl | vulkan（仅 gpu）
-gpu_api = "vulkan"
-# eco 节能 | normal 正常 | extreme 极致
+# opengl | vulkan（仅 gpu；Windows 默认 opengl，更稳）
+gpu_api = "opengl"
+# eco 节能 | normal 正常 | extreme 极致（档位热重载，无需重启）
 profile = "normal"
+
+[window]
+# 主窗口几何（调整后自动写入用户配置）
+width = 1280.0
+height = 720.0
+# x / y 省略则由系统摆放
+maximized = false
 
 [map]
 # auto = 暗色要石矢量 / 亮色地形瓦片；也可强制 vector | tiles | both

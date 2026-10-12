@@ -68,7 +68,7 @@ def write_usage(out: Path, ver: str) -> None:
 ================
 
 版本：Beta {ver}
-双击 jian.exe 即可运行（勿拆散 assets / geodata / config 相对位置）。
+双击 eewview.exe 即可运行（勿拆散 assets / geodata / config 相对位置）。
 
 【首次使用】
 1. 打开后点「设置」→ API与数据源，用 lk_ 换票绑定 Jian（可选）。
@@ -114,7 +114,7 @@ def main() -> int:
     log(f"EEW View Beta {ver} portable pack")
 
     skip_build = "--skip-build" in sys.argv
-    exe_src = ROOT / "target" / "release" / "jian.exe"
+    exe_src = ROOT / "target" / "release" / "eewview.exe"
     if not skip_build or not exe_src.is_file():
         log("cargo build -p jian-app --release")
         r = subprocess.run(
@@ -135,7 +135,7 @@ def main() -> int:
     rm_tree(out)
     out.mkdir(parents=True, exist_ok=True)
 
-    shutil.copy2(exe_src, out / "jian.exe")
+    shutil.copy2(exe_src, out / "eewview.exe")
     for name in ("README.md", "LICENSE"):
         src = ROOT / name
         if src.is_file():
@@ -157,7 +157,7 @@ def main() -> int:
     zpath = zip_out(out, ver)
     log(f"DIR  {out}")
     log(f"ZIP  {zpath}")
-    log(f"RUN  {out / 'jian.exe'}")
+    log(f"RUN  {out / 'eewview.exe'}")
     return 0
 
 

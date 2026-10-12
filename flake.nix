@@ -10,7 +10,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        version = "1.1.0";
+        version = "1.3.0";
       in {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "eew-view";
@@ -56,7 +56,7 @@
                 $out/share/icons/hicolor/256x256/apps/eew-view.png
             fi
 
-            makeWrapper $out/bin/jian $out/bin/eew-view \
+            makeWrapper $out/bin/eewview $out/bin/eew-view \
               --set EEWVIEW_ROOT $out/share/eew-view \
               --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath [
                 pkgs.alsa-lib

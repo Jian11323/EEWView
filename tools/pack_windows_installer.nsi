@@ -3,7 +3,7 @@ Unicode true
 RequestExecutionLevel admin
 
 !ifndef VERSION
-  !define VERSION "1.1.0"
+  !define VERSION "1.3.0"
 !endif
 !ifndef DIST_DIR
   !define DIST_DIR "..\dist\EEWView"
@@ -43,7 +43,7 @@ Section "EEW View" SecMain
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
     "Publisher" "Jian11323"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
-    "DisplayIcon" "$INSTDIR\jian.exe"
+    "DisplayIcon" "$INSTDIR\eewview.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
     "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
@@ -52,8 +52,8 @@ Section "EEW View" SecMain
     "NoRepair" 1
 
   CreateDirectory "$SMPROGRAMS\EEW View"
-  CreateShortCut "$SMPROGRAMS\EEW View\EEW View.lnk" "$INSTDIR\jian.exe" "" "$INSTDIR\assets\brand\app.ico"
-  CreateShortCut "$DESKTOP\EEW View.lnk" "$INSTDIR\jian.exe" "" "$INSTDIR\assets\brand\app.ico"
+  CreateShortCut "$SMPROGRAMS\EEW View\EEW View.lnk" "$INSTDIR\eewview.exe" "" "$INSTDIR\assets\brand\app.ico" 0 SW_SHOWNORMAL "" "$INSTDIR"
+  CreateShortCut "$DESKTOP\EEW View.lnk" "$INSTDIR\eewview.exe" "" "$INSTDIR\assets\brand\app.ico" 0 SW_SHOWNORMAL "" "$INSTDIR"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 SectionEnd
 

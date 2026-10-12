@@ -65,7 +65,7 @@ pub fn diagnose() -> PerfDiagnosis {
     };
 
     let summary = format!(
-        "CPU：{cpu_name}\n内存：{ram_gb:.1} GB（估分 CPU {cpu_score:.0} / 内存 {ram_score:.0}）\n{gpu_hint}\n建议：设备={device}，API={gpu_api}，档位={profile}\n（渲染后端保存后需重启生效）"
+        "CPU：{cpu_name}\n内存：{ram_gb:.1} GB（估分 CPU {cpu_score:.0} / 内存 {ram_score:.0}）\n{gpu_hint}\n建议：设备={device}，API={gpu_api}，档位={profile}\n（设备/GPU 接口需重启；性能档位立即生效）"
     );
 
     PerfDiagnosis {

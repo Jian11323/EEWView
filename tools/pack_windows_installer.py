@@ -81,7 +81,7 @@ def ensure_nsis() -> Path:
 
 def ensure_portable() -> Path:
     dist = ROOT / "dist" / "EEWView"
-    exe = dist / "jian.exe"
+    exe = dist / "eewview.exe"
     if exe.is_file() and (dist / "assets").is_dir():
         return dist
     log("portable dir missing → run pack_windows.py first")

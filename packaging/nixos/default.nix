@@ -5,7 +5,7 @@
 
 pkgs.stdenv.mkDerivation rec {
   pname = "eew-view";
-  version = "1.1.0";
+  version = "1.3.0";
 
   # 将 CI / pack_linux 产物放到同目录并改名，或改下面 src
   src = ./EEWView_Beta_${version}_linux_x86_64.tar.gz;
@@ -16,10 +16,10 @@ pkgs.stdenv.mkDerivation rec {
     mkdir -p $out/share/eew-view $out/bin
     # tar 顶层为 EEWView/
     cp -r EEWView/* $out/share/eew-view/
-    chmod +x $out/share/eew-view/jian
-    makeWrapper $out/share/eew-view/jian $out/bin/eew-view \
+    chmod +x $out/share/eew-view/eewview
+    makeWrapper $out/share/eew-view/eewview $out/bin/eew-view \
       --set EEWVIEW_ROOT $out/share/eew-view
-    makeWrapper $out/share/eew-view/jian $out/bin/jian \
+    makeWrapper $out/share/eew-view/eewview $out/bin/eewview \
       --set EEWVIEW_ROOT $out/share/eew-view
 
     mkdir -p $out/share/applications

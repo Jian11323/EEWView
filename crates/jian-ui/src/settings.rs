@@ -309,6 +309,10 @@ impl SettingsSession {
         if self.draft.is_none() {
             self.draft = Some(live.clone());
         }
+        // 选点时隐藏设置窗，避免挡住地图点击
+        if self.map_pick.is_some() {
+            return None;
+        }
 
         let mut action = None;
         let mut restore = false;
@@ -1515,7 +1519,7 @@ fn draw_general(
     });
 
     section(ui, "性能与渲染", "\u{25ce}", |ui| {
-        control_row(ui, "渲染设备", "CPU 软渲染 / GPU 硬件加速（改后需重启）", "\u{25ce}", |ui| {
+        control_row(ui, "渲染设备", "CPU 软渲染 / GPU 硬件加速（仅此项与 GPU 接口需重启）", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("set_perf_device")
                 .selected_text(perf_device_label(&draft.performance.device))
                 .width(140.0)
@@ -1545,7 +1549,7 @@ fn draw_general(
             });
         }
         row_divider(ui);
-        control_row(ui, "性能模式", "节能 / 正常 / 极致", "\u{25ce}", |ui| {
+        control_row(ui, "性能模式", "节能 / 正常 / 极致（保存后立即生效，无需重启）", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("set_perf_profile")
                 .selected_text(perf_profile_label(&draft.performance.profile))
                 .width(140.0)

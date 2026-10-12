@@ -61,7 +61,7 @@ def write_usage(out: Path, ver: str) -> None:
 ================================
 
 版本：Beta {ver}
-解压后：chmod +x jian && ./jian
+解压后：chmod +x eewview && ./eewview
 （勿拆散 assets / geodata / config）
 
 【依赖】Debian/Ubuntu 示例：
@@ -81,7 +81,7 @@ def write_usage(out: Path, ver: str) -> None:
     (out / "使用说明.txt").write_bytes(usage.encode("utf-8"))
     run_sh = out / "run.sh"
     run_sh.write_text(
-        '#!/bin/sh\ncd "$(dirname "$0")"\nexec ./jian "$@"\n',
+        '#!/bin/sh\ncd "$(dirname "$0")"\nexec ./eewview "$@"\n',
         encoding="utf-8",
         newline="\n",
     )
@@ -98,8 +98,8 @@ def find_bin(cli_bin: str | None) -> Path:
             raise SystemExit(f"binary not found: {p}")
         return p
     for c in (
-        ROOT / "target" / "x86_64-unknown-linux-gnu" / "release" / "jian",
-        ROOT / "target" / "release" / "jian",
+        ROOT / "target" / "x86_64-unknown-linux-gnu" / "release" / "eewview",
+        ROOT / "target" / "release" / "eewview",
     ):
         if c.is_file():
             return c
@@ -133,7 +133,7 @@ def main() -> int:
     rm_tree(out)
     out.mkdir(parents=True)
 
-    dst = out / "jian"
+    dst = out / "eewview"
     shutil.copy2(bin_src, dst)
     try:
         dst.chmod(0o755)

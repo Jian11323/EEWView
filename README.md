@@ -115,7 +115,7 @@ python tools/pack_windows_installer.py
 
 # Linux x86_64 便携包（本机 Linux / WSL，或 Windows 交叉 cargo zigbuild 后）
 # cargo zigbuild -p jian-app --release --target x86_64-unknown-linux-gnu.2.31
-python tools/pack_linux.py --skip-build --bin target/x86_64-unknown-linux-gnu/release/jian
+python tools/pack_linux.py --skip-build --bin target/x86_64-unknown-linux-gnu/release/eewview
 
 # NixOS / flake（在已装 Nix 的机器上）
 # nix run .#

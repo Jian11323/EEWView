@@ -15,7 +15,7 @@ usage = f"""EEWView 便携测试包
 ================
 
 版本：Beta {ver}
-双击 jian.exe 即可运行（勿拆散 assets / geodata / config 相对位置）。
+双击 eewview.exe 即可运行（勿拆散 assets / geodata / config 相对位置）。
 
 【首次使用】
 1. 打开后点「设置」→ API与数据源，用 lk_ 换票绑定 Jian（可选）。

@@ -12,6 +12,9 @@ pub struct AppConfig {
     pub ui: UiConfig,
     #[serde(default)]
     pub performance: PerformanceConfig,
+    /// 主窗口位置与大小（调整后自动保存）
+    #[serde(default)]
+    pub window: WindowConfig,
     pub map: MapConfig,
     pub audio: AudioConfig,
     pub travel: TravelConfig,
@@ -93,6 +96,42 @@ pub struct UiConfig {
     pub show_volcanoes: bool,
 }
 
+
+/// 主窗口几何；缺省由系统摆放，用户拖动/缩放后写入用户配置。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowConfig {
+    #[serde(default = "default_window_width")]
+    pub width: f32,
+    #[serde(default = "default_window_height")]
+    pub height: f32,
+    /// 外框左上角 X（物理像素近似）；缺省不强制
+    #[serde(default)]
+    pub x: Option<f32>,
+    #[serde(default)]
+    pub y: Option<f32>,
+    #[serde(default)]
+    pub maximized: bool,
+}
+
+fn default_window_width() -> f32 {
+    1280.0
+}
+fn default_window_height() -> f32 {
+    720.0
+}
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        Self {
+            width: default_window_width(),
+            height: default_window_height(),
+            x: None,
+            y: None,
+            maximized: false,
+        }
+    }
+}
+
 /// 渲染设备与性能档位（改渲染后端需重启后生效）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceConfig {
@@ -111,7 +150,7 @@ fn default_perf_device() -> String {
     "gpu".into()
 }
 fn default_perf_gpu_api() -> String {
-    "vulkan".into()
+    "opengl".into()
 }
 fn default_perf_profile() -> String {
     "normal".into()
@@ -503,6 +542,7 @@ impl Default for AppConfig {
                 show_volcanoes: true,
             },
             performance: PerformanceConfig::default(),
+            window: WindowConfig::default(),
             map: MapConfig {
                 basemap: default_basemap(),
                 projection: default_projection(),

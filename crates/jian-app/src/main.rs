@@ -209,63 +209,105 @@ fn main() -> Result<()> {
         shell.map.center_lat = ev.latitude;
     }
 
+    let win = &cfg.window;
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([1280.0, 720.0])
+        .with_inner_size([
+            win.width.clamp(640.0, 7680.0),
+            win.height.clamp(480.0, 4320.0),
+        ])
         .with_title(format!(
             "{} \u{00b7} 地震视监器  [Beta] v{}",
             jian_ui::APP_DISPLAY_NAME,
             env!("CARGO_PKG_VERSION")
         ));
+    if let (Some(x), Some(y)) = (win.x, win.y) {
+        viewport = viewport.with_position([x, y]);
+    }
+    if win.maximized {
+        viewport = viewport.with_maximized(true);
+    }
     if let Some(icon) = jian_ui::app_icon_data() {
         viewport = viewport.with_icon(icon);
     }
     if cfg.ui.always_on_top {
         viewport = viewport.with_always_on_top();
     }
-    let options = build_native_options(viewport, &cfg.performance);
-
     let started = Instant::now();
     let has_local = cfg.local.latitude.is_some() && cfg.local.longitude.is_some();
     snap.show_wave_rings = cfg.ui.show_wave_rings;
-    eframe::run_native(
+
+    let seed = std::rc::Rc::new(std::cell::RefCell::new(Some(JianApp {
+        _log_guard: log_guard,
+        resource_root: root,
+        snap,
+        shell,
+        travel,
+        started,
+        local_lat: cfg.local.latitude,
+        local_lon: cfg.local.longitude,
+        has_local,
+        geodata_dir,
+        assets_dir: assets,
+        cfg: cfg.clone(),
+        rt,
+        net_rx,
+        audio,
+        auto_center_pending: live,
+        last_follow_key: None,
+        last_record_follow_key: None,
+        cinema_idx: 0,
+        cinema_next_at: Instant::now(),
+        cinema_seen_key: String::new(),
+        prev_health: (
+            HealthStatus::Abnormal,
+            HealthStatus::Abnormal,
+            HealthStatus::Abnormal,
+            HealthStatus::Abnormal,
+        ),
+        prev_tsunami_key: String::new(),
+        window_geom_save_at: None,
+        last_window_geom: None,
+    })));
+
+    let make_app = |seed: std::rc::Rc<std::cell::RefCell<Option<JianApp>>>| {
+        Box::new(move |cc: &eframe::CreationContext<'_>| -> Result<Box<dyn eframe::App>, Box<dyn std::error::Error + Send + Sync>> {
+            install_cjk_fonts(&cc.egui_ctx);
+            let app = seed
+                .borrow_mut()
+                .take()
+                .ok_or_else(|| "app seed already taken")?;
+            Ok(Box::new(app) as Box<dyn eframe::App>)
+        })
+    };
+
+    // 优先按配置启动；Vulkan/wgpu 失败则回退 OpenGL（安装后打不开的常见原因）
+    let mut perf = cfg.performance.clone();
+    let options = build_native_options(viewport.clone(), &perf);
+    match eframe::run_native(
         jian_ui::APP_DISPLAY_NAME,
         options,
-        Box::new(move |cc| {
-            install_cjk_fonts(&cc.egui_ctx);
-            Ok(Box::new(JianApp {
-                _log_guard: log_guard,
-                resource_root: root,
-                snap,
-                shell,
-                travel,
-                started,
-                local_lat: cfg.local.latitude,
-                local_lon: cfg.local.longitude,
-                has_local,
-                geodata_dir,
-                assets_dir: assets,
-                cfg,
-                rt,
-                net_rx,
-                audio,
-                auto_center_pending: live,
-                last_follow_key: None,
-                last_record_follow_key: None,
-                cinema_idx: 0,
-                cinema_next_at: Instant::now(),
-                cinema_seen_key: String::new(),
-                prev_health: (
-                    HealthStatus::Abnormal,
-                    HealthStatus::Abnormal,
-                    HealthStatus::Abnormal,
-                    HealthStatus::Abnormal,
-                ),
-                prev_tsunami_key: String::new(),
-            }))
-        }),
-    )
-    .map_err(|e| anyhow::anyhow!("eframe: {e}"))?;
-    Ok(())
+        make_app(std::rc::Rc::clone(&seed)),
+    ) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let api = perf.gpu_api.to_ascii_lowercase();
+            let used_wgpu = perf.device.to_ascii_lowercase() != "cpu"
+                && api != "opengl"
+                && api != "gl";
+            if !used_wgpu || seed.borrow().is_none() {
+                return Err(anyhow::anyhow!("eframe: {e}"));
+            }
+            tracing::error!("GPU/Vulkan 启动失败，回退 OpenGL: {e}");
+            perf.gpu_api = "opengl".into();
+            let options = build_native_options(viewport, &perf);
+            eframe::run_native(
+                jian_ui::APP_DISPLAY_NAME,
+                options,
+                make_app(seed),
+            )
+            .map_err(|e2| anyhow::anyhow!("eframe(OpenGL fallback): {e2}"))
+        }
+    }
 }
 
 fn build_native_options(
@@ -318,7 +360,8 @@ fn idle_repaint_ms(profile: &str) -> u64 {
     match profile.to_ascii_lowercase().as_str() {
         "eco" | "节能" => 100,
         "extreme" | "极致" => 16,
-        _ => 250,
+        // 正常：约 30fps 空闲，避免拖拽/点击手感发木
+        _ => 33,
     }
 }
 
@@ -411,10 +454,15 @@ struct JianApp {
     cinema_seen_key: String,
     prev_health: (HealthStatus, HealthStatus, HealthStatus, HealthStatus),
     prev_tsunami_key: String,
+    /// 窗口几何变更后延迟写入用户配置
+    window_geom_save_at: Option<Instant>,
+    last_window_geom: Option<(f32, f32, Option<f32>, Option<f32>, bool)>,
 }
 
 impl eframe::App for JianApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.tick_window_geometry(ctx);
+
         if let Some(rx) = self.net_rx.as_mut() {
             while let Ok(ev) = rx.try_recv() {
                 if let NetEvent::Eew(ref report) = ev {
@@ -706,7 +754,7 @@ impl eframe::App for JianApp {
             match action {
                 SettingsAction::Saved { cfg, close } => {
                     match self.apply_saved_config(cfg) {
-                        Ok(path) => {
+                        Ok((path, renderer_changed)) => {
                             ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
                                 if self.cfg.ui.always_on_top {
                                     egui::WindowLevel::AlwaysOnTop
@@ -715,9 +763,11 @@ impl eframe::App for JianApp {
                                 },
                             ));
                             self.snap.show_wave_rings = self.cfg.ui.show_wave_rings;
-                            self.shell
-                                .settings
-                                .set_save_note(format!("已保存到 {}", path.display()));
+                            let mut note = format!("已保存到 {}", path.display());
+                            if renderer_changed {
+                                note.push_str("；渲染设备/GPU 接口需重启生效，其余已热重载");
+                            }
+                            self.shell.settings.set_save_note(note);
                             if close {
                                 self.shell.settings.close_after_save();
                             }
@@ -774,8 +824,14 @@ impl eframe::App for JianApp {
                 }
             }
         }
-        // 空闲降频；设置窗打开或极致模式保持高刷
-        if self.shell.map.is_flying() || self.shell.settings.open {
+        // 交互中 / 飞跃 / 设置窗：高刷；否则按性能档位空闲降频
+        let pointer_busy = ctx.input(|i| {
+            i.pointer.any_down()
+                || i.pointer.button_clicked(egui::PointerButton::Primary)
+                || i.pointer.button_released(egui::PointerButton::Primary)
+                || i.smooth_scroll_delta.length_sq() > 0.0
+        });
+        if pointer_busy || self.shell.map.is_flying() || self.shell.settings.open {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         } else {
             let ms = idle_repaint_ms(&self.cfg.performance.profile);
@@ -785,6 +841,59 @@ impl eframe::App for JianApp {
 }
 
 impl JianApp {
+    fn tick_window_geometry(&mut self, ctx: &egui::Context) {
+        let (w, h, x, y, maximized) = ctx.input(|i| {
+            let v = i.viewport();
+            let inner = v.inner_rect.unwrap_or(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(self.cfg.window.width, self.cfg.window.height),
+            ));
+            let outer = v.outer_rect;
+            let (x, y) = outer
+                .map(|r| (Some(r.min.x), Some(r.min.y)))
+                .unwrap_or((self.cfg.window.x, self.cfg.window.y));
+            (
+                inner.width().round(),
+                inner.height().round(),
+                x.map(|v| v.round()),
+                y.map(|v| v.round()),
+                v.maximized.unwrap_or(false),
+            )
+        });
+        if w < 200.0 || h < 150.0 {
+            return;
+        }
+        let geom = (w, h, x, y, maximized);
+        if self.last_window_geom.as_ref() == Some(&geom) {
+            if let Some(at) = self.window_geom_save_at {
+                if at.elapsed() >= std::time::Duration::from_millis(600) {
+                    self.window_geom_save_at = None;
+                    let same = (self.cfg.window.width - w).abs() < 0.5
+                        && (self.cfg.window.height - h).abs() < 0.5
+                        && self.cfg.window.x == x
+                        && self.cfg.window.y == y
+                        && self.cfg.window.maximized == maximized;
+                    if same {
+                        return;
+                    }
+                    self.cfg.window.width = w;
+                    self.cfg.window.height = h;
+                    self.cfg.window.x = x;
+                    self.cfg.window.y = y;
+                    self.cfg.window.maximized = maximized;
+                    if let Err(e) = self.cfg.save_user_overlay() {
+                        tracing::warn!("保存窗口几何失败: {e:#}");
+                    } else {
+                        tracing::debug!(w, h, ?x, ?y, maximized, "窗口几何已保存");
+                    }
+                }
+            }
+            return;
+        }
+        self.last_window_geom = Some(geom);
+        self.window_geom_save_at = Some(Instant::now());
+    }
+
     fn tick_health_audio(&mut self) {
         let cur = (
             self.snap.health_jian,
@@ -856,11 +965,15 @@ impl JianApp {
         audio.play(AudioCue::Tsunami { grade: g, kind });
     }
 
-    fn apply_saved_config(&mut self, new_cfg: AppConfig) -> Result<PathBuf, String> {
+    fn apply_saved_config(&mut self, new_cfg: AppConfig) -> Result<(PathBuf, bool), String> {
         let sources_same = self.cfg.sources_runtime_equal(&new_cfg);
         let travel_same = self.cfg.travel.primary == new_cfg.travel.primary
             && self.cfg.travel.fallback == new_cfg.travel.fallback
             && self.cfg.travel.linear_last_resort == new_cfg.travel.linear_last_resort;
+        let renderer_changed = self.cfg.performance.device.to_ascii_lowercase()
+            != new_cfg.performance.device.to_ascii_lowercase()
+            || self.cfg.performance.gpu_api.to_ascii_lowercase()
+                != new_cfg.performance.gpu_api.to_ascii_lowercase();
         self.cfg = new_cfg;
 
         self.local_lat = self.cfg.local.latitude;
@@ -921,7 +1034,7 @@ impl JianApp {
         match self.cfg.save_user_overlay() {
             Ok(path) => {
                 tracing::info!(path = %path.display(), "用户配置已保存");
-                Ok(path)
+                Ok((path, renderer_changed))
             }
             Err(e) => {
                 tracing::warn!("保存用户配置失败: {e:#}");

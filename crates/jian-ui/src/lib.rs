@@ -376,6 +376,7 @@ fn draw_map_pick_banner(ui: &mut Ui, p: &ThemePalette, kind: MapPickKind) {
     egui::Area::new(egui::Id::new("map_pick_banner"))
         .fixed_pos(ui.max_rect().center_top() + Vec2::new(-140.0, 44.0))
         .order(egui::Order::Foreground)
+        .interactable(false)
         .show(ui.ctx(), |ui| {
             Frame::NONE
                 .fill(p.panel_glass_soft)
@@ -498,6 +499,7 @@ fn draw_map_load_banner(ui: &mut Ui, p: &ThemePalette, state: BasemapLoadState, 
     egui::Area::new(egui::Id::new("map_load_banner"))
         .fixed_pos(ui.max_rect().center_top() + Vec2::new(-120.0, 10.0))
         .order(egui::Order::Foreground)
+        .interactable(false)
         .show(ui.ctx(), |ui| {
             Frame::NONE
                 .fill(p.panel_glass_soft)
@@ -567,6 +569,7 @@ fn draw_event_header(
     egui::Area::new(egui::Id::new("event_header"))
         .fixed_pos(ui.max_rect().left_top() + Vec2::new(LEFT_PANEL_X, OVERLAY_TOP_Y))
         .order(egui::Order::Foreground)
+        .interactable(false)
         .show(ui.ctx(), |ui| {
             ui.spacing_mut().item_spacing.y = ROW_GAP;
             ui.vertical(|ui| {
@@ -734,6 +737,7 @@ fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
     egui::Area::new(egui::Id::new("tsunami_banner"))
         .fixed_pos(ui.max_rect().left_top() + Vec2::new(LEFT_PANEL_X, top_y))
         .order(egui::Order::Foreground)
+        .interactable(false)
         .show(ui.ctx(), |ui| {
             Frame::NONE
                 .fill(fill)
@@ -833,6 +837,7 @@ fn draw_realtime_intensity_card(
         .pivot(egui::Align2::RIGHT_TOP)
         .fixed_pos(top_right)
         .order(egui::Order::Foreground)
+        .interactable(false)
         .show(ui.ctx(), |ui| {
             ui.set_min_size(Vec2::new(total_w, CARD_H));
             ui.horizontal(|ui| {
