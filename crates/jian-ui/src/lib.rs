@@ -1066,13 +1066,12 @@ fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_ni
 }
 
 fn draw_tz_clock_block(ui: &mut Ui, code: &str, title: &str, datetime: &str) {
-    ui.horizontal(|ui| {
+    // right_to_left：整块贴右；先排两行文案再排 BST/JST，视觉仍为「代号 | 标题/时间」
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            let font = FontId::new(28.0, FontFamily::Name("lxgw_wenkai".into()));
-            ui.label(RichText::new(code).font(font).color(Color32::WHITE).strong());
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
                 let f1 = FontId::new(13.0, FontFamily::Name("lxgw_wenkai".into()));
                 let f2 = FontId::new(16.0, FontFamily::Name("lxgw_wenkai".into()));
                 ui.label(
@@ -1083,6 +1082,8 @@ fn draw_tz_clock_block(ui: &mut Ui, code: &str, title: &str, datetime: &str) {
                 ui.label(RichText::new(datetime).font(f2).color(Color32::WHITE));
             });
         });
+        let font = FontId::new(28.0, FontFamily::Name("lxgw_wenkai".into()));
+        ui.label(RichText::new(code).font(font).color(Color32::WHITE).strong());
     });
 }
 

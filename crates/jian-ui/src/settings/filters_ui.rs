@@ -22,7 +22,7 @@ fn mag_label(v: f64) -> String {
 pub fn draw_eew_and_record_filters(ui: &mut Ui, draft: &mut AppConfig) {
     section(ui, "预警机构开关", "\u{26a1}", |ui| {
         ui.label(
-            RichText::new("关闭后对应机构预警不进列表。")
+            RichText::new("作用于 Jian / Wolfx / Pancakes 等全部接入通道；关闭后对应机构预警不进列表。")
                 .size(12.0)
                 .color(muted()),
         );
@@ -51,7 +51,7 @@ pub fn draw_eew_and_record_filters(ui: &mut Ui, draft: &mut AppConfig) {
 
     section(ui, "信息事件震级过滤", "\u{25ce}", |ui| {
         ui.label(
-            RichText::new("低于阈值的信息事件不会显示。白名单可绕过震级，不能绕过「不接收」。")
+            RichText::new("速报（信息事件）按机构过滤：选「不接收」即关闭该源速报；低于阈值的不显示。白名单可绕过震级，不能绕过「不接收」。")
                 .size(12.0)
                 .color(muted()),
         );

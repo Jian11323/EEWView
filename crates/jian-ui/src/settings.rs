@@ -1025,27 +1025,12 @@ fn draw_sources(
         }
         ui.add_space(8.0);
         ui.label(
-            RichText::new("Jian /all 预警子源（与「过滤」页机构开关同步）")
-                .size(12.0)
-                .color(chrome().muted),
+            RichText::new(
+                "Jian /all 同时接入预警与速报。各机构预警开关、速报震级过滤请到左侧「过滤」页，避免与数据源页重复。",
+            )
+            .size(12.0)
+            .color(chrome().muted),
         );
-        ui.add_space(6.0);
-        for fam in jian_core::EEW_FILTER_FAMILIES {
-            row_divider(ui);
-            let key = fam.as_filter_key();
-            let mut on = draft.filters.eew_agency_on(key);
-            control_row(
-                ui,
-                fam.display_name(),
-                &format!("[{}]", fam.bracket_label()),
-                "\u{25ce}",
-                |ui| {
-                    if toggle(ui, &mut on).changed() {
-                        draft.filters.set_eew_agency(key, on);
-                    }
-                },
-            );
-        }
     });
 
     section(ui, "Wolfx", "\u{25ce}", |ui| {
