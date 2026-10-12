@@ -42,7 +42,7 @@ pub fn spawn(tx: NetTx, cfg: JianSourceConfig) -> Vec<JoinHandle<()>> {
     let mut tasks = Vec::new();
     let mut any = false;
 
-    if cfg.enabled && (cfg.eew_enabled || cfg.record_enabled) {
+    if cfg.enabled {
         any = true;
         let token = resolve_access_token(&cfg);
         let Some(token) = token else {
@@ -58,19 +58,16 @@ pub fn spawn(tx: NetTx, cfg: JianSourceConfig) -> Vec<JoinHandle<()>> {
             url = format!("{url}{sep}key={token}");
         }
 
-        let list_cmds = if cfg.record_enabled {
-            vec![
-                "cenclist".into(),
-                "cwalist".into(),
-                "jmalist".into(),
-                "hkolist".into(),
-            ]
-        } else {
-            Vec::new()
-        };
-        let period = if cfg.record_enabled { 60 } else { 0 };
+        // 速报列表始终拉取；是否展示由「信息事件震级过滤」决定
+        let list_cmds = vec![
+            "cenclist".into(),
+            "cwalist".into(),
+            "jmalist".into(),
+            "hkolist".into(),
+        ];
+        let period = 60;
 
-        info!(%url, eew = cfg.eew_enabled, record = cfg.record_enabled, "jian: spawn /all");
+        info!(%url, "jian: spawn /all");
         let tx_all = tx.clone();
         let cfg_all = cfg.clone();
         tasks.push(tokio::spawn(async move {

@@ -305,14 +305,9 @@ fn build_native_options(
     }
 }
 
-/// 性能档位 → 空闲重绘间隔（毫秒）。设置窗打开时强制高刷。
-fn idle_repaint_ms(profile: &str) -> u64 {
-    match profile.to_ascii_lowercase().as_str() {
-        "eco" | "节能" => 100,
-        "extreme" | "极致" => 16,
-        // 正常：约 30fps 空闲，避免拖拽/点击手感发木
-        _ => 33,
-    }
+/// 目标帧率 → 重绘间隔（毫秒）。设置窗打开时强制高刷。
+fn idle_repaint_ms(perf: &jian_config::PerformanceConfig) -> u64 {
+    perf.repaint_interval_ms()
 }
 
 fn clear_countdown(snap: &mut AppSnapshot) {
@@ -805,11 +800,12 @@ impl eframe::App for JianApp {
                 || i.pointer.button_released(egui::PointerButton::Primary)
                 || i.smooth_scroll_delta.length_sq() > 0.0
         });
+        let fps_ms = idle_repaint_ms(&self.cfg.performance);
         if pointer_busy || self.shell.map.is_flying() || self.shell.settings.open {
-            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            // 交互/设置打开时至少按目标帧率刷新
+            ctx.request_repaint_after(std::time::Duration::from_millis(fps_ms.min(16)));
         } else {
-            let ms = idle_repaint_ms(&self.cfg.performance.profile);
-            ctx.request_repaint_after(std::time::Duration::from_millis(ms));
+            ctx.request_repaint_after(std::time::Duration::from_millis(fps_ms));
         }
     }
 }

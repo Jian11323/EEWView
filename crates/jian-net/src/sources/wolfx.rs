@@ -26,14 +26,14 @@ pub fn spawn(tx: NetTx, cfg: WolfxSourceConfig) -> Vec<JoinHandle<()>> {
     if cfg.type_enabled("cenc_eqlist") {
         let eqlist = cfg.http_eqlist.clone();
         let tx_http = tx.clone();
-        let ws_also = (cfg.eew_enabled || cfg.eqlist_enabled) && !cfg.ws_urls.is_empty();
+        let ws_also = (cfg.any_eew() || cfg.any_eqlist()) && !cfg.ws_urls.is_empty();
         tasks.push(tokio::spawn(async move {
             poll_eqlist(tx_http, eqlist, ws_also).await;
         }));
     }
 
-    // 预警或速报任一开启即连 WS（all_eew 可 query 列表）
-    if cfg.eew_enabled || cfg.eqlist_enabled {
+    // 预警或速报任一子源开启即连 WS（all_eew 可 query 列表）
+    if cfg.any_eew() || cfg.any_eqlist() {
         for url in cfg.ws_urls.clone() {
             let tx_ws = tx.clone();
             let cfg_ws = cfg.clone();

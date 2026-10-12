@@ -144,6 +144,9 @@ pub struct PerformanceConfig {
     /// `eco` 节能 | `normal` 正常 | `extreme` 极致
     #[serde(default = "default_perf_profile")]
     pub profile: String,
+    /// 目标帧率（空闲/波圈重绘）；默认 60，范围 20–300
+    #[serde(default = "default_target_fps")]
+    pub target_fps: u32,
 }
 
 fn default_perf_device() -> String {
@@ -155,6 +158,9 @@ fn default_perf_gpu_api() -> String {
 fn default_perf_profile() -> String {
     "normal".into()
 }
+fn default_target_fps() -> u32 {
+    60
+}
 
 impl Default for PerformanceConfig {
     fn default() -> Self {
@@ -162,7 +168,21 @@ impl Default for PerformanceConfig {
             device: default_perf_device(),
             gpu_api: default_perf_gpu_api(),
             profile: default_perf_profile(),
+            target_fps: default_target_fps(),
         }
+    }
+}
+
+impl PerformanceConfig {
+    /// 钳位到 20–300。
+    pub fn clamped_fps(&self) -> u32 {
+        self.target_fps.clamp(20, 300)
+    }
+
+    /// 目标帧率对应的重绘间隔（毫秒）。
+    pub fn repaint_interval_ms(&self) -> u64 {
+        let fps = self.clamped_fps().max(1);
+        (1000 / fps).max(1) as u64
     }
 }
 
@@ -420,17 +440,26 @@ pub struct WolfxSourceConfig {
 
 impl WolfxSourceConfig {
     pub fn type_enabled(&self, typ: &str) -> bool {
+        // 仅看各子源开关；总开关字段保留兼容旧配置，不再参与门控
         match typ {
-            "jma_eew" => self.eew_enabled && self.jma_eew,
-            "sc_eew" => self.eew_enabled && self.sc_eew,
-            "fj_eew" => self.eew_enabled && self.fj_eew,
-            "cq_eew" => self.eew_enabled && self.cq_eew,
-            "cenc_eew" => self.eew_enabled && self.cenc_eew,
-            "cwa_eew" => self.eew_enabled && self.cwa_eew,
-            "cenc_eqlist" => self.eqlist_enabled && self.cenc_eqlist,
-            "jma_eqlist" => self.eqlist_enabled && self.jma_eqlist,
+            "jma_eew" => self.jma_eew,
+            "sc_eew" => self.sc_eew,
+            "fj_eew" => self.fj_eew,
+            "cq_eew" => self.cq_eew,
+            "cenc_eew" => self.cenc_eew,
+            "cwa_eew" => self.cwa_eew,
+            "cenc_eqlist" => self.cenc_eqlist,
+            "jma_eqlist" => self.jma_eqlist,
             _ => true,
         }
+    }
+
+    pub fn any_eew(&self) -> bool {
+        self.jma_eew || self.sc_eew || self.fj_eew || self.cq_eew || self.cenc_eew || self.cwa_eew
+    }
+
+    pub fn any_eqlist(&self) -> bool {
+        self.cenc_eqlist || self.jma_eqlist
     }
 }
 
@@ -727,14 +756,13 @@ impl AppConfig {
 
     pub fn any_source_enabled(&self) -> bool {
         let st = &self.sources.stations;
-        (self.sources.jian.enabled
-            && (self.sources.jian.eew_enabled || self.sources.jian.record_enabled))
+        self.sources.jian.enabled
             || self.sources.jian.station_enabled
             || st.jma_enabled
             || st.snet_enabled
             || st.kma_enabled
             || (self.sources.wolfx.enabled
-                && (self.sources.wolfx.eew_enabled || self.sources.wolfx.eqlist_enabled))
+                && (self.sources.wolfx.any_eew() || self.sources.wolfx.any_eqlist()))
             || self.sources.p2pquake.enabled
             || self.sources.pancakes.enabled
     }

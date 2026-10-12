@@ -860,7 +860,7 @@ pub(super) fn row_divider(ui: &mut Ui) {
     ui.add_space(10.0);
 }
 
-/// RQ SettingsControlRow：·侧图标盒 + 标题副标题，右侧控件
+/// RQ SettingsControlRow：左侧图标盒 + 标题副标题，右侧控件
 pub(super) fn control_row(
     ui: &mut Ui,
     title: &str,
@@ -869,23 +869,7 @@ pub(super) fn control_row(
     right: impl FnOnce(&mut Ui),
 ) {
     ui.horizontal(|ui| {
-        let (icon_r, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
-        ui.painter().rect(
-            icon_r,
-            8.0,
-            chrome().icon_fill,
-            Stroke::new(1.0_f32,
-                chrome().icon_stroke,
-            ),
-            egui::StrokeKind::Inside,
-        );
-        ui.painter().text(
-            icon_r.center(),
-            egui::Align2::CENTER_CENTER,
-            glyph,
-            egui::FontId::proportional(14.0),
-            chrome().accent,
-        );
+        paint_row_icon(ui, glyph);
         ui.add_space(10.0);
 
         ui.vertical(|ui| {
@@ -901,6 +885,49 @@ pub(super) fn control_row(
             ui.set_max_width(330.0);
             right(ui);
         });
+    });
+}
+
+fn paint_row_icon(ui: &mut Ui, glyph: &str) {
+    let (icon_r, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
+    ui.painter().rect(
+        icon_r,
+        8.0,
+        chrome().icon_fill,
+        Stroke::new(1.0_f32, chrome().icon_stroke),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        icon_r.center(),
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        egui::FontId::proportional(14.0),
+        chrome().accent,
+    );
+}
+
+/// 标题行 + 下方通栏填写框（密钥、白名单等）
+pub(super) fn control_field_below(
+    ui: &mut Ui,
+    title: &str,
+    subtitle: &str,
+    glyph: &str,
+    edit: impl FnOnce(&mut Ui),
+) {
+    ui.horizontal(|ui| {
+        paint_row_icon(ui, glyph);
+        ui.add_space(10.0);
+        ui.vertical(|ui| {
+            ui.label(RichText::new(title).size(14.0).strong().color(chrome().text));
+            if !subtitle.is_empty() {
+                ui.label(RichText::new(subtitle).size(12.0).color(chrome().muted));
+            }
+        });
+    });
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.add_space(44.0);
+        edit(ui);
     });
 }
 
@@ -997,34 +1024,32 @@ fn draw_sources(
     });
 
     section(ui, "Jian Project", "\u{25ce}", |ui| {
-        control_row(ui, "启用 /all", "总开关（需令牌）", "\u{26a1}", |ui| {
+        control_row(ui, "启用 /all", "连接 Jian 聚合通道（需令牌）", "\u{26a1}", |ui| {
             toggle(ui, &mut draft.sources.jian.enabled);
         });
-        row_divider(ui);
-        control_row(ui, "预警总开关", "关闭后忽略 Jian 全部预警子源", "\u{26a1}", |ui| {
-            toggle(ui, &mut draft.sources.jian.eew_enabled);
-        });
-        if draft.sources.jian.eew_enabled {
-            for fam in jian_core::EEW_FILTER_FAMILIES {
-                row_divider(ui);
-                let mut on = jian_eew_flag(draft, *fam);
-                let sub = format!("[{}]", fam.bracket_label());
-                control_row(ui, fam.display_name(), &sub, "\u{25ce}", |ui| {
-                    toggle(ui, &mut on);
-                });
-                set_jian_eew_flag(draft, *fam, on);
-            }
+        for fam in jian_core::EEW_FILTER_FAMILIES {
+            row_divider(ui);
+            let mut on = jian_eew_flag(draft, *fam);
+            let sub = format!("[{}]", fam.bracket_label());
+            control_row(ui, fam.display_name(), &sub, "\u{25ce}", |ui| {
+                toggle(ui, &mut on);
+            });
+            set_jian_eew_flag(draft, *fam, on);
         }
         row_divider(ui);
-        control_row(ui, "速报总开关", "关闭后忽略 Jian /all 速报", "\u{25ce}", |ui| {
-            toggle(ui, &mut draft.sources.jian.record_enabled);
-        });
-        row_divider(ui);
-        control_row(ui, "登录密钥 lk_", "换取长期 Token rt_ 并写入用户配置", "\u{25ce}", |ui| {
-            framed_edit(ui, login_key, 200.0);
-        });
+        control_field_below(
+            ui,
+            "登录密钥 lk_",
+            "换取长期 Token rt_ 并写入用户配置",
+            "\u{25ce}",
+            |ui| {
+                let w = (ui.available_width() - 8.0).clamp(200.0, 420.0);
+                framed_edit(ui, login_key, w);
+            },
+        );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
+            ui.add_space(44.0);
             let label = if auth_busy { "换票中…" } else { "换票并保存" };
             if glass_btn(ui, label, true).clicked() && !auth_busy {
                 exchange = true;
@@ -1054,67 +1079,55 @@ fn draw_sources(
         }
         if draft.sources.jian.access_token.is_some() {
             ui.label(
-                RichText::new("短期 at_ ·由 JIAN_ACCESS_TOKEN 注入（不写入文件）。")
+                RichText::new("短期 at_ 由 JIAN_ACCESS_TOKEN 注入（不写入文件）。")
                     .size(11.5)
                     .color(chrome().muted),
             );
         }
         ui.add_space(8.0);
         ui.label(
-            RichText::new("预警子源开关在本区；速报按机构震级过滤仍在下方「信息事件震级过滤」。")
+            RichText::new("预警子源开关在本区；各机构速报开关见下方「信息事件震级过滤」（选「不接收」即关）。")
                 .size(12.0)
                 .color(chrome().muted),
         );
     });
 
     section(ui, "Wolfx", "\u{25ce}", |ui| {
-        control_row(ui, "启用 Wolfx", "总开关", "\u{26a1}", |ui| {
+        control_row(ui, "启用 Wolfx", "连接 Wolfx 通道", "\u{26a1}", |ui| {
             toggle(ui, &mut draft.sources.wolfx.enabled);
         });
         row_divider(ui);
-        control_row(ui, "预警总开关", "关闭后忽略全部 Wolfx 预警子源", "\u{26a1}", |ui| {
-            toggle(ui, &mut draft.sources.wolfx.eew_enabled);
+        control_row(ui, "JMA EEW", "jma_eew", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.wolfx.jma_eew);
         });
-        if draft.sources.wolfx.eew_enabled {
-            row_divider(ui);
-            control_row(ui, "JMA EEW", "jma_eew", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.wolfx.jma_eew);
-            });
-            row_divider(ui);
-            control_row(ui, "四川 EEW", "sc_eew", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.wolfx.sc_eew);
-            });
-            row_divider(ui);
-            control_row(ui, "福建 EEW", "fj_eew", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.wolfx.fj_eew);
-            });
-            row_divider(ui);
-            control_row(ui, "重庆 EEW", "cq_eew", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.wolfx.cq_eew);
-            });
-            row_divider(ui);
-            control_row(ui, "CENC EEW", "cenc_eew", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.wolfx.cenc_eew);
-            });
-            row_divider(ui);
-            control_row(ui, "CWA EEW", "cwa_eew", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.wolfx.cwa_eew);
-            });
-        }
         row_divider(ui);
-        control_row(ui, "速报总开关", "关闭后忽略 Wolfx 速报子源", "\u{25ce}", |ui| {
-            toggle(ui, &mut draft.sources.wolfx.eqlist_enabled);
+        control_row(ui, "四川 EEW", "sc_eew", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.wolfx.sc_eew);
         });
-        if draft.sources.wolfx.eqlist_enabled {
-            row_divider(ui);
-            control_row(ui, "CENC 速报", "cenc_eqlist", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.wolfx.cenc_eqlist);
-            });
-            row_divider(ui);
-            control_row(ui, "JMA 速报", "jma_eqlist", "\u{25ce}", |ui| {
-                toggle(ui, &mut draft.sources.wolfx.jma_eqlist);
-            });
-        }
+        row_divider(ui);
+        control_row(ui, "福建 EEW", "fj_eew", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.wolfx.fj_eew);
+        });
+        row_divider(ui);
+        control_row(ui, "重庆 EEW", "cq_eew", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.wolfx.cq_eew);
+        });
+        row_divider(ui);
+        control_row(ui, "CENC EEW", "cenc_eew", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.wolfx.cenc_eew);
+        });
+        row_divider(ui);
+        control_row(ui, "CWA EEW", "cwa_eew", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.wolfx.cwa_eew);
+        });
+        row_divider(ui);
+        control_row(ui, "CENC 速报", "cenc_eqlist", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.wolfx.cenc_eqlist);
+        });
+        row_divider(ui);
+        control_row(ui, "JMA 速报", "jma_eqlist", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.wolfx.jma_eqlist);
+        });
     });
 
     section(ui, "P2PQuake", "\u{25ce}", |ui| {
@@ -1613,6 +1626,31 @@ fn draw_general(
                     );
                 });
         });
+        row_divider(ui);
+        control_row(
+            ui,
+            "目标帧率",
+            "空闲与波圈重绘；默认 60，范围 20–300",
+            "\u{25ce}",
+            |ui| {
+                let mut fps = draft.performance.target_fps as i32;
+                ui.add(
+                    egui::DragValue::new(&mut fps)
+                        .speed(1.0)
+                        .range(20..=300)
+                        .suffix(" fps"),
+                );
+                draft.performance.target_fps = fps.clamp(20, 300) as u32;
+            },
+        );
+        if draft.performance.target_fps > 120 {
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("请注意帧率设置，避免因为帧率过高导致电脑异常")
+                    .size(12.0)
+                    .color(Color32::from_rgb(0xF0, 0xA0, 0x40)),
+            );
+        }
         row_divider(ui);
         control_row(ui, "性能诊断", "按 CPU/内存估分推荐配置", "\u{25ce}", |ui| {
             if glass_btn(ui, "开始诊断", true).clicked() {

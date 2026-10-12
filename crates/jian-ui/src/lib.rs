@@ -151,9 +151,10 @@ impl MainShell {
         let sample_elapsed = self.map_elapsed % 120.0;
         let mut map_click = None;
 
-        // 波圈动画锁定约 60fps，避免 uncapped request_repaint 拉高 CPU
+        // 波圈动画按目标帧率重绘，避免 uncapped request_repaint 拉高 CPU
         if show_waves && !wave_owned.is_empty() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            let ms = cfg.performance.repaint_interval_ms();
+            ctx.request_repaint_after(std::time::Duration::from_millis(ms));
         }
 
         // SidePanel 保证侧栏命中
@@ -250,7 +251,9 @@ impl MainShell {
                         )
                         .clamp(8.0, 12.5);
                         self.map.apply_linear_zoom_out(z, 0.10);
-                        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+                        ctx.request_repaint_after(std::time::Duration::from_millis(
+                            cfg.performance.repaint_interval_ms(),
+                        ));
                     }
                 }
                 draw_map_load_banner(ui, &p, self.map.load_state(), self.map.load_status());

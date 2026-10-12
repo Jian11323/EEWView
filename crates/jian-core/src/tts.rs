@@ -113,24 +113,54 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (y, m as i64, d as i64)
 }
 
-fn intensity_phrase(kind: IntensityKind, text: &str, eew: bool) -> String {
+/// 烈度/震度朗读：优先阿拉伯数字（罗马数字 SAPI 常读不出）。
+fn intensity_speak_token(kind: IntensityKind, text: &str, level: u8) -> String {
     let t = text.trim();
-    if t.is_empty() || t == "—" || t == "-" || t == "?" {
+    match kind {
+        IntensityKind::JmaShindo => {
+            if t.contains('弱') || t.contains('强') {
+                return t.to_string();
+            }
+            if !t.is_empty() && t != "—" && t != "-" && t != "?" {
+                return t.to_string();
+            }
+            if level > 0 {
+                return level.to_string();
+            }
+            String::new()
+        }
+        IntensityKind::CnIntensity => {
+            if level > 0 {
+                return level.to_string();
+            }
+            // 罗马数字等 → 尽量解析为阿拉伯数字
+            let lv = crate::cn_intensity_level(t);
+            if lv > 0 && !t.is_empty() && t != "—" {
+                return lv.to_string();
+            }
+            String::new()
+        }
+    }
+}
+
+fn intensity_phrase(kind: IntensityKind, text: &str, level: u8, eew_style: bool) -> String {
+    let token = intensity_speak_token(kind, text, level);
+    if token.is_empty() {
         return String::new();
     }
     match kind {
         IntensityKind::CnIntensity => {
-            if eew {
-                format!("预估最大烈度{t}")
+            if eew_style {
+                format!("预估最大烈度{token}")
             } else {
-                format!("烈度{t}")
+                format!("烈度{token}")
             }
         }
         IntensityKind::JmaShindo => {
-            if eew {
-                format!("推定最大震度{t}")
+            if eew_style {
+                format!("推定最大震度{token}")
             } else {
-                format!("最大震度{t}")
+                format!("最大震度{token}")
             }
         }
     }
@@ -160,7 +190,7 @@ pub fn build_eew_tts_script(ev: &EewReport) -> String {
     } else {
         format!("{place}发生地震")
     };
-    let inten = intensity_phrase(ev.intensity_kind, &ev.max_intensity_text, true);
+    let inten = intensity_phrase(ev.intensity_kind, &ev.max_intensity_text, ev.intensity_level, true);
     let mut out = if updates.is_empty() {
         format!("{org}，{body}")
     } else {
@@ -173,22 +203,22 @@ pub fn build_eew_tts_script(ev: &EewReport) -> String {
     out
 }
 
-/// 速报 TTS：`source地震速报[自动/正式测定]，时间 place发生M级…，震源深度…，震度/烈度…`
+/// 速报 TTS：
+/// `source地震速报，时间，place发生M级地震，震源深度…千米。预估最大烈度/推定最大震度…`
+/// CENC：`中国地震台网中心自动测定/正式测定`（不加「地震速报」）。
 pub fn build_record_tts_script(rec: &EqRecord) -> String {
     let src = agency_tts_name(&rec.agency.0, false, false);
-    let det = if agency_family(&rec.agency.0) == AgencyFamily::Cenc {
+    let is_cenc = agency_family(&rec.agency.0) == AgencyFamily::Cenc;
+    let org = if is_cenc {
         if rec.is_auto {
-            "[自动测定]"
+            "中国地震台网中心自动测定".into()
         } else {
-            "[正式测定]"
+            "中国地震台网中心正式测定".into()
         }
+    } else if src.contains("地震速报") || src.contains("地震信息") {
+        src
     } else {
-        ""
-    };
-    let org = if src.contains("地震速报") || src.contains("地震信息") {
-        format!("{src}{det}")
-    } else {
-        format!("{src}地震速报{det}")
+        format!("{src}地震速报")
     };
     let time = format_origin_for_tts(rec.origin_ms);
     let place = sanitize_place(&rec.place);
@@ -200,16 +230,18 @@ pub fn build_record_tts_script(rec: &EqRecord) -> String {
     if rec.depth_km >= 0.0 {
         body.push_str(&format!("，震源深度{:.0}千米", rec.depth_km));
     }
-    let inten = intensity_phrase(rec.intensity_kind, &rec.intensity_text, false);
-    if !inten.is_empty() {
-        body.push('，');
-        body.push_str(&inten);
-    }
-    if time.is_empty() {
+    // 速报也用「预估最大烈度 / 推定最大震度」+ 阿拉伯数字
+    let inten = intensity_phrase(rec.intensity_kind, &rec.intensity_text, rec.intensity_level, true);
+    let mut out = if time.is_empty() {
         format!("{org}，{body}")
     } else {
-        format!("{org}，{time} {body}")
+        format!("{org}，{time}，{body}")
+    };
+    if !inten.is_empty() {
+        out.push('。');
+        out.push_str(&inten);
     }
+    out
 }
 
 #[cfg(test)]
@@ -251,5 +283,49 @@ mod tests {
             agency_tts_name("sa", true, false),
             "美国ShakeAlert预警"
         );
+    }
+
+    #[test]
+    fn cenc_record_no_sudubao_suffix() {
+        let rec = EqRecord {
+            agency: AgencyId("cenc".into()),
+            place: "四川汶川".into(),
+            time_text: "".into(),
+            magnitude: 5.2,
+            intensity_text: "Ⅵ".into(),
+            intensity_kind: IntensityKind::CnIntensity,
+            intensity_level: 6,
+            latitude: 31.0,
+            longitude: 103.0,
+            depth_km: 10.0,
+            origin_ms: 0,
+            is_auto: true,
+        };
+        let s = build_record_tts_script(&rec);
+        assert!(s.starts_with("中国地震台网中心自动测定"));
+        assert!(!s.contains("地震速报"));
+        assert!(s.contains("预估最大烈度6"));
+    }
+
+    #[test]
+    fn record_tts_uses_estimated_intensity_words() {
+        let rec = EqRecord {
+            agency: AgencyId("usgs".into()),
+            place: "California".into(),
+            time_text: "".into(),
+            magnitude: 4.0,
+            intensity_text: "4".into(),
+            intensity_kind: IntensityKind::CnIntensity,
+            intensity_level: 4,
+            latitude: 34.0,
+            longitude: -118.0,
+            depth_km: 8.0,
+            origin_ms: 0,
+            is_auto: false,
+        };
+        let s = build_record_tts_script(&rec);
+        assert!(s.contains("美国地质调查局地震速报"));
+        assert!(s.contains("预估最大烈度4"));
+        assert!(s.contains("震源深度8千米"));
     }
 }

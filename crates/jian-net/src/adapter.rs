@@ -387,11 +387,6 @@ fn dispatch_jian_data(
             tracing::warn!(agency, "jian: EEW 帧未能归一化（缺 placeName/经纬/震级？）");
         }
     } else if let Some(rec) = parse_jian_record(agency, data) {
-        if let Some(c) = cfg {
-            if !c.record_enabled {
-                return;
-            }
-        }
         let _ = tx.send(NetEvent::Record(rec));
     } else {
         debug!(agency, "jian: 未能归一化帧");
@@ -400,9 +395,6 @@ fn dispatch_jian_data(
 
 fn jian_accepts_eew(cfg: &jian_config::JianSourceConfig, agency: &str) -> bool {
     use jian_core::AgencyFamily;
-    if !cfg.eew_enabled {
-        return false;
-    }
     match agency_family(agency) {
         AgencyFamily::Jma => cfg.jma_eew,
         AgencyFamily::Cea => cfg.cea_eew,
@@ -1971,9 +1963,9 @@ mod tests {
         let (tx, mut rx) = channel();
         ingest_wolfx_frame(&tx, body, &jian_config::WolfxSourceConfig {
             enabled: true,
-            eew_enabled: false,
+            eew_enabled: true,
             eqlist_enabled: true,
-            jma_eew: true,
+            jma_eew: false,
             sc_eew: true,
             fj_eew: true,
             cq_eew: true,

@@ -727,7 +727,7 @@ impl AppSnapshot {
 
     /// 插入速报；全源混合后按机构族+发震时刻去重；新→旧。
     /// 无传播中预警时：收到即选中并飞跃（不论是否列表最新）。
-    /// 有传播中预警：只入列表不跳转、不改 active/Tab；仍排队 TTS（作预警确认播报）。
+    /// 有传播中预警：只入列表不跳转、不改 active/Tab；符合条件时仍排队 TTS。
     pub fn upsert_record(&mut self, record: EqRecord) {
         // 火山不得混入地震速报
         if record.agency.0.eq_ignore_ascii_case("jma-volcano")
@@ -736,19 +736,27 @@ impl AppSnapshot {
             return;
         }
         let mut is_new_or_upgrade = true;
+        let mut announce_tts = false;
         // 跨 API 同机构族同一事件：更新槽位（Jian cenc ↔ Wolfx wolfx-cenc；自动→正式）
         if let Some(pos) = self.records.iter().position(|r| same_record_event(r, &record)) {
             let cur = &self.records[pos];
-            let prefer_new = if cur.is_auto && !record.is_auto {
+            // 列表轮询/快照重放：内容未变则静默，避免反复 TTS
+            if records_content_equivalent(cur, &record) {
+                return;
+            }
+            let auto_to_final = cur.is_auto && !record.is_auto;
+            let prefer_new = if auto_to_final {
                 true
             } else if !cur.is_auto && record.is_auto {
                 false
             } else {
                 let pn = eew_feed_priority(&record.agency.0);
                 let po = eew_feed_priority(&cur.agency.0);
-                pn > po || (pn == po && record.origin_ms >= cur.origin_ms)
+                pn > po || (pn == po && record.origin_ms > cur.origin_ms)
             };
             if prefer_new {
+                // 仅「自动→正式」或足够新的事件才朗读，避免历史列表刷屏
+                announce_tts = auto_to_final || record_fresh_for_tts(record.origin_ms);
                 self.records[pos] = record.clone();
                 sort_records_newest_first(&mut self.records);
             } else {
@@ -760,12 +768,15 @@ impl AppSnapshot {
             if self.records.len() > 80 {
                 self.records.truncate(80);
             }
+            // 新条目：仅近时事件朗读（冷启动/定期 list 里的旧报不读）
+            announce_tts = record_fresh_for_tts(record.origin_ms);
         }
         if !is_new_or_upgrade {
             return;
         }
-        // 任意新到/升级速报均可 TTS；传播中预警则仅 TTS，绝不抢焦点
-        self.pending_tts_record = Some(record.clone());
+        if announce_tts {
+            self.pending_tts_record = Some(record.clone());
+        }
         if self.has_live_eew() {
             return;
         }
@@ -1049,7 +1060,8 @@ pub fn eew_map_markers_spread<'a>(
     live_wave_eews_spread(list, now_ms, spread)
 }
 
-/// 预警侧栏：每个机构族只显示最新一条（跨 API 镜像已去重）；波走完仍留这条供回看。
+/// 预警侧栏：每个侧栏源槽只显示最新一条（跨 API 镜像已去重）；波走完仍留这条供回看。
+/// 国网 CEA 与省级 cea-pr 分槽，避免地方局挤掉 `[CN]`。
 /// 地图多震仍用 live_wave_eews，与列表无关。
 pub fn eew_sidebar_entries(list: &[EewReport]) -> Vec<(usize, &EewReport)> {
     latest_eew_per_source(list)
@@ -1062,7 +1074,18 @@ pub fn eew_sidebar_entries(list: &[EewReport]) -> Vec<(usize, &EewReport)> {
         .collect()
 }
 
-/// 每个机构族（如 JMA，含 Jian/Wolfx 镜像）只保留发震最新的一条。
+/// 侧栏分组键：同族镜像合并；CEA 国网与各省 cea-pr 分开。
+pub fn eew_sidebar_group_key(agency: &str) -> String {
+    if let Some(prov) = cea_pr_province(agency) {
+        if prov.is_empty() {
+            return "cea-pr".into();
+        }
+        return format!("cea-pr:{prov}");
+    }
+    agency_family(agency).as_filter_key().to_string()
+}
+
+/// 每个侧栏源槽（如 JMA，含 Jian/Wolfx 镜像；CEA 国网与各省分槽）只保留发震最新的一条。
 pub fn latest_eew_per_source(list: &[EewReport]) -> Vec<&EewReport> {
     let mut best: Vec<&EewReport> = Vec::new();
     for e in list {
@@ -1073,8 +1096,11 @@ pub fn latest_eew_per_source(list: &[EewReport]) -> Vec<&EewReport> {
         {
             continue;
         }
-        let fam = agency_family(&e.agency.0);
-        if let Some(pos) = best.iter().position(|b| agency_family(&b.agency.0) == fam) {
+        let key = eew_sidebar_group_key(&e.agency.0);
+        if let Some(pos) = best
+            .iter()
+            .position(|b| eew_sidebar_group_key(&b.agency.0) == key)
+        {
             let cur = best[pos];
             let newer = recency_ms(e.origin_ms) > recency_ms(cur.origin_ms)
                 || (e.origin_ms == cur.origin_ms && prefer_eew_report(cur, e));
@@ -1091,6 +1117,29 @@ pub fn latest_eew_per_source(list: &[EewReport]) -> Vec<&EewReport> {
             .then(b.serial.cmp(&a.serial))
     });
     best
+}
+
+/// 速报内容是否实质相同（列表重放判定）。
+fn records_content_equivalent(a: &EqRecord, b: &EqRecord) -> bool {
+    a.is_auto == b.is_auto
+        && (a.magnitude - b.magnitude).abs() < 0.05
+        && a.intensity_level == b.intensity_level
+        && a.place == b.place
+        && (a.depth_km - b.depth_km).abs() < 0.5
+        && (a.latitude - b.latitude).abs() < 0.02
+        && (a.longitude - b.longitude).abs() < 0.02
+}
+
+/// 近时速报才触发 TTS（避免冷启动/定期 list 朗读历史条目）。
+fn record_fresh_for_tts(origin_ms: i64) -> bool {
+    if origin_ms <= 0 {
+        return false;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    now.saturating_sub(origin_ms) < 45 * 60 * 1000
 }
 
 /// 跨 API 是否同一 EEW 事件（同机构族 + 同 EventID，或发震时刻/震中接近）。
@@ -1112,7 +1161,8 @@ fn same_record_event(a: &EqRecord, b: &EqRecord) -> bool {
 }
 
 pub fn same_eew_event(a: &EewReport, b: &EewReport) -> bool {
-    if agency_family(&a.agency.0) != agency_family(&b.agency.0) {
+    // 国网 CEA 与各省 cea-pr 分源；同槽内 Jian/Wolfx 镜像仍合并
+    if eew_sidebar_group_key(&a.agency.0) != eew_sidebar_group_key(&b.agency.0) {
         return false;
     }
     let id_a = a.event_id.trim();
@@ -1168,7 +1218,7 @@ fn prune_eew_list(list: &mut Vec<EewReport>, max_age_ms: i64, max_len: usize) {
     // 每源最新（非取消、有坐标）必须保留，否则冷启动历史会被 6h 窗清空
     let mut keep_ids: std::collections::HashSet<(String, String)> =
         std::collections::HashSet::new();
-    // 每机构族最新一条（跨 API 镜像只留一条）
+    // 每侧栏源槽最新一条（国网 CEA / 各省 cea-pr 分槽；跨 API 镜像只留一条）
     let mut best_by_family: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
     for (i, e) in list.iter().enumerate() {
@@ -1179,7 +1229,7 @@ fn prune_eew_list(list: &mut Vec<EewReport>, max_age_ms: i64, max_len: usize) {
         {
             continue;
         }
-        let fam = agency_family(&e.agency.0).as_filter_key().to_string();
+        let fam = eew_sidebar_group_key(&e.agency.0);
         match best_by_family.get(&fam) {
             None => {
                 best_by_family.insert(fam, i);
@@ -1296,6 +1346,56 @@ mod eew_dedup_tests {
         assert_eq!(snap.eew_list[0].agency.0, "jma-eew");
         let side = eew_sidebar_entries(&snap.eew_list);
         assert_eq!(side.len(), 1);
+    }
+
+    #[test]
+    fn sidebar_keeps_national_cea_and_cea_pr() {
+        let mut snap = AppSnapshot::offline_sample();
+        snap.eew_list.clear();
+        let mut cea = sample("cea", "cn-1", 2);
+        cea.place = "缅甸".into();
+        cea.latitude = 22.0;
+        cea.longitude = 98.5;
+        cea.origin_ms = 1_728_650_000_000;
+        let mut pr = sample("cea-pr:云南", "pr-1", 1);
+        pr.place = "云南某地".into();
+        pr.latitude = 25.0;
+        pr.longitude = 102.0;
+        pr.origin_ms = 1_728_651_000_000;
+        snap.upsert_eew(cea);
+        snap.upsert_eew(pr);
+        let side = eew_sidebar_entries(&snap.eew_list);
+        assert_eq!(side.len(), 2);
+        let agencies: Vec<_> = side.iter().map(|(_, e)| e.agency.0.as_str()).collect();
+        assert!(agencies.iter().any(|a| *a == "cea"));
+        assert!(agencies.iter().any(|a| *a == "cea-pr:云南"));
+    }
+
+    #[test]
+    fn stale_record_list_replay_skips_tts() {
+        let mut snap = AppSnapshot::offline_sample();
+        snap.eew_list.clear();
+        snap.records.clear();
+        snap.pending_tts_record = None;
+        let old = EqRecord {
+            agency: AgencyId("cenc".into()),
+            place: "测试地点".into(),
+            time_text: "2020-01-01".into(),
+            magnitude: 4.0,
+            intensity_text: "Ⅲ".into(),
+            intensity_kind: IntensityKind::CnIntensity,
+            intensity_level: 3,
+            latitude: 30.0,
+            longitude: 104.0,
+            depth_km: 10.0,
+            origin_ms: 1_577_836_800_000, // 2020
+            is_auto: false,
+        };
+        snap.upsert_record(old.clone());
+        assert!(snap.pending_tts_record.is_none());
+        // 同内容重放仍不应 TTS
+        snap.upsert_record(old);
+        assert!(snap.pending_tts_record.is_none());
     }
 
     #[test]

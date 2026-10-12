@@ -1,6 +1,6 @@
 //! 信息事件（速报）震级过滤与地点白名单。
 
-use super::{control_row, framed_edit, muted, row_divider, section};
+use super::{control_field_below, control_row, framed_edit, muted, row_divider, section};
 use egui::{RichText, Ui};
 use jian_config::AppConfig;
 use jian_core::{AgencyFamily, RECORD_FILTER_FAMILIES};
@@ -53,13 +53,14 @@ pub fn draw_record_filters(ui: &mut Ui, draft: &mut AppConfig) {
             draft.filters.set_record_mag(key, val);
         }
         row_divider(ui);
-        control_row(
+        control_field_below(
             ui,
             "信息事件地点白名单",
             "关键词用 | 分隔；命中后可绕过震级，但「不接收」仍优先",
             "\u{25ce}",
             |ui| {
-                framed_edit(ui, &mut draft.filters.place_whitelist, 200.0);
+                let w = (ui.available_width() - 8.0).clamp(200.0, 420.0);
+                framed_edit(ui, &mut draft.filters.place_whitelist, w);
             },
         );
     });
