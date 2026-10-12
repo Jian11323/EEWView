@@ -1,9 +1,9 @@
-//! RhythmQuake 风格：预警机构开关 + 信息事件震级过滤。
+//! 信息事件（速报）震级过滤与地点白名单。
 
-use super::{control_row, framed_edit, muted, row_divider, section, toggle};
+use super::{control_row, framed_edit, muted, row_divider, section};
 use egui::{RichText, Ui};
 use jian_config::AppConfig;
-use jian_core::{AgencyFamily, EEW_FILTER_FAMILIES, RECORD_FILTER_FAMILIES};
+use jian_core::{AgencyFamily, RECORD_FILTER_FAMILIES};
 
 const MAG_OPTS: [f64; 12] = [
     -1.0, 0.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5,
@@ -19,36 +19,7 @@ fn mag_label(v: f64) -> String {
     }
 }
 
-pub fn draw_eew_and_record_filters(ui: &mut Ui, draft: &mut AppConfig) {
-    section(ui, "预警机构开关", "\u{26a1}", |ui| {
-        ui.label(
-            RichText::new("作用于 Jian / Wolfx / Pancakes 等全部接入通道；关闭后对应机构预警不进列表。")
-                .size(12.0)
-                .color(muted()),
-        );
-        ui.add_space(10.0);
-        let mut first = true;
-        for fam in EEW_FILTER_FAMILIES {
-            if !first {
-                row_divider(ui);
-            }
-            first = false;
-            let key = fam.as_filter_key();
-            let mut on = draft.filters.eew_agency_on(key);
-            control_row(
-                ui,
-                fam.display_name(),
-                &format!("[{}]", fam.bracket_label()),
-                "\u{25ce}",
-                |ui| {
-                    if toggle(ui, &mut on).changed() {
-                        draft.filters.set_eew_agency(key, on);
-                    }
-                },
-            );
-        }
-    });
-
+pub fn draw_record_filters(ui: &mut Ui, draft: &mut AppConfig) {
     section(ui, "信息事件震级过滤", "\u{25ce}", |ui| {
         ui.label(
             RichText::new("速报（信息事件）按机构过滤：选「不接收」即关闭该源速报；低于阈值的不显示。白名单可绕过震级，不能绕过「不接收」。")

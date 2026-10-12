@@ -1,7 +1,7 @@
 //! 原始 JSON → core 模型（各源字段在此归一化）。
 
 use jian_core::{
-    cea_pr_agency_id, cn_intensity_text, fill_intensity, instrumental_display_text,
+    agency_family, cea_pr_agency_id, cn_intensity_text, fill_intensity, instrumental_display_text,
     intensity_kind_for_agency, jma_from_instrumental, jma_shindo_level, AgencyId, EewReport,
     EqRecord, IntensityKind, StationSample, TsunamiArea, TsunamiInfo,
 };
@@ -302,7 +302,8 @@ fn ingest_int_station_frame(
 }
 
 /// Jian `/all` 或单源信封：`{ type, Data, md5 }` 或 `source：xxx`
-pub fn ingest_jian_frame(tx: &NetTx, text: &str) {
+/// `cfg` 为 `None` 时不按源开关过滤（单测）。
+pub fn ingest_jian_frame(tx: &NetTx, text: &str, cfg: Option<&jian_config::JianSourceConfig>) {
     let Ok(v) = serde_json::from_str::<Value>(text) else {
         return;
     };
@@ -328,7 +329,7 @@ pub fn ingest_jian_frame(tx: &NetTx, text: &str) {
                 }
                 let agency = agency_from_source_key(k);
                 let data = entry.get("Data").cloned().unwrap_or_else(|| entry.clone());
-                dispatch_jian_data(tx, agency, &data);
+                dispatch_jian_data(tx, agency, &data, cfg);
             }
         }
         return;
@@ -340,14 +341,14 @@ pub fn ingest_jian_frame(tx: &NetTx, text: &str) {
         let agency = agency_from_list_response(typ);
         if let Some(arr) = v.get("Data").and_then(|d| d.as_array()) {
             for item in arr {
-                dispatch_jian_data(tx, agency, item);
+                dispatch_jian_data(tx, agency, item, cfg);
             }
         }
         return;
     }
 
     let data = v.get("Data").cloned().unwrap_or(v.clone());
-    dispatch_jian_data(tx, typ, &data);
+    dispatch_jian_data(tx, typ, &data, cfg);
 }
 
 fn agency_from_source_key(k: &str) -> &str {
@@ -358,7 +359,12 @@ fn agency_from_source_key(k: &str) -> &str {
     k.split('：').nth(1).or_else(|| k.split(':').nth(1)).unwrap_or(k)
 }
 
-fn dispatch_jian_data(tx: &NetTx, agency: &str, data: &Value) {
+fn dispatch_jian_data(
+    tx: &NetTx,
+    agency: &str,
+    data: &Value,
+    cfg: Option<&jian_config::JianSourceConfig>,
+) {
     if data.is_null() || !data.is_object() {
         return;
     }
@@ -370,15 +376,41 @@ fn dispatch_jian_data(tx: &NetTx, agency: &str, data: &Value) {
         return;
     }
     if is_eew_agency(agency) {
+        if let Some(c) = cfg {
+            if !jian_accepts_eew(c, agency) {
+                return;
+            }
+        }
         if let Some(eew) = parse_jian_eew(agency, data) {
             let _ = tx.send(NetEvent::Eew(eew));
         } else {
             tracing::warn!(agency, "jian: EEW 帧未能归一化（缺 placeName/经纬/震级？）");
         }
     } else if let Some(rec) = parse_jian_record(agency, data) {
+        if let Some(c) = cfg {
+            if !c.record_enabled {
+                return;
+            }
+        }
         let _ = tx.send(NetEvent::Record(rec));
     } else {
         debug!(agency, "jian: 未能归一化帧");
+    }
+}
+
+fn jian_accepts_eew(cfg: &jian_config::JianSourceConfig, agency: &str) -> bool {
+    use jian_core::AgencyFamily;
+    if !cfg.eew_enabled {
+        return false;
+    }
+    match agency_family(agency) {
+        AgencyFamily::Jma => cfg.jma_eew,
+        AgencyFamily::Cea => cfg.cea_eew,
+        AgencyFamily::Cwa => cfg.cwa_eew,
+        AgencyFamily::Kma => cfg.kma_eew,
+        AgencyFamily::Sa => cfg.sa_eew,
+        AgencyFamily::EarlyEst => cfg.early_est_eew,
+        _ => true,
     }
 }
 
@@ -1979,13 +2011,13 @@ mod tests {
             }
         }"#;
         let (tx, mut rx) = channel();
-        ingest_jian_frame(&tx, body);
+        ingest_jian_frame(&tx, body, None);
         assert!(rx.try_recv().is_err());
 
         let body2 = body
             .replace("\"isTraining\": true", "\"isTraining\": false")
             .replace("\"isPLUM\": false", "\"isPLUM\": true");
-        ingest_jian_frame(&tx, &body2);
+        ingest_jian_frame(&tx, &body2, None);
         let NetEvent::Eew(e) = rx.try_recv().expect("eew") else {
             panic!("expected Eew");
         };
@@ -2016,7 +2048,7 @@ mod tests {
             }
         }"#;
         let (tx, mut rx) = channel();
-        ingest_jian_frame(&tx, body);
+        ingest_jian_frame(&tx, body, None);
         let NetEvent::Tsunami(tsu) = rx.try_recv().expect("tsu") else {
             panic!("expected Tsunami");
         };
@@ -2028,7 +2060,7 @@ mod tests {
         let cancel = body
             .replace("\"cancel\": false", "\"cancel\": true")
             .replace("\"infoTypeName\": \"発表\"", "\"infoTypeName\": \"取消\"");
-        ingest_jian_frame(&tx, &cancel);
+        ingest_jian_frame(&tx, &cancel, None);
         let NetEvent::Tsunami(tsu2) = rx.try_recv().expect("tsu2") else {
             panic!("expected Tsunami");
         };

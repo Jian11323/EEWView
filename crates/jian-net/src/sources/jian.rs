@@ -42,7 +42,7 @@ pub fn spawn(tx: NetTx, cfg: JianSourceConfig) -> Vec<JoinHandle<()>> {
     let mut tasks = Vec::new();
     let mut any = false;
 
-    if cfg.enabled {
+    if cfg.enabled && (cfg.eew_enabled || cfg.record_enabled) {
         any = true;
         let token = resolve_access_token(&cfg);
         let Some(token) = token else {
@@ -58,8 +58,21 @@ pub fn spawn(tx: NetTx, cfg: JianSourceConfig) -> Vec<JoinHandle<()>> {
             url = format!("{url}{sep}key={token}");
         }
 
-        info!(%url, "jian: spawn /all");
+        let list_cmds = if cfg.record_enabled {
+            vec![
+                "cenclist".into(),
+                "cwalist".into(),
+                "jmalist".into(),
+                "hkolist".into(),
+            ]
+        } else {
+            Vec::new()
+        };
+        let period = if cfg.record_enabled { 60 } else { 0 };
+
+        info!(%url, eew = cfg.eew_enabled, record = cfg.record_enabled, "jian: spawn /all");
         let tx_all = tx.clone();
+        let cfg_all = cfg.clone();
         tasks.push(tokio::spawn(async move {
             run_ws_loop(
                 tx_all,
@@ -67,22 +80,12 @@ pub fn spawn(tx: NetTx, cfg: JianSourceConfig) -> Vec<JoinHandle<()>> {
                     source: "jian",
                     url,
                     // 官方仅 cenc/cwa/jma/hko 支持 *list；分别拉取后由 upsert 混合去重、新→旧
-                    on_open_texts: vec![
-                        "cenclist".into(),
-                        "cwalist".into(),
-                        "jmalist".into(),
-                        "hkolist".into(),
-                    ],
-                    periodic_texts: vec![
-                        "cenclist".into(),
-                        "cwalist".into(),
-                        "jmalist".into(),
-                        "hkolist".into(),
-                    ],
-                    periodic_secs: 60,
+                    on_open_texts: list_cmds.clone(),
+                    periodic_texts: list_cmds,
+                    periodic_secs: period,
                     backoff_max_secs: 60,
                 },
-                |tx, text| ingest_jian_frame(tx, text),
+                move |tx, text| ingest_jian_frame(tx, text, Some(&cfg_all)),
             )
             .await;
         }));

@@ -15,7 +15,7 @@ pub struct AppConfig {
     pub travel: TravelConfig,
     pub local: LocalConfig,
     pub sources: SourcesConfig,
-    /// 预警机构开关、速报震级阈值（对齐 RhythmQuake）
+    /// 速报震级阈值与地点白名单
     #[serde(default)]
     pub filters: FiltersConfig,
     /// 文件日志（便携版无控制台时仍写入资源根下 logs/）
@@ -247,6 +247,24 @@ impl Default for StationsConfig {
 pub struct JianSourceConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// `/all` 预警总开关
+    #[serde(default = "default_true")]
+    pub eew_enabled: bool,
+    /// `/all` 速报总开关
+    #[serde(default = "default_true")]
+    pub record_enabled: bool,
+    #[serde(default = "default_true")]
+    pub jma_eew: bool,
+    #[serde(default = "default_true")]
+    pub cea_eew: bool,
+    #[serde(default = "default_true")]
+    pub cwa_eew: bool,
+    #[serde(default = "default_true")]
+    pub kma_eew: bool,
+    #[serde(default = "default_true")]
+    pub sa_eew: bool,
+    #[serde(default = "default_true")]
+    pub early_est_eew: bool,
     /// 建议用 `/all` 单连接，避免占满并发额度
     #[serde(default = "default_jian_ws")]
     pub ws_url: String,
@@ -319,31 +337,12 @@ impl WolfxSourceConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FiltersConfig {
     #[serde(default)]
-    pub eew_agency: HashMap<String, bool>,
-    #[serde(default)]
     pub record_mag: HashMap<String, f64>,
     #[serde(default)]
     pub place_whitelist: String,
 }
 
 impl FiltersConfig {
-    pub fn eew_agency_on(&self, key: &str) -> bool {
-        if let Some(v) = self.eew_agency.get(key) {
-            return *v;
-        }
-        // 旧配置曾把 CEA 预警误记为 cenc
-        if key == "cea" {
-            if let Some(v) = self.eew_agency.get("cenc") {
-                return *v;
-            }
-        }
-        true
-    }
-
-    pub fn set_eew_agency(&mut self, key: &str, on: bool) {
-        self.eew_agency.insert(key.to_string(), on);
-    }
-
     /// `-1` 不接收；`0` 不过滤；正数为最低震级。未适配机构默认不接收。
     pub fn record_mag_threshold(&self, key: &str) -> f64 {
         self.record_mag
@@ -472,6 +471,14 @@ impl Default for AppConfig {
             sources: SourcesConfig {
                 jian: JianSourceConfig {
                     enabled: true,
+                    eew_enabled: true,
+                    record_enabled: true,
+                    jma_eew: true,
+                    cea_eew: true,
+                    cwa_eew: true,
+                    kma_eew: true,
+                    sa_eew: true,
+                    early_est_eew: true,
                     ws_url: default_jian_ws(),
                     access_token: None,
                     refresh_token: None,
@@ -617,7 +624,8 @@ impl AppConfig {
 
     pub fn any_source_enabled(&self) -> bool {
         let st = &self.sources.stations;
-        self.sources.jian.enabled
+        (self.sources.jian.enabled
+            && (self.sources.jian.eew_enabled || self.sources.jian.record_enabled))
             || self.sources.jian.station_enabled
             || st.jma_enabled
             || st.snet_enabled
@@ -630,6 +638,14 @@ impl AppConfig {
 
     pub fn sources_runtime_equal(&self, other: &Self) -> bool {
         self.sources.jian.enabled == other.sources.jian.enabled
+            && self.sources.jian.eew_enabled == other.sources.jian.eew_enabled
+            && self.sources.jian.record_enabled == other.sources.jian.record_enabled
+            && self.sources.jian.jma_eew == other.sources.jian.jma_eew
+            && self.sources.jian.cea_eew == other.sources.jian.cea_eew
+            && self.sources.jian.cwa_eew == other.sources.jian.cwa_eew
+            && self.sources.jian.kma_eew == other.sources.jian.kma_eew
+            && self.sources.jian.sa_eew == other.sources.jian.sa_eew
+            && self.sources.jian.early_est_eew == other.sources.jian.early_est_eew
             && self.sources.jian.station_enabled == other.sources.jian.station_enabled
             && self.sources.jian.ws_url == other.sources.jian.ws_url
             && self.sources.jian.station_ws_url == other.sources.jian.station_ws_url

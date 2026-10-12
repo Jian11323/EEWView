@@ -56,6 +56,14 @@ linear_last_resort = true
 
 [sources.jian]
 enabled = true
+eew_enabled = true
+record_enabled = true
+jma_eew = true
+cea_eew = true
+cwa_eew = true
+kma_eew = true
+sa_eew = true
+early_est_eew = true
 # 兼容旧键：与 stations.jma_enabled + jma_source=jian 同步
 station_enabled = true
 # station_ws_url = "wss://api.sismotide.top/kmoni"
@@ -97,15 +105,6 @@ jma_volcano = true
 
 [filters]
 place_whitelist = ""
-
-[filters.eew_agency]
-jma = true
-cea = true
-cwa = true
-kma = true
-sa = true
-early_est = true
-gq = true
 
 [filters.record_mag]
 cenc = 0.0

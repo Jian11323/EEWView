@@ -104,7 +104,7 @@ pub fn apply_event(snap: &mut jian_core::AppSnapshot, ev: NetEvent) {
     apply_event_filtered(snap, ev, None);
 }
 
-/// 带 RhythmQuake 风格机构开关 / 震级阈值过滤。
+/// 带速报震级阈值 / 白名单过滤（预警由各数据源开关负责）。
 pub fn apply_event_filtered(
     snap: &mut jian_core::AppSnapshot,
     ev: NetEvent,
@@ -113,13 +113,6 @@ pub fn apply_event_filtered(
     match ev {
         NetEvent::Health { source, status } => snap.set_health(source, status),
         NetEvent::Eew(e) => {
-            if let Some(f) = filters {
-                let key = agency_family(&e.agency.0).as_filter_key();
-                if !f.eew_agency_on(key) {
-                    return;
-                }
-            }
-            // GlobalQuake：再按 Pancakes 配置的震级阈值过滤（filters 路径无 cfg 时跳过）
             snap.upsert_eew(e);
         }
         NetEvent::Record(r) => {

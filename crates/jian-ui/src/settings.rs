@@ -980,11 +980,30 @@ fn draw_sources(
     });
 
     section(ui, "Jian Project", "\u{25ce}", |ui| {
-        control_row(ui, "启用 /all", "预警与速报（需令牌）", "\u{26a1}", |ui| {
+        control_row(ui, "启用 /all", "总开关（需令牌）", "\u{26a1}", |ui| {
             toggle(ui, &mut draft.sources.jian.enabled);
         });
         row_divider(ui);
-        control_row(ui, "登录密钥 lk_", "换取长期 Token rt_ 并写入用·配置", "\u{25ce}", |ui| {
+        control_row(ui, "预警总开关", "关闭后忽略 Jian 全部预警子源", "\u{26a1}", |ui| {
+            toggle(ui, &mut draft.sources.jian.eew_enabled);
+        });
+        if draft.sources.jian.eew_enabled {
+            for fam in jian_core::EEW_FILTER_FAMILIES {
+                row_divider(ui);
+                let mut on = jian_eew_flag(draft, *fam);
+                let sub = format!("[{}]", fam.bracket_label());
+                control_row(ui, fam.display_name(), &sub, "\u{25ce}", |ui| {
+                    toggle(ui, &mut on);
+                });
+                set_jian_eew_flag(draft, *fam, on);
+            }
+        }
+        row_divider(ui);
+        control_row(ui, "速报总开关", "关闭后忽略 Jian /all 速报", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.jian.record_enabled);
+        });
+        row_divider(ui);
+        control_row(ui, "登录密钥 lk_", "换取长期 Token rt_ 并写入用户配置", "\u{25ce}", |ui| {
             framed_edit(ui, login_key, 200.0);
         });
         ui.add_space(8.0);
@@ -1025,11 +1044,9 @@ fn draw_sources(
         }
         ui.add_space(8.0);
         ui.label(
-            RichText::new(
-                "Jian /all 同时接入预警与速报。各机构预警开关、速报震级过滤请到左侧「过滤」页，避免与数据源页重复。",
-            )
-            .size(12.0)
-            .color(chrome().muted),
+            RichText::new("预警子源开关在本区；速报按机构震级过滤仍在下方「信息事件震级过滤」。")
+                .size(12.0)
+                .color(chrome().muted),
         );
     });
 
@@ -1185,9 +1202,35 @@ fn draw_sources(
     });
 
 
-    filters_ui::draw_eew_and_record_filters(ui, draft);
+    filters_ui::draw_record_filters(ui, draft);
 
     exchange
+}
+
+fn jian_eew_flag(draft: &AppConfig, fam: jian_core::AgencyFamily) -> bool {
+    use jian_core::AgencyFamily;
+    match fam {
+        AgencyFamily::Jma => draft.sources.jian.jma_eew,
+        AgencyFamily::Cea => draft.sources.jian.cea_eew,
+        AgencyFamily::Cwa => draft.sources.jian.cwa_eew,
+        AgencyFamily::Kma => draft.sources.jian.kma_eew,
+        AgencyFamily::Sa => draft.sources.jian.sa_eew,
+        AgencyFamily::EarlyEst => draft.sources.jian.early_est_eew,
+        _ => true,
+    }
+}
+
+fn set_jian_eew_flag(draft: &mut AppConfig, fam: jian_core::AgencyFamily, on: bool) {
+    use jian_core::AgencyFamily;
+    match fam {
+        AgencyFamily::Jma => draft.sources.jian.jma_eew = on,
+        AgencyFamily::Cea => draft.sources.jian.cea_eew = on,
+        AgencyFamily::Cwa => draft.sources.jian.cwa_eew = on,
+        AgencyFamily::Kma => draft.sources.jian.kma_eew = on,
+        AgencyFamily::Sa => draft.sources.jian.sa_eew = on,
+        AgencyFamily::EarlyEst => draft.sources.jian.early_est_eew = on,
+        _ => {}
+    }
 }
 
 fn status_row(ui: &mut Ui, name: &str, status: HealthStatus) {

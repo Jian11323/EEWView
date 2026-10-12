@@ -2,7 +2,7 @@
 //!
 //! 预警（EEW）与速报（信息事件）分族：`cea` 展示为 `[CN]`，`cenc` 展示为 `[CENC]`。
 
-/// 预警机构开关（Jian `/all` 内各地震 EEW 源）。
+/// Jian `/all` 预警子源（设置页挂在数据源下方；GQ 由 Pancakes 开关负责）。
 pub const EEW_FILTER_FAMILIES: &[AgencyFamily] = &[
     AgencyFamily::Jma,
     AgencyFamily::Cea,
@@ -10,7 +10,6 @@ pub const EEW_FILTER_FAMILIES: &[AgencyFamily] = &[
     AgencyFamily::Kma,
     AgencyFamily::Sa,
     AgencyFamily::EarlyEst,
-    AgencyFamily::Gq,
 ];
 
 /// 信息事件震级过滤（Jian `/all` 内各地震速报源，对齐 RhythmQuake）。
