@@ -1086,7 +1086,7 @@ fn draw_sources(
         }
         ui.add_space(8.0);
         ui.label(
-            RichText::new("预警子源开关在本区；各机构速报开关见下方「信息事件震级过滤」（选「不接收」即关）。")
+            RichText::new("预警子源开关在本区；各机构速报开关见下方「信息事件源开关」，震级阈值见「信息事件震级过滤」。")
                 .size(12.0)
                 .color(chrome().muted),
         );

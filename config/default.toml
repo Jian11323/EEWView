@@ -124,6 +124,10 @@ jma_volcano = true
 [filters]
 place_whitelist = ""
 
+# 各机构速报开关（与震级过滤分离；缺省 other=关，其余开）
+[filters.record_enabled]
+other = false
+
 [filters.record_mag]
 cenc = 0.0
 usgs = 0.0
@@ -164,4 +168,4 @@ ssn = 0.0
 ga = 0.0
 igepn = 0.0
 peru = 0.0
-other = -1.0
+other = 0.0

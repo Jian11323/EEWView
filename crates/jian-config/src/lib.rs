@@ -463,9 +463,16 @@ impl WolfxSourceConfig {
     }
 }
 
-/// `-1` 不接收；`0` 不过滤；`>0` 最低震级。白名单可绕过震级，但不能绕过「不接收」。
+/// 速报过滤：源开关与震级阈值分离。
+///
+/// - `record_enabled`：各机构速报开关（关则整源丢弃）
+/// - `record_mag`：`0` 不过滤；`>0` 最低震级。白名单可绕过震级，不能绕过关闭的源。
+/// - 兼容旧配置：`record_mag = -1` 视为该源关闭，并按 `0` 读阈值。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FiltersConfig {
+    /// 各机构速报开关；缺省：`other` 关，其余开
+    #[serde(default)]
+    pub record_enabled: HashMap<String, bool>,
     #[serde(default)]
     pub record_mag: HashMap<String, f64>,
     #[serde(default)]
@@ -473,16 +480,46 @@ pub struct FiltersConfig {
 }
 
 impl FiltersConfig {
-    /// `-1` 不接收；`0` 不过滤；正数为最低震级。未适配机构默认不接收。
+    /// 该机构速报是否接收（与震级阈值无关）。
+    pub fn record_source_enabled(&self, key: &str) -> bool {
+        if let Some(on) = self.record_enabled.get(key) {
+            return *on;
+        }
+        // 旧配置用 mag=-1 表示关闭
+        if self.record_mag.get(key).copied().unwrap_or(0.0) < 0.0 {
+            return false;
+        }
+        key != "other"
+    }
+
+    pub fn set_record_source_enabled(&mut self, key: &str, on: bool) {
+        self.record_enabled.insert(key.to_string(), on);
+    }
+
+    /// `0` 不过滤；正数为最低震级。负值（旧「不接收」）按 `0` 处理。
     pub fn record_mag_threshold(&self, key: &str) -> f64 {
-        self.record_mag
-            .get(key)
-            .copied()
-            .unwrap_or(if key == "other" { -1.0 } else { 0.0 })
+        let v = self.record_mag.get(key).copied().unwrap_or(0.0);
+        if v < 0.0 {
+            0.0
+        } else {
+            v
+        }
     }
 
     pub fn set_record_mag(&mut self, key: &str, val: f64) {
-        self.record_mag.insert(key.to_string(), val);
+        self.record_mag.insert(key.to_string(), val.max(0.0));
+    }
+
+    /// 将旧 `record_mag=-1` 迁移为源开关关闭，避免与震级过滤混用。
+    pub fn migrate_legacy_record_off(&mut self) {
+        let keys: Vec<String> = self.record_mag.keys().cloned().collect();
+        for key in keys {
+            if self.record_mag.get(&key).copied().unwrap_or(0.0) < 0.0 {
+                self.record_enabled.entry(key.clone()).or_insert(false);
+                self.record_mag.insert(key, 0.0);
+            }
+        }
+        self.record_enabled.entry("other".into()).or_insert(false);
     }
 
     pub fn place_whitelist_hit(&self, place: &str) -> bool {
@@ -702,6 +739,7 @@ impl AppConfig {
             }
         }
         cfg.apply_env_overrides();
+        cfg.filters.migrate_legacy_record_off();
         cfg
     }
 
@@ -715,6 +753,7 @@ impl AppConfig {
         fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
         let path = dir.join("config.toml");
         let mut sanitized = self.clone();
+        sanitized.filters.migrate_legacy_record_off();
         sanitized.sources.jian.access_token = None;
         let text = toml::to_string_pretty(&sanitized).context("serialize config")?;
         fs::write(&path, text).with_context(|| format!("write {}", path.display()))?;
@@ -737,6 +776,7 @@ impl AppConfig {
     /// 环境变量覆盖敏感项（不写进仓库）
     pub fn apply_env_overrides(&mut self) {
         self.sync_station_compat();
+        self.filters.migrate_legacy_record_off();
         if let Ok(tok) = env::var("JIAN_REFRESH_TOKEN") {
             if tok.trim().starts_with("rt_") {
                 self.sources.jian.refresh_token = Some(tok.trim().to_string());

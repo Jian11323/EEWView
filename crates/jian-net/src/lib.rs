@@ -104,7 +104,7 @@ pub fn apply_event(snap: &mut jian_core::AppSnapshot, ev: NetEvent) {
     apply_event_filtered(snap, ev, None);
 }
 
-/// 带速报震级阈值 / 白名单过滤（预警由各数据源开关负责）。
+/// 带速报源开关 / 震级阈值 / 白名单过滤（预警由各数据源开关负责）。
 pub fn apply_event_filtered(
     snap: &mut jian_core::AppSnapshot,
     ev: NetEvent,
@@ -131,11 +131,12 @@ pub fn apply_event_filtered(
 
 fn record_allowed(f: &FiltersConfig, agency: &str, magnitude: f64, place: &str) -> bool {
     let key = agency_family(agency).as_filter_key();
-    let thr = f.record_mag_threshold(key);
-    if thr < 0.0 {
+    // 源开关优先：关则整源丢弃（与震级过滤无关）
+    if !f.record_source_enabled(key) {
         return false;
     }
-    if thr == 0.0 {
+    let thr = f.record_mag_threshold(key);
+    if thr <= 0.0 {
         return true;
     }
     if magnitude + 1e-9 >= thr {

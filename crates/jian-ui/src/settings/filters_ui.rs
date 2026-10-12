@@ -1,18 +1,14 @@
-//! 信息事件（速报）震级过滤与地点白名单。
+//! 信息事件（速报）源开关与震级过滤。
 
-use super::{control_field_below, control_row, framed_edit, muted, row_divider, section};
+use super::{control_field_below, control_row, framed_edit, muted, row_divider, section, toggle};
 use egui::{RichText, Ui};
 use jian_config::AppConfig;
 use jian_core::{AgencyFamily, RECORD_FILTER_FAMILIES};
 
-const MAG_OPTS: [f64; 12] = [
-    -1.0, 0.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5,
-];
+const MAG_OPTS: [f64; 11] = [0.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5];
 
 fn mag_label(v: f64) -> String {
-    if v < 0.0 {
-        "不接收".into()
-    } else if v == 0.0 {
+    if v <= 0.0 {
         "不过滤".into()
     } else {
         format!("M {v:.1}")
@@ -20,9 +16,36 @@ fn mag_label(v: f64) -> String {
 }
 
 pub fn draw_record_filters(ui: &mut Ui, draft: &mut AppConfig) {
+    section(ui, "信息事件源开关", "\u{25ce}", |ui| {
+        ui.label(
+            RichText::new("各机构速报独立开关；关闭后该源整条丢弃。与下方震级阈值无关。")
+                .size(12.0)
+                .color(muted()),
+        );
+        ui.add_space(10.0);
+        let mut first = true;
+        for fam in RECORD_FILTER_FAMILIES {
+            if !first {
+                row_divider(ui);
+            }
+            first = false;
+            let key = fam.as_filter_key();
+            let mut on = draft.filters.record_source_enabled(key);
+            let subtitle = if *fam == AgencyFamily::Other {
+                "未登记机构的信息事件；默认关闭"
+            } else {
+                fam.as_filter_key()
+            };
+            control_row(ui, fam.display_name(), subtitle, "\u{25ce}", |ui| {
+                toggle(ui, &mut on);
+            });
+            draft.filters.set_record_source_enabled(key, on);
+        }
+    });
+
     section(ui, "信息事件震级过滤", "\u{25ce}", |ui| {
         ui.label(
-            RichText::new("速报（信息事件）按机构过滤：选「不接收」即关闭该源速报；低于阈值的不显示。白名单可绕过震级，不能绕过「不接收」。")
+            RichText::new("仅按震级阈值过滤已开启的源：不过滤，或最低震级。白名单可绕过震级，不能绕过已关闭的源开关。")
                 .size(12.0)
                 .color(muted()),
         );
@@ -36,7 +59,7 @@ pub fn draw_record_filters(ui: &mut Ui, draft: &mut AppConfig) {
             let key = fam.as_filter_key();
             let mut val = draft.filters.record_mag_threshold(key);
             let subtitle = if *fam == AgencyFamily::Other {
-                "未登记机构的信息事件；默认不接收"
+                "未登记机构；仅在上方开关打开时生效"
             } else {
                 "低于阈值的信息事件不会显示"
             };
@@ -56,7 +79,7 @@ pub fn draw_record_filters(ui: &mut Ui, draft: &mut AppConfig) {
         control_field_below(
             ui,
             "信息事件地点白名单",
-            "关键词用 | 分隔；命中后可绕过震级，但「不接收」仍优先",
+            "关键词用 | 分隔；命中后可绕过震级，但关闭的源开关仍优先",
             "\u{25ce}",
             |ui| {
                 let w = (ui.available_width() - 8.0).clamp(200.0, 420.0);
