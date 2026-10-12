@@ -232,82 +232,57 @@ fn main() -> Result<()> {
     if cfg.ui.always_on_top {
         viewport = viewport.with_always_on_top();
     }
+
+    // 恢复 d07a801 之前：仅 Glow，避免 wgpu/独立 viewport 抢输入
+    let options = build_native_options(viewport, &cfg.performance);
+
     let started = Instant::now();
     let has_local = cfg.local.latitude.is_some() && cfg.local.longitude.is_some();
     snap.show_wave_rings = cfg.ui.show_wave_rings;
-
-    let seed = std::rc::Rc::new(std::cell::RefCell::new(Some(JianApp {
-        _log_guard: log_guard,
-        resource_root: root,
-        snap,
-        shell,
-        travel,
-        started,
-        local_lat: cfg.local.latitude,
-        local_lon: cfg.local.longitude,
-        has_local,
-        geodata_dir,
-        assets_dir: assets,
-        cfg: cfg.clone(),
-        rt,
-        net_rx,
-        audio,
-        auto_center_pending: live,
-        last_follow_key: None,
-        last_record_follow_key: None,
-        cinema_idx: 0,
-        cinema_next_at: Instant::now(),
-        cinema_seen_key: String::new(),
-        prev_health: (
-            HealthStatus::Abnormal,
-            HealthStatus::Abnormal,
-            HealthStatus::Abnormal,
-            HealthStatus::Abnormal,
-        ),
-        prev_tsunami_key: String::new(),
-        window_geom_save_at: None,
-        last_window_geom: None,
-    })));
-
-    let make_app = |seed: std::rc::Rc<std::cell::RefCell<Option<JianApp>>>| {
-        Box::new(move |cc: &eframe::CreationContext<'_>| -> Result<Box<dyn eframe::App>, Box<dyn std::error::Error + Send + Sync>> {
-            install_cjk_fonts(&cc.egui_ctx);
-            let app = seed
-                .borrow_mut()
-                .take()
-                .ok_or_else(|| "app seed already taken")?;
-            Ok(Box::new(app) as Box<dyn eframe::App>)
-        })
-    };
-
-    // 优先按配置启动；Vulkan/wgpu 失败则回退 OpenGL（安装后打不开的常见原因）
-    let mut perf = cfg.performance.clone();
-    let options = build_native_options(viewport.clone(), &perf);
-    match eframe::run_native(
+    eframe::run_native(
         jian_ui::APP_DISPLAY_NAME,
         options,
-        make_app(std::rc::Rc::clone(&seed)),
-    ) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            let api = perf.gpu_api.to_ascii_lowercase();
-            let used_wgpu = perf.device.to_ascii_lowercase() != "cpu"
-                && api != "opengl"
-                && api != "gl";
-            if !used_wgpu || seed.borrow().is_none() {
-                return Err(anyhow::anyhow!("eframe: {e}"));
-            }
-            tracing::error!("GPU/Vulkan 启动失败，回退 OpenGL: {e}");
-            perf.gpu_api = "opengl".into();
-            let options = build_native_options(viewport, &perf);
-            eframe::run_native(
-                jian_ui::APP_DISPLAY_NAME,
-                options,
-                make_app(seed),
-            )
-            .map_err(|e2| anyhow::anyhow!("eframe(OpenGL fallback): {e2}"))
-        }
-    }
+        Box::new(move |cc| {
+            install_cjk_fonts(&cc.egui_ctx);
+            // 强制嵌入式 viewport，防止历史 set_embed_viewports(false) 残留逻辑
+            cc.egui_ctx.set_embed_viewports(true);
+            Ok(Box::new(JianApp {
+                _log_guard: log_guard,
+                resource_root: root,
+                snap,
+                shell,
+                travel,
+                started,
+                local_lat: cfg.local.latitude,
+                local_lon: cfg.local.longitude,
+                has_local,
+                geodata_dir,
+                assets_dir: assets,
+                cfg,
+                rt,
+                net_rx,
+                audio,
+                auto_center_pending: live,
+                last_follow_key: None,
+                last_record_follow_key: None,
+                cinema_idx: 0,
+                cinema_next_at: Instant::now(),
+                cinema_seen_key: String::new(),
+                prev_health: (
+                    HealthStatus::Abnormal,
+                    HealthStatus::Abnormal,
+                    HealthStatus::Abnormal,
+                    HealthStatus::Abnormal,
+                ),
+                prev_tsunami_key: String::new(),
+                window_geom_save_at: None,
+                last_window_geom: None,
+                pointer_debug: cfg!(debug_assertions),
+            }))
+        }),
+    )
+    .map_err(|e| anyhow::anyhow!("eframe: {e}"))?;
+    Ok(())
 }
 
 fn build_native_options(
@@ -315,44 +290,20 @@ fn build_native_options(
     perf: &jian_config::PerformanceConfig,
 ) -> eframe::NativeOptions {
     let device = perf.device.to_ascii_lowercase();
-    let api = perf.gpu_api.to_ascii_lowercase();
     let profile = perf.profile.to_ascii_lowercase();
-
-    let (renderer, hw) = if device == "cpu" {
-        // CPU：强制软渲染（无硬件加速）
-        (
-            eframe::Renderer::Glow,
-            eframe::HardwareAcceleration::Off,
-        )
-    } else if api == "opengl" || api == "gl" {
-        (
-            eframe::Renderer::Glow,
-            eframe::HardwareAcceleration::Preferred,
-        )
+    // 无 wgpu feature：一律 Glow；cpu=关硬件加速
+    let hw = if device == "cpu" {
+        eframe::HardwareAcceleration::Off
     } else {
-        // GPU + Vulkan：走 wgpu
-        (
-            eframe::Renderer::Wgpu,
-            eframe::HardwareAcceleration::Preferred,
-        )
+        eframe::HardwareAcceleration::Preferred
     };
-
-    let vsync = profile != "extreme";
-    let mut options = eframe::NativeOptions {
+    eframe::NativeOptions {
         viewport,
-        vsync,
+        vsync: profile != "extreme",
         hardware_acceleration: hw,
-        renderer,
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
-    };
-    if matches!(renderer, eframe::Renderer::Wgpu) {
-        let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::default();
-        // 优先 Vulkan；Windows 无 Vulkan 时回退 DX12
-        setup.instance_descriptor.backends =
-            eframe::wgpu::Backends::VULKAN | eframe::wgpu::Backends::DX12;
-        options.wgpu_options.wgpu_setup = eframe::egui_wgpu::WgpuSetup::CreateNew(setup);
     }
-    options
 }
 
 /// 性能档位 → 空闲重绘间隔（毫秒）。设置窗打开时强制高刷。
@@ -363,6 +314,29 @@ fn idle_repaint_ms(profile: &str) -> u64 {
         // 正常：约 30fps 空闲，避免拖拽/点击手感发木
         _ => 33,
     }
+}
+
+
+fn draw_pointer_debug(ctx: &egui::Context, settings_open: bool) {
+    let (pos, any_down) = ctx.input(|i| (i.pointer.hover_pos(), i.pointer.any_down()));
+    let layer = pos.and_then(|p| ctx.layer_id_at(p));
+    let text = format!(
+        "F3指针调试 settings_open={settings_open} pos={pos:?} down={any_down} layer={layer:?} wants={}",
+        ctx.wants_pointer_input()
+    );
+    egui::Area::new(egui::Id::new("pointer_debug_hud"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(egui::pos2(8.0, 8.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::NONE
+                .fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 200))
+                .inner_margin(egui::Margin::symmetric(8, 4))
+                .corner_radius(4.0)
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new(text).size(12.0).color(egui::Color32::YELLOW));
+                });
+        });
 }
 
 fn clear_countdown(snap: &mut AppSnapshot) {
@@ -457,11 +431,17 @@ struct JianApp {
     /// 窗口几何变更后延迟写入用户配置
     window_geom_save_at: Option<Instant>,
     last_window_geom: Option<(f32, f32, Option<f32>, Option<f32>, bool)>,
+    /// debug 构建默认开：顶栏显示指针命中信息（F3 切换）
+    pointer_debug: bool,
 }
 
 impl eframe::App for JianApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.set_embed_viewports(true);
         self.tick_window_geometry(ctx);
+        if ctx.input(|i| i.key_pressed(egui::Key::F3)) {
+            self.pointer_debug = !self.pointer_debug;
+        }
 
         if let Some(rx) = self.net_rx.as_mut() {
             while let Ok(ev) = rx.try_recv() {
@@ -824,7 +804,11 @@ impl eframe::App for JianApp {
                 }
             }
         }
-        // 交互中 / 飞跃 / 设置窗：高刷；否则按性能档位空闲降频
+        if self.pointer_debug {
+            draw_pointer_debug(ctx, self.shell.settings.open);
+        }
+
+        // 有指针活动立即重绘，避免空闲降频把点击「吃掉」
         let pointer_busy = ctx.input(|i| {
             i.pointer.any_down()
                 || i.pointer.button_clicked(egui::PointerButton::Primary)

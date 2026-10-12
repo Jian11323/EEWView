@@ -303,15 +303,15 @@ impl SettingsSession {
         live: &AppConfig,
         health: &SourceHealthView,
     ) -> Option<SettingsAction> {
+        // 选点时不挡地图；设置保持 open，选完自动回来
+        if self.map_pick.is_some() {
+            return None;
+        }
         if !self.open {
             return None;
         }
         if self.draft.is_none() {
             self.draft = Some(live.clone());
-        }
-        // 选点时隐藏设置窗，避免挡住地图点击
-        if self.map_pick.is_some() {
-            return None;
         }
 
         let mut action = None;
@@ -319,7 +319,7 @@ impl SettingsSession {
         let mut do_exchange = false;
         let mut close_requested = false;
 
-        // 主窗口内嵌设置窗：避免独立 viewport 在部分环境下点不开
+        // 主窗口内嵌设置（勿再用独立 viewport：会抢焦点，表现为鼠标被隔离）
         let theme_key = self
             .draft
             .as_ref()
@@ -328,15 +328,35 @@ impl SettingsSession {
         let c = SettingsChrome::for_theme(theme_key);
         set_chrome(c);
 
+        // 全屏遮罩：点空白关闭；Window 用更高 Order，避免 dim 盖住设置控件
+        let screen = ctx.screen_rect();
+        egui::Area::new(egui::Id::new("eewview_settings_dim"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .interactable(true)
+            .show(ctx, |ui| {
+                let resp = ui.allocate_rect(screen, egui::Sense::click());
+                ui.painter().rect_filled(
+                    screen,
+                    0.0,
+                    Color32::from_black_alpha(140),
+                );
+                if resp.clicked() {
+                    close_requested = true;
+                }
+            });
+
+        let mut still_open = self.open;
         egui::Window::new("EEW View \u{00b7} 设置")
             .id(egui::Id::new("eewview_settings_embedded"))
-            .default_size([1080.0, 640.0])
-            .min_size([860.0, 520.0])
+            .open(&mut still_open)
+            .default_size([960.0, 600.0])
+            .min_size([720.0, 480.0])
             .resizable(true)
             .collapsible(false)
             .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.screen_rect().center())
-            .order(egui::Order::Foreground)
+            .default_pos(screen.center())
+            .order(egui::Order::Tooltip)
             .frame(
                 Frame::NONE
                     .fill(chrome().page_bg)
@@ -354,6 +374,10 @@ impl SettingsSession {
                     &mut do_exchange,
                 );
             });
+        if !still_open {
+            close_requested = true;
+        }
+        self.open = still_open;
 
         // Esc 关闭（打开后短暂忽略）；选点模式留给主界面 Esc
         let grace_ok = self

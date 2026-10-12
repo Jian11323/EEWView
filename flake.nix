@@ -10,7 +10,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        version = "1.3.0";
+        version = "1.2.0";
       in {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "eew-view";

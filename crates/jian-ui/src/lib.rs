@@ -138,190 +138,182 @@ impl MainShell {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
 
+        // SidePanel 保证侧栏命中；勿再用双 scope_builder（易被地图 Sense 吞点击）
+        let screen_w = ctx.screen_rect().width();
+        let sidebar_w = 280.0_f32.min(screen_w * 0.32).max(234.0);
+        let mut side_action = None;
+
+        egui::SidePanel::right("eew_sidebar")
+            .exact_width(sidebar_w)
+            .resizable(false)
+            .frame(Frame::NONE.fill(p.sidebar_bg))
+            .show(ctx, |ui| {
+                side_action = draw_sidebar(
+                    ui,
+                    &p,
+                    snap,
+                    scale.as_str(),
+                    &self.intensity_icons,
+                    cfg.ui.show_volcanoes,
+                );
+            });
+
         egui::CentralPanel::default()
             .frame(Frame::NONE.fill(p.map_bg))
             .show(ctx, |ui| {
-                let full = ui.available_rect_before_wrap();
-                // 对齐 RhythmQuake 桌面壳：右信息区约 234–280
-                let sidebar_w = 280.0_f32.min(full.width() * 0.32).max(234.0);
-                let map_rect = egui::Rect::from_min_max(
-                    full.min,
-                    egui::pos2(full.max.x - sidebar_w, full.max.y),
-                );
-                let side_rect = egui::Rect::from_min_max(
-                    egui::pos2(full.max.x - sidebar_w, full.min.y),
-                    full.max,
-                );
-
-                ui.scope_builder(egui::UiBuilder::new().max_rect(map_rect), |ui| {
-                    let home = match (self.local_lon, self.local_lat) {
-                        (Some(lon), Some(lat)) => Some((lon, lat)),
-                        _ => None,
-                    };
-                    // 样本事件：把 origin_ms=0 的 elapsed 写回临时列表供波圈用
-                    let mut wave_for_map = wave_owned.clone();
-                    for ev in &mut wave_for_map {
-                        if ev.origin_ms <= 0 {
-                            // 用负 origin 编码不可行；map 侧对 origin<=0 会得到 0。
-                            // 改为临时写入 now - sample_elapsed*1000
-                            ev.origin_ms = now_ms - (sample_elapsed * 1000.0) as i64;
-                        }
+                let map_rect = ui.available_rect_before_wrap();
+                let home = match (self.local_lon, self.local_lat) {
+                    (Some(lon), Some(lat)) => Some((lon, lat)),
+                    _ => None,
+                };
+                let mut wave_for_map = wave_owned.clone();
+                for ev in &mut wave_for_map {
+                    if ev.origin_ms <= 0 {
+                        ev.origin_ms = now_ms - (sample_elapsed * 1000.0) as i64;
                     }
-                    let selected_volcano = snap.selection.and_then(|s| {
-                        if s.tab == SidebarTab::Volcano {
-                            Some(s.index)
-                        } else {
-                            None
-                        }
-                    });
-                    let volcanoes_for_map = if cfg.ui.show_volcanoes {
-                        snap.volcanoes.as_slice()
+                }
+                let selected_volcano = snap.selection.and_then(|s| {
+                    if s.tab == SidebarTab::Volcano {
+                        Some(s.index)
                     } else {
-                        &[]
-                    };
-                    map_click = self.map.ui(
-                        ui,
-                        snap.active.as_ref(),
-                        &wave_for_map,
-                        &marker_owned,
-                        travel,
-                        now_ms,
-                        show_waves,
-                        &snap.stations,
-                        &snap.records,
-                        volcanoes_for_map,
-                        selected_volcano,
-                        home,
-                        snap.tsunami.as_ref(),
-                    );
-                    // 只跟当前焦点预警的 S 波线性缩小，绝不对全球多震取最小 zoom
-                    if cfg.ui.auto_zoom_waves
-                        && show_waves
-                        && !self.map.is_flying()
-                        && !self.map.user_camera_override
-                    {
-                        let focus = snap.active.as_ref().filter(|e| {
-                            !e.is_cancel
-                                && !e.event_id.starts_with("record:")
-                                && !e.event_id.starts_with("station:")
-                                && (e.latitude.abs() > 0.01 || e.longitude.abs() > 0.01)
-                        });
-                        if let Some(ev) = focus {
-                            let elapsed = if ev.origin_ms > 0 {
-                                ((now_ms - ev.origin_ms) as f64 / 1000.0).max(0.0)
-                            } else {
-                                sample_elapsed
-                            };
-                            let s_km = if let Some(eng) = travel {
-                                eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, elapsed)
-                            } else {
-                                elapsed * 5.0
-                            };
-                            // S 波始终入画：只缩小、目标=套住当前 S（fill 0.82）
-                            let r = s_km
-                                .min(max_s_wave_spread_km(ev.magnitude))
-                                .max(35.0);
-                            let z = zoom_to_fit_radius_km(
-                                ev.latitude,
-                                r,
-                                map_rect.width().min(map_rect.height()),
-                                0.72,
-                            )
-                            .clamp(7.2, 11.8);
-                            self.map.apply_linear_zoom_out(z, 0.10);
-                            ctx.request_repaint_after(std::time::Duration::from_millis(16));
-                        }
-                    }
-                    draw_map_load_banner(ui, &p, self.map.load_state(), self.map.load_status());
-                    if let Some(kind) = self.settings.map_pick {
-                        draw_map_pick_banner(ui, &p, kind);
-                    }
-                    draw_event_header(ui, &p, snap, scale.as_str(), &self.intensity_icons);
-                    draw_tsunami_banner(ui, &p, snap);
-                    draw_realtime_intensity_card(ui, &p, snap, &self.intensity_icons);
-                    if cfg.ui.show_legend {
-                        draw_legend_bar(ui, &p);
-                    }
-                    draw_countdown_hud(ui, &p, snap, self.show_nied_clock);
-                });
-
-                ui.scope_builder(egui::UiBuilder::new().max_rect(side_rect), |ui| {
-                    if let Some(act) = draw_sidebar(
-                        ui,
-                        &p,
-                        snap,
-                        scale.as_str(),
-                        &self.intensity_icons,
-                        cfg.ui.show_volcanoes,
-                    ) {
-                        match act {
-                            SideAction::List(tab, idx) => {
-                                if let Some((lon, lat, zoom)) = snap.select_list_item(tab, idx) {
-                                    // 预警 / 速报 / 火山：抛物线；测站：飞跃略近
-                                    match tab {
-                                        SidebarTab::Eew | SidebarTab::Records => {
-                                            let r_km = if tab == SidebarTab::Eew {
-                                                snap.eew_list.get(idx).map(|e| {
-                                                    let live = eew_wave_active_spread(e, now_ms, &snap.wave_spread_km);
-                                                    if !live {
-                                                        return 90.0;
-                                                    }
-                                                    let elapsed = if e.origin_ms > 0 {
-                                                        ((now_ms - e.origin_ms) as f64 / 1000.0)
-                                                            .max(0.0)
-                                                    } else {
-                                                        0.0
-                                                    };
-                                                    let s_km = if let Some(eng) = travel {
-                                                        eng.surface_distance_for_elapsed(
-                                                            Wave::S,
-                                                            e.depth_km,
-                                                            elapsed,
-                                                        )
-                                                    } else {
-                                                        elapsed * 5.0
-                                                    };
-                                                    s_km.min(max_s_wave_spread_km(e.magnitude))
-                                                        .max(35.0)
-                                                })
-                                            } else {
-                                                Some(80.0)
-                                            }
-                                            .unwrap_or(80.0);
-                                            let end_z = zoom_to_fit_radius_km(
-                                                lat,
-                                                r_km,
-                                                map_rect.width().min(map_rect.height()),
-                                                0.72,
-                                            )
-                                            .clamp(7.2, 11.8);
-                                            let dur = if tab == SidebarTab::Eew {
-                                                1.0
-                                            } else {
-                                                0.85
-                                            };
-                                            self.map.fly_to(lon, lat, Some(end_z), dur);
-                                        }
-                                        SidebarTab::Station => {
-                                            self.map.fly_to(lon, lat, Some(zoom.max(8.5)), 0.7);
-                                        }
-                                        SidebarTab::Volcano => {
-                                            self.map.fly_to(lon, lat, Some(zoom.max(7.5)), 0.85);
-                                        }
-                                    }
-                                    if snap.overlay_mode == OverlayMode::Wave {
-                                        self.map_elapsed = 0.0;
-                                    }
-                                }
-                            }
-                            SideAction::Settings => {
-                                self.settings.open_with(cfg);
-                            }
-                        }
+                        None
                     }
                 });
-
+                let volcanoes_for_map = if cfg.ui.show_volcanoes {
+                    snap.volcanoes.as_slice()
+                } else {
+                    &[]
+                };
+                map_click = self.map.ui(
+                    ui,
+                    snap.active.as_ref(),
+                    &wave_for_map,
+                    &marker_owned,
+                    travel,
+                    now_ms,
+                    show_waves,
+                    &snap.stations,
+                    &snap.records,
+                    volcanoes_for_map,
+                    selected_volcano,
+                    home,
+                    snap.tsunami.as_ref(),
+                );
+                if cfg.ui.auto_zoom_waves
+                    && show_waves
+                    && !self.map.is_flying()
+                    && !self.map.user_camera_override
+                {
+                    let focus = snap.active.as_ref().filter(|e| {
+                        !e.is_cancel
+                            && !e.event_id.starts_with("record:")
+                            && !e.event_id.starts_with("station:")
+                            && (e.latitude.abs() > 0.01 || e.longitude.abs() > 0.01)
+                    });
+                    if let Some(ev) = focus {
+                        let elapsed = if ev.origin_ms > 0 {
+                            ((now_ms - ev.origin_ms) as f64 / 1000.0).max(0.0)
+                        } else {
+                            sample_elapsed
+                        };
+                        let s_km = if let Some(eng) = travel {
+                            eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, elapsed)
+                        } else {
+                            elapsed * 5.0
+                        };
+                        let r = s_km
+                            .min(max_s_wave_spread_km(ev.magnitude))
+                            .max(35.0);
+                        let z = zoom_to_fit_radius_km(
+                            ev.latitude,
+                            r,
+                            map_rect.width().min(map_rect.height()),
+                            0.72,
+                        )
+                        .clamp(7.2, 11.8);
+                        self.map.apply_linear_zoom_out(z, 0.10);
+                        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+                    }
+                }
+                draw_map_load_banner(ui, &p, self.map.load_state(), self.map.load_status());
+                if let Some(kind) = self.settings.map_pick {
+                    draw_map_pick_banner(ui, &p, kind);
+                }
+                draw_event_header(ui, &p, snap, scale.as_str(), &self.intensity_icons);
+                draw_tsunami_banner(ui, &p, snap);
+                draw_realtime_intensity_card(ui, &p, snap, &self.intensity_icons);
+                if cfg.ui.show_legend {
+                    draw_legend_bar(ui, &p);
+                }
+                draw_countdown_hud(ui, &p, snap, self.show_nied_clock);
             });
+
+        if let Some(act) = side_action {
+            match act {
+                SideAction::List(tab, idx) => {
+                    if let Some((lon, lat, zoom)) = snap.select_list_item(tab, idx) {
+                        let vp = ctx.screen_rect();
+                        let map_w = (vp.width() - sidebar_w).max(120.0);
+                        let map_h = vp.height().max(120.0);
+                        match tab {
+                            SidebarTab::Eew | SidebarTab::Records => {
+                                let r_km = if tab == SidebarTab::Eew {
+                                    snap.eew_list.get(idx).map(|e| {
+                                        let live = eew_wave_active_spread(
+                                            e,
+                                            now_ms,
+                                            &snap.wave_spread_km,
+                                        );
+                                        if !live {
+                                            return 90.0;
+                                        }
+                                        let elapsed = if e.origin_ms > 0 {
+                                            ((now_ms - e.origin_ms) as f64 / 1000.0).max(0.0)
+                                        } else {
+                                            0.0
+                                        };
+                                        let s_km = if let Some(eng) = travel {
+                                            eng.surface_distance_for_elapsed(
+                                                Wave::S,
+                                                e.depth_km,
+                                                elapsed,
+                                            )
+                                        } else {
+                                            elapsed * 5.0
+                                        };
+                                        s_km.min(max_s_wave_spread_km(e.magnitude)).max(35.0)
+                                    })
+                                } else {
+                                    Some(80.0)
+                                }
+                                .unwrap_or(80.0);
+                                let end_z = zoom_to_fit_radius_km(
+                                    lat,
+                                    r_km,
+                                    map_w.min(map_h),
+                                    0.72,
+                                )
+                                .clamp(7.2, 11.8);
+                                let dur = if tab == SidebarTab::Eew { 1.0 } else { 0.85 };
+                                self.map.fly_to(lon, lat, Some(end_z), dur);
+                            }
+                            SidebarTab::Station => {
+                                self.map.fly_to(lon, lat, Some(zoom.max(8.5)), 0.7);
+                            }
+                            SidebarTab::Volcano => {
+                                self.map.fly_to(lon, lat, Some(zoom.max(7.5)), 0.85);
+                            }
+                        }
+                        if snap.overlay_mode == OverlayMode::Wave {
+                            self.map_elapsed = 0.0;
+                        }
+                    }
+                }
+                SideAction::Settings => {
+                    self.settings.open_with(cfg);
+                }
+            }
+        }
 
         if let Some((lon, lat)) = map_click {
             self.apply_map_pick(lon, lat);
