@@ -50,3 +50,4 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 resvg = { version = "0.45", default-features = false }
 rodio = { version = "0.20", features = ["wav", "mp3"] }
+earcutr = "0.5"

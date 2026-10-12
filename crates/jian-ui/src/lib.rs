@@ -1106,38 +1106,26 @@ fn draw_countdown_hud(
                     );
                     ui.add_space(6.0);
                 }
-                draw_tz_clock_block(ui, "BST", "北京时间", &clock);
+                draw_tz_clock_block(ui, "北京时间", &clock);
                 if let Some(jst) = jst_clock {
-                    draw_tz_clock_block(ui, "JST", "日本标准时", &jst);
+                    draw_tz_clock_block(ui, "东京时间", &jst);
                 }
             });
         });
 }
 
-fn draw_tz_clock_block(ui: &mut Ui, code: &str, title: &str, datetime: &str) {
-    // 从右往左排：时间块贴右，BST/JST 在其左侧
-    ui.allocate_ui_with_layout(
-        Vec2::new(ui.available_width(), 40.0),
-        egui::Layout::right_to_left(egui::Align::Center),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
-                    let f1 = FontId::new(13.0, FontFamily::Name("lxgw_wenkai".into()));
-                    let f2 = FontId::new(15.0, FontFamily::Name("lxgw_wenkai".into()));
-                    ui.label(
-                        RichText::new(title)
-                            .font(f1)
-                            .color(Color32::from_rgb(0xCC, 0xCC, 0xCC)),
-                    );
-                    ui.label(RichText::new(datetime).font(f2).color(Color32::WHITE));
-                });
-            });
-            let font = FontId::new(22.0, FontFamily::Name("lxgw_wenkai".into()));
-            ui.label(RichText::new(code).font(font).color(Color32::WHITE).strong());
-        },
-    );
+fn draw_tz_clock_block(ui: &mut Ui, title: &str, datetime: &str) {
+    ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let f1 = FontId::new(13.0, FontFamily::Name("lxgw_wenkai".into()));
+        let f2 = FontId::new(15.0, FontFamily::Name("lxgw_wenkai".into()));
+        ui.label(
+            RichText::new(title)
+                .font(f1)
+                .color(Color32::from_rgb(0xCC, 0xCC, 0xCC)),
+        );
+        ui.label(RichText::new(datetime).font(f2).color(Color32::WHITE));
+    });
 }
 
 fn intensity_fg(bg: Color32) -> Color32 {

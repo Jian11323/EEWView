@@ -1493,7 +1493,7 @@ fn draw_general(
     });
 
     section(ui, "界面偏好", "\u{2630}", |ui| {
-        control_row(ui, "JST 时钟", "主界面额外显示日本标准时", "\u{25ce}", |ui| {
+        control_row(ui, "东京时间", "主界面额外显示东京时间", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_nied_clock);
         });
         row_divider(ui);

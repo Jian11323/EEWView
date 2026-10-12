@@ -120,6 +120,8 @@ struct RingSet {
     max_lat: f32,
     /// 沿环解缠后的经度跨度；>180° 表示绕地过半，禁止填色。
     lon_span: f32,
+    /// 经纬度平面耳切三角剖分（外环+孔洞顶点序）；空表示不可填。
+    tris: Vec<u32>,
 }
 
 impl RingSet {
@@ -129,7 +131,7 @@ impl RingSet {
         }
         let lon_span = unwrapped_lon_span(&exterior);
         let (min_lon, min_lat, max_lon, max_lat) = bbox_of(&exterior);
-        Some(Self {
+        let mut ring = Self {
             exterior,
             holes,
             min_lon,
@@ -137,14 +139,17 @@ impl RingSet {
             max_lon,
             max_lat,
             lon_span,
-        })
+            tris: Vec::new(),
+        };
+        if ring.may_fill() {
+            ring.tris = triangulate_ring(&ring.exterior, &ring.holes);
+        }
+        Some(ring)
     }
 
-    /// egui PathShape 填色对凹多边形会扇出射线；仅极简单小环才填。
+    /// 绕地过半或跨日界的环只描边；其余用 earcut 预剖分后 Mesh 填色。
     fn may_fill(&self) -> bool {
-        self.lon_span <= 40.0
-            && self.exterior.len() <= 24
-            && !has_antimeridian_edge(&self.exterior)
+        self.lon_span <= 180.0 + 1e-3 && !has_antimeridian_edge(&self.exterior)
     }
 }
 
@@ -651,6 +656,42 @@ fn paint_rings(
     land_fill: Color32,
     lon_shift: f64,
 ) {
+    // 先填后描：避免后画的陆地盖住先画的边界
+    if fill {
+        let mut land = egui::epaint::Mesh::default();
+        for ring in rings {
+            if ring.tris.is_empty() {
+                continue;
+            }
+            if !ring_visible(
+                ring,
+                min_lon - lon_shift,
+                min_lat,
+                max_lon - lon_shift,
+                max_lat,
+            ) {
+                continue;
+            }
+            let Some(verts) =
+                project_fill_vertices(ring, view, max_jump_px, lon_shift)
+            else {
+                continue;
+            };
+            let base = land.vertices.len() as u32;
+            land.reserve_vertices(verts.len());
+            land.reserve_triangles(ring.tris.len() / 3);
+            for p in verts {
+                land.colored_vertex(p, land_fill);
+            }
+            for tri in ring.tris.chunks_exact(3) {
+                land.add_triangle(base + tri[0], base + tri[1], base + tri[2]);
+            }
+        }
+        if !land.indices.is_empty() {
+            shapes.push(land.into());
+        }
+    }
+
     for ring in rings {
         // 可见性按未偏移地理范围；副本仅改投影经度
         if !ring_visible(
@@ -670,12 +711,10 @@ fn paint_rings(
             max_jump_px,
             lon_shift,
         );
-        let _ = (fill, land_fill, ring.may_fill());
         for pts in segments {
             if pts.len() < 2 {
                 continue;
             }
-            // 只描边：egui PathShape 填色对凹多边形会扇出射线，勿再 fill
             shapes.push(
                 egui::epaint::PathShape {
                     points: pts,
@@ -716,6 +755,126 @@ fn paint_rings(
             }
         }
     }
+}
+
+/// 经纬度耳切；顶点序 = 外环 + 各孔洞，与 `project_fill_vertices` 一致。
+fn triangulate_ring(exterior: &[[f32; 2]], holes: &[Vec<[f32; 2]>]) -> Vec<u32> {
+    let mut flat: Vec<f64> = Vec::with_capacity((exterior.len()
+        + holes.iter().map(|h| h.len()).sum::<usize>())
+        * 2);
+    let mut hole_indices: Vec<usize> = Vec::with_capacity(holes.len());
+    for p in exterior {
+        flat.push(p[0] as f64);
+        flat.push(p[1] as f64);
+    }
+    for hole in holes {
+        if hole.len() < 3 {
+            continue;
+        }
+        hole_indices.push(flat.len() / 2);
+        for p in hole {
+            flat.push(p[0] as f64);
+            flat.push(p[1] as f64);
+        }
+    }
+    match earcutr::earcut(&flat, &hole_indices, 2) {
+        Ok(idx) => idx.into_iter().map(|i| i as u32).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// 投影填色顶点；任一点不可见或屏幕跳变过大则放弃该环填色（仍可描边）。
+fn project_fill_vertices(
+    ring: &RingSet,
+    view: &ViewCtx,
+    max_jump_px: f32,
+    lon_shift: f64,
+) -> Option<Vec<Pos2>> {
+    let jump2 = max_jump_px * max_jump_px;
+    let mut out: Vec<Pos2> =
+        Vec::with_capacity(ring.exterior.len() + ring.holes.iter().map(|h| h.len()).sum::<usize>());
+
+    let push_ring = |pts: &[[f32; 2]], out: &mut Vec<Pos2>| -> bool {
+        let Some(projected) = project_ring_points(pts, view, lon_shift) else {
+            return false;
+        };
+        if projected.len() != pts.len() {
+            return false;
+        }
+        for i in 0..projected.len() {
+            let a = projected[i];
+            let b = projected[(i + 1) % projected.len()];
+            let dx = a.x - b.x;
+            let dy = a.y - b.y;
+            if dx * dx + dy * dy > jump2 {
+                return false;
+            }
+        }
+        out.extend(projected);
+        true
+    };
+
+    if !push_ring(&ring.exterior, &mut out) {
+        return None;
+    }
+    for hole in &ring.holes {
+        if hole.len() < 3 {
+            continue;
+        }
+        if !push_ring(hole, &mut out) {
+            return None;
+        }
+    }
+    if out.len() < 3 {
+        return None;
+    }
+    Some(out)
+}
+
+fn project_ring_points(
+    ring: &[[f32; 2]],
+    view: &ViewCtx,
+    lon_shift: f64,
+) -> Option<Vec<Pos2>> {
+    if ring.is_empty() {
+        return None;
+    }
+
+    if view.mode.is_globe() {
+        let mut out = Vec::with_capacity(ring.len());
+        for p in ring {
+            let sp = view.project(p[0] as f64, p[1] as f64)?;
+            out.push(sp);
+        }
+        return Some(out);
+    }
+
+    let center_lon = view.center_lon;
+    let zoom = view.zoom;
+    let rect = view.rect;
+    let (cx, cy) = projection::lonlat_to_world(center_lon, view.center_lat, zoom);
+    let mut out = Vec::with_capacity(ring.len());
+    let mut prev_lon: Option<f64> = None;
+
+    for p in ring {
+        let lat = p[1] as f64;
+        let mut lon = projection::wrap_lon_near(p[0] as f64, center_lon) + lon_shift;
+        if let Some(prev) = prev_lon {
+            while lon - prev > 180.0 {
+                lon -= 360.0;
+            }
+            while prev - lon > 180.0 {
+                lon += 360.0;
+            }
+            if (lon - prev).abs() > 180.0 {
+                return None;
+            }
+        }
+        let (wx, wy) = projection::lonlat_to_world(lon, lat, zoom);
+        out.push(rect.center() + egui::Vec2::new((wx - cx) as f32, (wy - cy) as f32));
+        prev_lon = Some(lon);
+    }
+    Some(out)
 }
 
 fn ring_visible(ring: &RingSet, min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64) -> bool {
@@ -1878,8 +2037,28 @@ mod tests {
         ];
         let parts = split_closed_ring(&pts);
         assert_eq!(parts.len(), 1);
-        assert!(RingSet::from_parts(parts[0].clone(), Vec::new())
-            .unwrap()
-            .may_fill());
+        let set = RingSet::from_parts(parts[0].clone(), Vec::new()).unwrap();
+        assert!(set.may_fill());
+        assert_eq!(set.tris.len(), 6); // 四边形 → 2 个三角形
+    }
+
+    #[test]
+    fn triangulate_ring_with_hole() {
+        let exterior = vec![
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 10.0],
+            [0.0, 10.0],
+        ];
+        let hole = vec![
+            [2.0, 2.0],
+            [2.0, 8.0],
+            [8.0, 8.0],
+            [8.0, 2.0],
+        ];
+        let tris = triangulate_ring(&exterior, &[hole]);
+        assert!(tris.len() >= 12); // 外环+孔至少若干三角形
+        assert!(tris.len() % 3 == 0);
+        assert!(tris.iter().all(|&i| i < 8));
     }
 }
