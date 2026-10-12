@@ -476,9 +476,8 @@ impl eframe::App for JianApp {
                     // SREV 仅 JMA（对齐要石：issue/update/final/cancel + caution/warn）
                     if agency_family(&report.agency.0) == AgencyFamily::Jma {
                         if let Some(audio) = self.audio.as_mut() {
-                            // 启动数秒内历史灌入只登记不播，否则会听到 SREV issue
-                            let boot_mute = self.started.elapsed().as_secs_f64() < 5.0;
-                            if boot_mute {
+                            // 启动界面期间历史灌入只登记不播
+                            if self.splash.active() {
                                 audio.seed_eew_seen(
                                     &report.agency.0,
                                     &report.event_id,
@@ -507,13 +506,12 @@ impl eframe::App for JianApp {
                     ev,
                     Some(&self.cfg.filters),
                 );
-                // 预警 TTS：侧栏展示条 + 内容/文案去重；启动 5s 内不念历史灌入
+                // 预警 TTS：侧栏展示条 + 内容/文案去重。
+                // 启动界面未结束：只登记基线，不朗读；消失后才播后续更新。
                 if let Some(report) = eew_for_tts {
-                    let boot_mute = self.started.elapsed().as_secs_f64() < 5.0;
                     if self.cfg.audio.tts_enabled
                         && !self.cfg.audio.mute
                         && !report.is_cancel
-                        && !boot_mute
                     {
                         if let Some((_, shown)) = eew_sidebar_entries(&self.snap.eew_list)
                             .into_iter()
@@ -531,7 +529,9 @@ impl eframe::App for JianApp {
                                     .is_some_and(|s| s == &script);
                                 let last = self.last_eew_tts.get(&slot);
                                 if !same_script && should_play_eew_tts(last, shown) {
-                                    speak_async(script.clone());
+                                    if !self.splash.active() {
+                                        speak_async(script.clone());
+                                    }
                                     self.last_eew_tts.insert(slot.clone(), shown.clone());
                                     self.last_eew_tts_script.insert(slot, script);
                                 }
@@ -543,9 +543,12 @@ impl eframe::App for JianApp {
         }
 
         // 速报 TTS（含预警中的确认速报；跳转与否由 upsert_record 决定）
+        // 启动界面期间丢弃待播，避免冷启动 list 灌入朗读
         if self.cfg.audio.tts_enabled && !self.cfg.audio.mute {
             if let Some(rec) = self.snap.pending_tts_record.take() {
-                speak_async(build_record_tts_script(&rec));
+                if !self.splash.active() {
+                    speak_async(build_record_tts_script(&rec));
+                }
             }
         } else {
             self.snap.pending_tts_record = None;
@@ -987,8 +990,8 @@ impl JianApp {
         if prev == cur {
             return;
         }
-        // 启动数秒内源从「全异常」变为接通会滴一声；与 TTS 一样静音，避免误扰
-        if self.started.elapsed().as_secs_f64() < 5.0 {
+        // 启动界面未结束：源接通不滴声，避免误扰
+        if self.splash.active() {
             self.prev_health = cur;
             return;
         }
@@ -1026,8 +1029,8 @@ impl JianApp {
         }
         let prev = self.prev_tsunami_key.clone();
         self.prev_tsunami_key = key.clone();
-        // 启动灌入的海啸状态不播 SREV 海啸音
-        if self.started.elapsed().as_secs_f64() < 5.0 {
+        // 启动界面期间灌入的海啸状态不播 SREV 海啸音
+        if self.splash.active() {
             return;
         }
         let Some(audio) = self.audio.as_mut() else {

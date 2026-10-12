@@ -332,7 +332,9 @@ impl SettingsSession {
         let c = SettingsChrome::for_theme(theme_key);
         set_chrome(c);
 
-        // 全屏遮罩：点空白关闭；Window 用更高 Order，避免 dim 盖住设置控件
+        // 全屏遮罩：点空白关闭。Window 与 ComboBox 弹出层同为 Foreground
+        // （勿用 Tooltip：会盖住 egui ComboBox 的 Foreground 菜单）。
+        // dim 先画、Window 后画，同层内 Window 在上；打开下拉时 popup 会 move_to_top。
         let screen = ctx.screen_rect();
         egui::Area::new(egui::Id::new("eewview_settings_dim"))
             .order(egui::Order::Foreground)
@@ -366,7 +368,7 @@ impl SettingsSession {
             .constrain(true)
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(screen.center())
-            .order(egui::Order::Tooltip)
+            .order(egui::Order::Foreground)
             .frame(
                 Frame::NONE
                     .fill(chrome().page_bg)
