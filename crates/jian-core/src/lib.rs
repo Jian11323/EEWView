@@ -714,16 +714,20 @@ impl AppSnapshot {
         }
     }
 
-    /// 当前 active 是真预警（非速报/测站头）时为 true。
-    fn active_is_eew_header(&self) -> bool {
-        self.active.as_ref().is_some_and(|e| {
-            !e.event_id.starts_with("record:") && !e.event_id.starts_with("station:")
-        })
+    /// 是否仍有传播中的真预警（按自定义传播表；表空则用内置近似）。
+    fn has_live_eew(&self) -> bool {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        self.eew_list
+            .iter()
+            .any(|e| eew_wave_active_spread(e, now_ms, &self.wave_spread_km))
     }
 
     /// 插入速报；全源混合后按机构族+发震时刻去重；新→旧。
-    /// 无活跃预警时：收到即选中并飞跃（不论是否列表最新）。
-    /// 有预警展示中：只入列表不跳转；仍排队 TTS（作预警确认播报）。
+    /// 无传播中预警时：收到即选中并飞跃（不论是否列表最新）。
+    /// 有传播中预警：只入列表不跳转、不改 active/Tab；仍排队 TTS（作预警确认播报）。
     pub fn upsert_record(&mut self, record: EqRecord) {
         // 火山不得混入地震速报
         if record.agency.0.eq_ignore_ascii_case("jma-volcano")
@@ -760,9 +764,9 @@ impl AppSnapshot {
         if !is_new_or_upgrade {
             return;
         }
-        // 任意新到/升级速报均可 TTS；预警中则仅 TTS 不跳转
+        // 任意新到/升级速报均可 TTS；传播中预警则仅 TTS，绝不抢焦点
         self.pending_tts_record = Some(record.clone());
-        if self.active_is_eew_header() {
+        if self.has_live_eew() {
             return;
         }
         let lon = record.longitude;
@@ -1303,5 +1307,42 @@ mod eew_dedup_tests {
         snap.upsert_eew(sample("wolfx-jma-eew", "20261011201300", 6));
         assert_eq!(snap.eew_list.len(), 1);
         assert_eq!(snap.eew_list[0].serial, 6);
+    }
+
+    #[test]
+    fn live_eew_blocks_record_from_stealing_active() {
+        let mut snap = AppSnapshot::offline_sample();
+        snap.eew_list.clear();
+        snap.records.clear();
+        snap.active = None;
+        let mut eew = sample("jma-eew", "20261011201300", 3);
+        eew.origin_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        snap.upsert_eew(eew.clone());
+        assert_eq!(snap.tab, SidebarTab::Eew);
+
+        // active 被清掉时，旧逻辑会让速报抢走；传播中预警必须挡住
+        snap.active = None;
+        snap.upsert_record(EqRecord {
+            agency: AgencyId("p2pquake".into()),
+            place: "宫古岛近海".into(),
+            time_text: "2026-10-12 12:00".into(),
+            magnitude: 4.6,
+            intensity_text: "2".into(),
+            intensity_kind: IntensityKind::JmaShindo,
+            intensity_level: 2,
+            latitude: 24.8,
+            longitude: 125.3,
+            depth_km: 10.0,
+            origin_ms: eew.origin_ms,
+            is_auto: false,
+        });
+        assert!(snap.records.iter().any(|r| r.place == "宫古岛近海"));
+        assert!(snap.pending_tts_record.is_some());
+        assert!(snap.active.is_none());
+        assert_eq!(snap.tab, SidebarTab::Eew);
+        assert!(snap.pending_record_fly.is_none());
     }
 }

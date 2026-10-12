@@ -81,8 +81,16 @@ impl TravelTable {
         }
     }
 
-    /// 双线性插值走时（秒）
+    /// 双线性插值走时（秒）。
+    /// 震中距超出本表最大距离时返回 `None`（禁止钳到表末，否则远源会被当成 ~2000km）。
     pub fn travel_time(&self, wave: Wave, depth_km: f64, distance_km: f64) -> Option<f64> {
+        if self.distances_km.is_empty() {
+            return None;
+        }
+        let d_max = *self.distances_km.last()?;
+        if distance_km > d_max + 1e-6 {
+            return None;
+        }
         let di = bracket(&self.depths_km, depth_km)?;
         let dj = bracket(&self.distances_km, distance_km)?;
         let g = self.grid(wave);
@@ -271,6 +279,21 @@ pub fn s_wave_still_spreading(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn travel_time_rejects_beyond_table_max() {
+        let t = TravelTable {
+            name: "t".into(),
+            depths_km: vec![0.0, 10.0],
+            distances_km: vec![0.0, 1000.0, 2000.0],
+            p_times_s: vec![vec![0.0, 100.0, 200.0], vec![1.0, 101.0, 201.0]],
+            s_times_s: vec![vec![0.0, 180.0, 360.0], vec![2.0, 182.0, 362.0]],
+        };
+        assert!(t.travel_time(Wave::S, 5.0, 1500.0).is_some());
+        assert!(t.travel_time(Wave::S, 5.0, 2000.0).is_some());
+        assert!(t.travel_time(Wave::S, 5.0, 2000.1).is_none());
+        assert!(t.travel_time(Wave::S, 5.0, 9000.0).is_none());
+    }
 
     #[test]
     fn max_spread_scales_with_magnitude() {

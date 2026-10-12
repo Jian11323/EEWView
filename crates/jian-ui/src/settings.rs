@@ -350,18 +350,20 @@ impl SettingsSession {
                 }
             });
 
-        // 限制在主窗口内，避免内容高度每帧抬升把窗体撑满
+        // 限制在主窗口内；固定默认尺寸上限，内容只用 max 约束，避免 avail 反馈抬升
         let max_w = (screen.width() - 48.0).clamp(400.0, 1100.0);
         let max_h = (screen.height() - 48.0).clamp(320.0, 720.0);
         let def_w = 960.0_f32.min(max_w);
         let def_h = 600.0_f32.min(max_h);
+        let min_w = 720.0_f32.min(max_w);
+        let min_h = 480.0_f32.min(max_h);
 
         let mut still_open = self.open;
         egui::Window::new("EEW View \u{00b7} 设置")
             .id(egui::Id::new(("eewview_settings_embedded", self.open_gen)))
             .open(&mut still_open)
             .default_size([def_w, def_h])
-            .min_size([720.0_f32.min(max_w), 480.0_f32.min(max_h)])
+            .min_size([min_w, min_h])
             .max_size([max_w, max_h])
             .resizable(true)
             .collapsible(false)
@@ -377,6 +379,9 @@ impl SettingsSession {
                     .corner_radius(14.0),
             )
             .show(ctx, |ui| {
+                // 锁死本帧可用区：只设 max，绝不按 avail 抬 min（否则会逐帧线性撑大）
+                let panel = ui.available_size();
+                ui.set_max_size(panel);
                 draw_shell(
                     ui,
                     self,
@@ -479,10 +484,13 @@ fn draw_shell(
     Frame::NONE
         .inner_margin(Margin::symmetric(28, 18))
         .show(ui, |ui| {
+    let shell = ui.available_size();
+    ui.set_max_size(shell);
     ui.allocate_ui_with_layout(
-        ui.available_size(),
+        shell,
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
+            ui.set_max_size(shell);
             // 页眉（RQ .header）
             Frame::NONE
                 .inner_margin(Margin::symmetric(4, 6))
@@ -507,6 +515,7 @@ fn draw_shell(
             let avail = ui.available_size();
             // 用剩余高度精确分配，禁止 set_min_size 按 avail 抬升（否则窗体会逐帧撑满）
             let body_h = (avail.y - FOOTER_H - 8.0).max(200.0).min(avail.y.max(200.0));
+            let body_w = avail.x.max(100.0);
 
             // 统一面板（RQ .panel）
             Frame::NONE
@@ -515,11 +524,12 @@ fn draw_shell(
                 .corner_radius(14.0)
                 .inner_margin(Margin::ZERO)
                 .show(ui, |ui| {
-                    ui.set_max_size(Vec2::new(avail.x.max(100.0), body_h));
+                    ui.set_max_size(Vec2::new(body_w, body_h));
                     ui.allocate_ui_with_layout(
-                        Vec2::new(avail.x.max(100.0), body_h),
+                        Vec2::new(body_w, body_h),
                         egui::Layout::left_to_right(egui::Align::TOP),
                         |ui| {
+                            ui.set_max_size(Vec2::new(body_w, body_h));
                             draw_nav(ui, session, body_h);
                             // 竖分割线
                             let (line, _) =
@@ -748,7 +758,8 @@ fn draw_main(
                 .auto_shrink([false, false])
                 .id_salt("settings_body")
                 .show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
+                    // 只限宽，不把 available 写成 min（避免窗体逐帧加宽）
+                    ui.set_max_width(ui.available_width());
                     ui.add_space(8.0);
                     Frame::NONE
                         .inner_margin(Margin::symmetric(16, 8))

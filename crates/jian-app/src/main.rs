@@ -277,7 +277,6 @@ fn main() -> Result<()> {
                 prev_tsunami_key: String::new(),
                 window_geom_save_at: None,
                 last_window_geom: None,
-                pointer_debug: cfg!(debug_assertions),
             }))
         }),
     )
@@ -314,29 +313,6 @@ fn idle_repaint_ms(profile: &str) -> u64 {
         // 正常：约 30fps 空闲，避免拖拽/点击手感发木
         _ => 33,
     }
-}
-
-
-fn draw_pointer_debug(ctx: &egui::Context, settings_open: bool) {
-    let (pos, any_down) = ctx.input(|i| (i.pointer.hover_pos(), i.pointer.any_down()));
-    let layer = pos.and_then(|p| ctx.layer_id_at(p));
-    let text = format!(
-        "F3指针调试 settings_open={settings_open} pos={pos:?} down={any_down} layer={layer:?} wants={}",
-        ctx.wants_pointer_input()
-    );
-    egui::Area::new(egui::Id::new("pointer_debug_hud"))
-        .order(egui::Order::Tooltip)
-        .fixed_pos(egui::pos2(8.0, 8.0))
-        .interactable(false)
-        .show(ctx, |ui| {
-            egui::Frame::NONE
-                .fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 200))
-                .inner_margin(egui::Margin::symmetric(8, 4))
-                .corner_radius(4.0)
-                .show(ui, |ui| {
-                    ui.label(egui::RichText::new(text).size(12.0).color(egui::Color32::YELLOW));
-                });
-        });
 }
 
 fn clear_countdown(snap: &mut AppSnapshot) {
@@ -379,7 +355,18 @@ fn refresh_countdown(
         clear_countdown(snap);
         return;
     }
+    let surface = jian_util::haversine_km(ev.longitude, ev.latitude, lon, lat);
+    // 本机已在该震级 S 波最大传播范围之外：波到不了，不显示倒计时
+    let max_reach = max_s_wave_spread_km(ev.magnitude);
+    if surface > max_reach * 1.05 {
+        clear_countdown(snap);
+        return;
+    }
     let total = eng.eta_s_to_site(ev.longitude, ev.latitude, ev.depth_km, lon, lat);
+    if !total.is_finite() || total <= 0.0 {
+        clear_countdown(snap);
+        return;
+    }
     // 用 ceil：显示/语音与「还剩整秒」一致；音效侧按秒边界重启滴滴
     let remain = (total - elapsed_s).ceil() as i32;
     // EEWCN：到达本机后倒计时隐藏（不再挂 0 秒）
@@ -387,7 +374,6 @@ fn refresh_countdown(
         clear_countdown(snap);
         return;
     }
-    let surface = jian_util::haversine_km(ev.longitude, ev.latitude, lon, lat);
     let (lv, text) = jian_core::estimate_at_site(
         ev.intensity_kind,
         ev.magnitude,
@@ -431,17 +417,12 @@ struct JianApp {
     /// 窗口几何变更后延迟写入用户配置
     window_geom_save_at: Option<Instant>,
     last_window_geom: Option<(f32, f32, Option<f32>, Option<f32>, bool)>,
-    /// debug 构建默认开：顶栏显示指针命中信息（F3 切换）
-    pointer_debug: bool,
 }
 
 impl eframe::App for JianApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.set_embed_viewports(true);
         self.tick_window_geometry(ctx);
-        if ctx.input(|i| i.key_pressed(egui::Key::F3)) {
-            self.pointer_debug = !self.pointer_debug;
-        }
 
         if let Some(rx) = self.net_rx.as_mut() {
             while let Ok(ev) = rx.try_recv() {
@@ -516,16 +497,16 @@ impl eframe::App for JianApp {
                         };
                         let r = s_km
                             .min(max_s_wave_spread_km(ev.magnitude))
-                            .max(80.0);
+                            .max(18.0);
                         zoom_to_fit_radius_km(
                             ev.latitude,
-                            r.max(35.0),
+                            r,
                             self.shell.map.last_viewport_min_px,
-                            0.72,
+                            0.52,
                         )
-                        .clamp(7.2, 11.8)
+                        .clamp(8.0, 12.5)
                     } else {
-                        7.2
+                        8.5
                     };
                     self.shell.map.fly_to(lon, lat, Some(z), 1.0);
                     self.auto_center_pending = false;
@@ -569,6 +550,12 @@ impl eframe::App for JianApp {
                     let key = (ev.event_id.clone(), ev.serial);
                     let prev_id = self.last_follow_key.as_ref().map(|(id, _)| id.as_str());
                     let is_new_event = prev_id != Some(ev.event_id.as_str());
+                    // 速报/测站曾抢焦点时：跟焦键未变也要把 active/Tab 拉回预警
+                    let active_is_this_eew = self.snap.active.as_ref().is_some_and(|a| {
+                        a.event_id == ev.event_id
+                            && !a.event_id.starts_with("record:")
+                            && !a.event_id.starts_with("station:")
+                    });
                     if is_new_event {
                         // 新预警：强制飞跃（无视用户拖拽锁定）
                         let z = gq_jump_zoom(
@@ -588,6 +575,12 @@ impl eframe::App for JianApp {
                         // 同震更新报：刷新 active，不重飞
                         self.last_follow_key = Some(key);
                         self.snap.active = Some(ev.clone());
+                        self.snap.tab = jian_core::SidebarTab::Eew;
+                        self.snap.overlay_mode = jian_core::OverlayMode::Wave;
+                    } else if !active_is_this_eew {
+                        self.snap.active = Some(ev.clone());
+                        self.snap.tab = jian_core::SidebarTab::Eew;
+                        self.snap.overlay_mode = jian_core::OverlayMode::Wave;
                     }
                 } else {
                     let mut jump_idx: Option<usize> = None;
@@ -803,9 +796,6 @@ impl eframe::App for JianApp {
                     }
                 }
             }
-        }
-        if self.pointer_debug {
-            draw_pointer_debug(ctx, self.shell.settings.open);
         }
 
         // 有指针活动立即重绘，避免空闲降频把点击「吃掉」
@@ -1047,19 +1037,19 @@ fn gq_jump_zoom(
     } else {
         elapsed * 5.0
     };
-    // 视野拉近：S 圈约占短边 72%
+    // 视野再拉近：S 圈约占短边 52%（越小越近）；早期最小半径也收紧
     let r = s_km
         .min(max_s_wave_spread_km(ev.magnitude))
-        .max(22.0);
-    let fit_s = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.72);
+        .max(12.0);
+    let fit_s = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.52);
     let age_min = if ev.origin_ms > 0 {
         ((now_ms - ev.origin_ms) as f64 / 60_000.0).max(0.0)
     } else {
         0.0
     };
     let scroll = (age_min / 5.0).clamp(0.05, 1.2);
-    let prefer = (12.6 - scroll * 2.0).clamp(7.5, 12.0);
-    prefer.min(fit_s).clamp(7.2, 12.0)
+    let prefer = (13.2 - scroll * 1.6).clamp(8.2, 12.5);
+    prefer.min(fit_s).clamp(8.0, 12.5)
 }
 
 fn tsunami_audio_grade(grade: &str) -> u8 {

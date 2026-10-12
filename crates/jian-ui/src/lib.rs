@@ -241,14 +241,14 @@ impl MainShell {
                         };
                         let r = s_km
                             .min(max_s_wave_spread_km(ev.magnitude))
-                            .max(35.0);
+                            .max(18.0);
                         let z = zoom_to_fit_radius_km(
                             ev.latitude,
                             r,
                             map_rect.width().min(map_rect.height()),
-                            0.72,
+                            0.52,
                         )
-                        .clamp(7.2, 11.8);
+                        .clamp(8.0, 12.5);
                         self.map.apply_linear_zoom_out(z, 0.10);
                         ctx.request_repaint_after(std::time::Duration::from_millis(16));
                     }
@@ -299,19 +299,19 @@ impl MainShell {
                                         } else {
                                             elapsed * 5.0
                                         };
-                                        s_km.min(max_s_wave_spread_km(e.magnitude)).max(35.0)
+                                        s_km.min(max_s_wave_spread_km(e.magnitude)).max(18.0)
                                     })
                                 } else {
-                                    Some(80.0)
+                                    Some(55.0)
                                 }
-                                .unwrap_or(80.0);
+                                .unwrap_or(55.0);
                                 let end_z = zoom_to_fit_radius_km(
                                     lat,
                                     r_km,
                                     map_w.min(map_h),
-                                    0.72,
+                                    0.52,
                                 )
-                                .clamp(7.2, 11.8);
+                                .clamp(8.0, 12.5);
                                 let dur = if tab == SidebarTab::Eew { 1.0 } else { 0.85 };
                                 self.map.fly_to(lon, lat, Some(end_z), dur);
                                 // 手动点选：锁定镜头，避免影院 10s 轮播 / 跟焦把缩放突然改掉
@@ -1026,14 +1026,17 @@ fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_ni
         None
     };
 
-    let br = ui.max_rect().right_bottom() + Vec2::new(-5.0, -2.0);
+    // 留足右边/底边距，避免 BST 与时间贴边裁切
+    let br = ui.max_rect().right_bottom() + Vec2::new(-14.0, -12.0);
+    let hud_w = 340.0_f32;
+    let hud_h = if snap.countdown_s.is_some() { 148.0 } else { 88.0 };
     let rect = egui::Rect::from_min_size(
-        egui::pos2(br.x - 280.0, br.y - 120.0),
-        Vec2::new(280.0, 120.0),
+        egui::pos2(br.x - hud_w, br.y - hud_h),
+        Vec2::new(hud_w, hud_h),
     );
     overlay_child(ui, "countdown_hud", rect, |ui| {
             ui.spacing_mut().window_margin = Margin::ZERO;
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
             ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
                 if let Some(sec) = snap.countdown_s {
                     outlined_label(ui, "S波即将到达", Color32::WHITE, 14.0, false);
@@ -1089,7 +1092,7 @@ fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_ni
                                 });
                         });
                     });
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
                 }
                 draw_tz_clock_block(ui, "BST", "北京时间", &clock);
                 if let Some(jst) = jst_clock {
@@ -1100,16 +1103,17 @@ fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_ni
 }
 
 fn draw_tz_clock_block(ui: &mut Ui, code: &str, title: &str, datetime: &str) {
-    // 整块贴右：外层 RTL 只放一个水平组，避免 vertical 吃满宽度把排版撑乱
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        ui.horizontal(|ui| {
+    // 整块右对齐；块内固定 LTR：BST/JST 在左，中文标题与时间在右（对齐图二）
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            let font = FontId::new(28.0, FontFamily::Name("lxgw_wenkai".into()));
+            let font = FontId::new(22.0, FontFamily::Name("lxgw_wenkai".into()));
             ui.label(RichText::new(code).font(font).color(Color32::WHITE).strong());
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
+                ui.set_max_width(210.0);
                 let f1 = FontId::new(13.0, FontFamily::Name("lxgw_wenkai".into()));
-                let f2 = FontId::new(16.0, FontFamily::Name("lxgw_wenkai".into()));
+                let f2 = FontId::new(15.0, FontFamily::Name("lxgw_wenkai".into()));
                 ui.label(
                     RichText::new(title)
                         .font(f1)
