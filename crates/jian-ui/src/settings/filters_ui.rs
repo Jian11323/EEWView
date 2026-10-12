@@ -5,16 +5,6 @@ use egui::{RichText, Ui};
 use jian_config::AppConfig;
 use jian_core::{AgencyFamily, RECORD_FILTER_FAMILIES};
 
-const MAG_OPTS: [f64; 11] = [0.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5];
-
-fn mag_label(v: f64) -> String {
-    if v <= 0.0 {
-        "不过滤".into()
-    } else {
-        format!("M {v:.1}")
-    }
-}
-
 /// 各机构速报开关（挂在 Jian Project 区内，不再单独成块）。
 pub fn draw_record_source_switches(ui: &mut Ui, draft: &mut AppConfig) {
     ui.label(
@@ -46,7 +36,7 @@ pub fn draw_record_source_switches(ui: &mut Ui, draft: &mut AppConfig) {
 pub fn draw_record_mag_filters(ui: &mut Ui, draft: &mut AppConfig) {
     section(ui, "信息事件震级过滤", "\u{25ce}", |ui| {
         ui.label(
-            RichText::new("仅按震级阈值过滤已开启的源：不过滤，或最低震级。白名单可绕过震级，不能绕过已关闭的源开关。")
+            RichText::new("手动填写最低震级；0=不过滤。白名单可绕过震级，不能绕过已关闭的源开关。")
                 .size(12.0)
                 .color(muted()),
         );
@@ -62,17 +52,16 @@ pub fn draw_record_mag_filters(ui: &mut Ui, draft: &mut AppConfig) {
             let subtitle = if *fam == AgencyFamily::Other {
                 "未登记机构；仅在上方开关打开时生效"
             } else {
-                "低于阈值的信息事件不会显示"
+                "0=不过滤；低于阈值不显示"
             };
             control_row(ui, fam.display_name(), subtitle, "\u{25ce}", |ui| {
-                egui::ComboBox::from_id_salt(format!("mag_filter_{key}"))
-                    .selected_text(mag_label(val))
-                    .width(110.0)
-                    .show_ui(ui, |ui| {
-                        for opt in MAG_OPTS {
-                            ui.selectable_value(&mut val, opt, mag_label(opt));
-                        }
-                    });
+                ui.add(
+                    egui::DragValue::new(&mut val)
+                        .speed(0.1)
+                        .range(0.0..=9.9)
+                        .fixed_decimals(1)
+                        .prefix("M "),
+                );
             });
             draft.filters.set_record_mag(key, val);
         }
