@@ -11,11 +11,14 @@ RequestExecutionLevel admin
 !ifndef OUT_FILE
   !define OUT_FILE "..\dist\EEWView_Beta_${VERSION}_setup.exe"
 !endif
+!ifndef SPLASH_BMP
+  !define SPLASH_BMP "${DIST_DIR}\assets\brand\splash_installer.bmp"
+!endif
 
 Name "EEW View"
 OutFile "${OUT_FILE}"
-InstallDir "$PROGRAMFILES64\EEW View"
-InstallDirRegKey HKLM "Software\EEW View" "InstallDir"
+InstallDir "$PROGRAMFILES32\eew view"
+InstallDirRegKey HKLM "Software\eew view" "InstallDir"
 SetCompressor /SOLID lzma
 
 !include "MUI2.nsh"
@@ -24,8 +27,14 @@ SetCompressor /SOLID lzma
 !define MUI_ICON "${DIST_DIR}\assets\brand\app.ico"
 !define MUI_UNICON "${DIST_DIR}\assets\brand\app.ico"
 
+; 安装向导侧栏 / 欢迎页使用启动图（BMP，打包时由 splash_bg.png 生成）
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${SPLASH_BMP}"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "${SPLASH_BMP}"
+
+!insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "SimpChinese"
@@ -35,7 +44,7 @@ Section "EEW View" SecMain
   SetOutPath "$INSTDIR"
   File /r "${DIST_DIR}\*.*"
 
-  WriteRegStr HKLM "Software\EEW View" "InstallDir" "$INSTDIR"
+  WriteRegStr HKLM "Software\eew view" "InstallDir" "$INSTDIR"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
     "DisplayName" "EEW View"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
@@ -62,6 +71,6 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\EEW View\EEW View.lnk"
   RMDir "$SMPROGRAMS\EEW View"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView"
-  DeleteRegKey HKLM "Software\EEW View"
+  DeleteRegKey HKLM "Software\eew view"
   RMDir /r "$INSTDIR"
 SectionEnd

@@ -1854,13 +1854,13 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
     section(ui, "配置文件", "\u{25ce}", |ui| {
         if let Some(path) = AppConfig::user_config_path() {
             ui.label(
-                RichText::new(format!("用·覆盖：{}", path.display()))
+                RichText::new(format!("用户覆盖：{}", path.display()))
                     .size(12.0)
                     .color(chrome().muted),
             );
         } else {
             ui.label(
-                RichText::new("未能解析用·配置目录。")
+                RichText::new("未能解析用户配置目录。")
                     .size(12.0)
                     .color(chrome().muted),
             );

@@ -1,6 +1,9 @@
-//! 文件 + 可选控制台的 tracing 初始化（便携版无黑窗时仍可留档）。
+//! 文件 + 可选控制台的 tracing 初始化。
+//!
+//! Windows 默认写入 `%APPDATA%\eew view\log.txt`（安装到 Program Files 时资源根不可写，
+//! 若仍向安装目录建 logs/ 会令 tracing-appender panic，表现为双击无反应）。
 
-use jian_config::LogConfig;
+use jian_config::{AppConfig, LogConfig};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -8,20 +11,72 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
-/// 解析日志目录：绝对路径原样；相对路径相对资源根。
-pub fn resolve_log_dir(resource_root: &Path, cfg: &LogConfig) -> PathBuf {
+/// 用户目录下的单一日志文件：`…/eew view/log.txt`。
+fn user_log_file() -> Option<PathBuf> {
+    AppConfig::user_app_dir().map(|d| d.join("log.txt"))
+}
+
+fn preferred_log_file(resource_root: &Path, cfg: &LogConfig) -> PathBuf {
     let raw = cfg.dir.trim();
-    let dir = if raw.is_empty() {
-        resource_root.join("logs")
-    } else {
+    if !raw.is_empty() {
         let p = Path::new(raw);
         if p.is_absolute() {
-            p.to_path_buf()
-        } else {
-            resource_root.join(p)
+            // 绝对路径：若像目录则拼 log.txt，否则视为文件
+            if p.extension().is_none() || p.is_dir() {
+                return p.join("log.txt");
+            }
+            return p.to_path_buf();
         }
+    }
+    if let Some(f) = user_log_file() {
+        return f;
+    }
+    // 无用户目录时退回资源根（便携/特殊环境）
+    if raw.is_empty() {
+        resource_root.join("logs").join("log.txt")
+    } else {
+        resource_root.join(raw).join("log.txt")
+    }
+}
+
+fn ensure_parent_writable(file: &Path) -> bool {
+    let Some(dir) = file.parent() else {
+        return false;
     };
-    dir
+    if fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(".eewview_write_probe");
+    match fs::write(&probe, b"ok") {
+        Ok(()) => {
+            let _ = fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// 日志所在目录（设置页「打开日志目录」用）。
+pub fn resolve_log_dir(resource_root: &Path, cfg: &LogConfig) -> PathBuf {
+    let file = preferred_log_file(resource_root, cfg);
+    file.parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| resource_root.join("logs"))
+}
+
+fn pick_writable_log_file(resource_root: &Path, cfg: &LogConfig) -> Option<PathBuf> {
+    let preferred = preferred_log_file(resource_root, cfg);
+    if ensure_parent_writable(&preferred) {
+        return Some(preferred);
+    }
+    eprintln!("无法写入日志 {}，尝试备用路径…", preferred.display());
+    // 备用：资源根 logs/（便携包可写时）
+    let fallback = resource_root.join("logs").join("log.txt");
+    if ensure_parent_writable(&fallback) {
+        eprintln!("日志改写到 {}", fallback.display());
+        return Some(fallback);
+    }
+    None
 }
 
 fn level_token(level: &str) -> &'static str {
@@ -35,7 +90,6 @@ fn level_token(level: &str) -> &'static str {
 }
 
 fn build_filter(cfg: &LogConfig) -> EnvFilter {
-    // `RUST_LOG` 优先；否则用配置等级（全局）。
     EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level_token(&cfg.level)))
 }
 
@@ -51,7 +105,8 @@ fn prune_old_logs(dir: &Path, keep_days: u64) {
     for ent in rd.flatten() {
         let path = ent.path();
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        if !name.starts_with("eewview.log") {
+        // 清理历史按日滚动文件；保留现行 log.txt
+        if !(name.starts_with("eewview.log") || (name.starts_with("log.") && name != "log.txt")) {
             continue;
         }
         let Ok(meta) = ent.metadata() else {
@@ -66,30 +121,37 @@ fn prune_old_logs(dir: &Path, keep_days: u64) {
     }
 }
 
-/// 初始化全局 subscriber；返回的 guard 须持有至进程结束（禁用文件日志时仍返回 dummy guard）。
+/// 初始化全局 subscriber；不可写时关闭文件层，切勿让 appender panic。
 pub fn init_logging(resource_root: &Path, cfg: &LogConfig) -> WorkerGuard {
-    let log_dir = resolve_log_dir(resource_root, cfg);
-    if cfg.enabled {
-        if let Err(e) = fs::create_dir_all(&log_dir) {
-            eprintln!("无法创建日志目录 {}: {e}", log_dir.display());
-        } else {
-            prune_old_logs(&log_dir, cfg.keep_days);
+    let log_file = if cfg.enabled {
+        pick_writable_log_file(resource_root, cfg)
+    } else {
+        None
+    };
+    if let Some(ref file) = log_file {
+        if let Some(dir) = file.parent() {
+            prune_old_logs(dir, cfg.keep_days);
         }
     }
 
     let filter = build_filter(cfg);
-    // debug 构建默认也打 stderr；release 仅当配置显式开启
     let want_console = cfg.console || cfg!(debug_assertions);
+    let file_enabled = cfg.enabled && log_file.is_some();
 
-    let (nb_writer, guard) = if cfg.enabled {
-        let file_appender = tracing_appender::rolling::daily(&log_dir, "eewview.log");
+    let (nb_writer, guard) = if let Some(ref file) = log_file {
+        let dir = file.parent().unwrap_or_else(|| Path::new("."));
+        let name = file
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("log.txt");
+        // 单一文件、不按日滚动（安装约定：AppData\\eew view\\log.txt）
+        let file_appender = tracing_appender::rolling::never(dir, name);
         tracing_appender::non_blocking(file_appender)
     } else {
-        // 占位 guard：文件关闭时仍保持类型一致
         tracing_appender::non_blocking(std::io::sink())
     };
 
-    let file_layer = cfg.enabled.then(|| {
+    let file_layer = file_enabled.then(|| {
         fmt::layer()
             .with_writer(nb_writer)
             .with_ansi(false)
@@ -106,7 +168,6 @@ pub fn init_logging(resource_root: &Path, cfg: &LogConfig) -> WorkerGuard {
             .with_target(true)
     });
 
-    // 全关时仍挂一层 sink，保证 set_global_default 成功
     let sink_layer = (file_layer.is_none() && console_layer.is_none()).then(|| {
         fmt::layer()
             .with_writer(|| std::io::sink())
@@ -134,12 +195,20 @@ pub fn init_logging(resource_root: &Path, cfg: &LogConfig) -> WorkerGuard {
         };
         tracing::error!(%loc, %payload, "panic");
         eprintln!("panic at {loc}: {payload}");
+        show_fatal_dialog(
+            "EEW View",
+            &format!("程序异常退出：\n{payload}\n\n位置：{loc}"),
+        );
     }));
 
+    let log_display = log_file
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "(disabled)".into());
     tracing::info!(
-        dir = %log_dir.display(),
+        file = %log_display,
         level = %level_token(&cfg.level),
-        enabled = cfg.enabled,
+        enabled = file_enabled,
         console = want_console,
         keep_days = cfg.keep_days,
         "logging ready"
@@ -147,7 +216,6 @@ pub fn init_logging(resource_root: &Path, cfg: &LogConfig) -> WorkerGuard {
     guard
 }
 
-/// 在资源管理器 / 文件管理器中打开日志目录。
 pub fn open_log_dir(dir: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dir)?;
     #[cfg(target_os = "windows")]
@@ -163,4 +231,43 @@ pub fn open_log_dir(dir: &Path) -> std::io::Result<()> {
         std::process::Command::new("xdg-open").arg(dir).spawn()?;
     }
     Ok(())
+}
+
+pub fn show_fatal_dialog(title: &str, message: &str) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        fn wide(s: &str) -> Vec<u16> {
+            std::ffi::OsStr::new(s)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect()
+        }
+        #[link(name = "user32")]
+        extern "system" {
+            fn MessageBoxW(
+                hwnd: *mut core::ffi::c_void,
+                text: *const u16,
+                caption: *const u16,
+                flags: u32,
+            ) -> i32;
+        }
+        const MB_ICONERROR: u32 = 0x0000_0010;
+        const MB_OK: u32 = 0x0000_0000;
+        let text = wide(message);
+        let caption = wide(title);
+        unsafe {
+            MessageBoxW(
+                std::ptr::null_mut(),
+                text.as_ptr(),
+                caption.as_ptr(),
+                MB_OK | MB_ICONERROR,
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (title, message);
+        eprintln!("{title}: {message}");
+    }
 }

@@ -125,7 +125,7 @@ python tools/pack_nix.py
 
 资源根默认是可执行文件所在目录（或其上级仓库根）；也可用环境变量 `EEWVIEW_ROOT` 指定。
 
-运行日志默认写到资源根下 `logs/eewview.log.YYYY-MM-DD`（按日滚动）；设置 → 高级 → 运行日志可改等级与打开目录。环境变量 `RUST_LOG` 优先于配置中的等级。
+Windows 安装包默认装到 `C:\Program Files (x86)\eew view`。本地配置 `%APPDATA%\eew view\settings.json`，运行日志同目录 `log.txt`。设置 → 高级可打开日志目录。环境变量 `RUST_LOG` 优先于配置中的等级。
 
 ---
 

@@ -710,31 +710,31 @@ impl AppConfig {
     }
 
     /// 仓库默认 + 用户目录覆盖 + 环境变量（令牌仍以环境变量优先）。
+    /// Windows 用户覆盖：`%APPDATA%\eew view\settings.json`。
     pub fn load_merged(repo_config: impl AsRef<Path>) -> Self {
         let mut cfg = Self::load_default_or_builtin(repo_config);
         if let Some(path) = Self::user_config_path() {
             if path.is_file() {
-                match fs::read_to_string(&path) {
-                    Ok(text) => match text.parse::<toml::Value>() {
-                        Ok(overlay) => match toml::Value::try_from(&cfg) {
-                            Ok(base) => {
-                                let merged = merge_toml(base, overlay);
-                                match merged.try_into() {
-                                    Ok(c) => {
-                                        tracing_log(&format!(
-                                            "已合并用户配置 {}",
-                                            path.display()
-                                        ));
-                                        cfg = c;
-                                    }
-                                    Err(e) => eprintln!("用户配置无法解析，已忽略: {e:#}"),
-                                }
+                match Self::apply_user_overlay_file(&mut cfg, &path) {
+                    Ok(()) => tracing_log(&format!("已合并用户配置 {}", path.display())),
+                    Err(e) => eprintln!("用户配置无效，已忽略 {}: {e:#}", path.display()),
+                }
+            } else {
+                // 一次性迁移旧路径（sismotide / config.toml）
+                for legacy in Self::legacy_user_config_paths() {
+                    if legacy.is_file() {
+                        match Self::apply_user_overlay_file(&mut cfg, &legacy) {
+                            Ok(()) => {
+                                tracing_log(&format!(
+                                    "已从旧配置迁移 {} → settings.json",
+                                    legacy.display()
+                                ));
+                                let _ = cfg.save_user_overlay();
+                                break;
                             }
-                            Err(e) => eprintln!("序列化当前配置失败: {e:#}"),
-                        },
-                        Err(e) => eprintln!("用户配置 TOML 无效，已忽略: {e:#}"),
-                    },
-                    Err(e) => eprintln!("读取用户配置失败: {e:#}"),
+                            Err(e) => eprintln!("旧配置无法读取 {}: {e:#}", legacy.display()),
+                        }
+                    }
                 }
             }
         }
@@ -743,19 +743,42 @@ impl AppConfig {
         cfg
     }
 
-    pub fn user_config_path() -> Option<PathBuf> {
-        Self::user_config_dir().map(|d| d.join("config.toml"))
+    fn apply_user_overlay_file(cfg: &mut Self, path: &Path) -> Result<()> {
+        let text = fs::read_to_string(path)
+            .with_context(|| format!("read {}", path.display()))?;
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if name.ends_with(".json") {
+            let overlay: serde_json::Value =
+                serde_json::from_str(&text).context("parse settings.json")?;
+            let base = serde_json::to_value(&*cfg).context("serialize base config")?;
+            let merged = merge_json(base, overlay);
+            *cfg = serde_json::from_value(merged).context("settings.json → AppConfig")?;
+        } else {
+            let overlay: toml::Value = text.parse().context("parse TOML overlay")?;
+            let base = toml::Value::try_from(&*cfg).context("serialize base config")?;
+            let merged = merge_toml(base, overlay);
+            *cfg = merged.try_into().context("TOML overlay → AppConfig")?;
+        }
+        Ok(())
     }
 
-    /// 写入用户目录覆盖（不含短期 `at_`；保留长期 `rt_`）。
+    pub fn user_config_path() -> Option<PathBuf> {
+        Self::user_config_dir().map(|d| d.join("settings.json"))
+    }
+
+    /// 写入用户目录覆盖为 `settings.json`（不含短期 `at_`；保留长期 `rt_`）。
     pub fn save_user_overlay(&self) -> Result<PathBuf> {
         let dir = Self::user_config_dir().context("无法解析用户配置目录")?;
         fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
-        let path = dir.join("config.toml");
+        let path = dir.join("settings.json");
         let mut sanitized = self.clone();
         sanitized.filters.migrate_legacy_record_off();
         sanitized.sources.jian.access_token = None;
-        let text = toml::to_string_pretty(&sanitized).context("serialize config")?;
+        let text = serde_json::to_string_pretty(&sanitized).context("serialize settings.json")?;
         fs::write(&path, text).with_context(|| format!("write {}", path.display()))?;
         Ok(path)
     }
@@ -789,9 +812,39 @@ impl AppConfig {
         }
     }
 
+    /// 用户数据根目录。
+    /// Windows：`%APPDATA%\eew view`（配置 `settings.json`、日志 `log.txt`）。
     pub fn user_config_dir() -> Option<PathBuf> {
-        directories::ProjectDirs::from("top", "sismotide", "jian-project")
-            .map(|d| d.config_dir().to_path_buf())
+        Self::user_app_dir()
+    }
+
+    /// 与 `user_config_dir` 相同（本机可写用户数据）。
+    pub fn user_data_local_dir() -> Option<PathBuf> {
+        Self::user_app_dir()
+    }
+
+    /// 平台用户目录：`eew view`。
+    pub fn user_app_dir() -> Option<PathBuf> {
+        #[cfg(windows)]
+        {
+            env::var_os("APPDATA").map(|p| PathBuf::from(p).join("eew view"))
+        }
+        #[cfg(not(windows))]
+        {
+            directories::BaseDirs::new().map(|b| b.config_dir().join("eew view"))
+        }
+    }
+
+    /// 旧版配置路径（仅迁移读取，不再写入）。
+    fn legacy_user_config_paths() -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        if let Some(proj) = directories::ProjectDirs::from("top", "sismotide", "jian-project") {
+            let base = proj.config_dir().to_path_buf();
+            out.push(base.join("config.toml"));
+            out.push(base.join("config").join("config.toml"));
+            out.push(base.join("settings.json"));
+        }
+        out
     }
 
     pub fn any_source_enabled(&self) -> bool {
@@ -854,6 +907,25 @@ impl AppConfig {
             && self.sources.pancakes.gq_min_magnitude == other.sources.pancakes.gq_min_magnitude
             && self.sources.pancakes.gq == other.sources.pancakes.gq
             && self.sources.pancakes.jma_volcano == other.sources.pancakes.jma_volcano
+    }
+}
+
+fn merge_json(base: serde_json::Value, overlay: serde_json::Value) -> serde_json::Value {
+    match (base, overlay) {
+        (serde_json::Value::Object(mut a), serde_json::Value::Object(b)) => {
+            for (k, v) in b {
+                match a.remove(&k) {
+                    Some(prev) => {
+                        a.insert(k, merge_json(prev, v));
+                    }
+                    None => {
+                        a.insert(k, v);
+                    }
+                }
+            }
+            serde_json::Value::Object(a)
+        }
+        (_, overlay) => overlay,
     }
 }
 

@@ -95,7 +95,15 @@ fn install_cjk_fonts(ctx: &egui::Context) {
     tracing::info!(bytes = LXGW_WENKAI.len(), "embedded LXGW WenKai");
 }
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(e) = run_app() {
+        let msg = format!("{e:#}");
+        logging::show_fatal_dialog("EEW View", &format!("启动失败：\n{msg}"));
+        std::process::exit(1);
+    }
+}
+
+fn run_app() -> Result<()> {
     let root = resource_root();
     let assets = assets_root();
     let cfg = AppConfig::load_merged(root.join("config/default.toml"));

@@ -118,12 +118,38 @@ def main() -> int:
     log(f"stage copy -> {stage_dist}")
     shutil.copytree(dist, stage_dist)
 
+    # NSIS MUI 欢迎页侧栏需要 BMP；由启动图生成
+    splash_png = stage_dist / "assets" / "brand" / "splash_bg.png"
+    splash_bmp = stage_dist / "assets" / "brand" / "splash_installer.bmp"
+    if splash_png.is_file():
+        try:
+            from PIL import Image  # type: ignore
+        except ImportError:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pillow", "-q"])
+            from PIL import Image  # type: ignore
+        im = Image.open(splash_png).convert("RGB")
+        w, h = 164, 314
+        im_ratio = im.width / max(im.height, 1)
+        target_ratio = w / h
+        if im_ratio > target_ratio:
+            nh, nw = h, int(h * im_ratio)
+        else:
+            nw, nh = w, int(w / max(im_ratio, 1e-6))
+        im = im.resize((nw, nh), Image.Resampling.LANCZOS)
+        left, top = (nw - w) // 2, (nh - h) // 2
+        im.crop((left, top, left + w, top + h)).save(splash_bmp, format="BMP")
+        log(f"installer splash bmp -> {splash_bmp.name}")
+    else:
+        log(f"WARN missing splash png: {splash_png}")
+
+
     nsi = ROOT / "tools" / "pack_windows_installer.nsi"
     cmd = [
         str(makensis),
         f"/DVERSION={ver}",
         f"/DDIST_DIR={stage_dist}",
         f"/DOUT_FILE={stage_out}",
+        f"/DSPLASH_BMP={splash_bmp}",
         str(nsi),
     ]
     log(" ".join(cmd))
