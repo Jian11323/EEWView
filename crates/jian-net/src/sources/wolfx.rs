@@ -23,7 +23,7 @@ pub fn spawn(tx: NetTx, cfg: WolfxSourceConfig) -> Vec<JoinHandle<()>> {
     }
 
     let mut tasks = Vec::new();
-    if cfg.eqlist_enabled {
+    if cfg.type_enabled("cenc_eqlist") {
         let eqlist = cfg.http_eqlist.clone();
         let tx_http = tx.clone();
         let ws_also = (cfg.eew_enabled || cfg.eqlist_enabled) && !cfg.ws_urls.is_empty();
@@ -34,12 +34,11 @@ pub fn spawn(tx: NetTx, cfg: WolfxSourceConfig) -> Vec<JoinHandle<()>> {
 
     // 预警或速报任一开启即连 WS（all_eew 可 query 列表）
     if cfg.eew_enabled || cfg.eqlist_enabled {
-        for url in cfg.ws_urls {
+        for url in cfg.ws_urls.clone() {
             let tx_ws = tx.clone();
-            let eew = cfg.eew_enabled;
-            let eqlist = cfg.eqlist_enabled;
+            let cfg_ws = cfg.clone();
             let is_cwa = url.contains("cwa_eew");
-            let on_open = wolfx_on_open_texts(&url, eew, eqlist);
+            let on_open = wolfx_on_open_texts(&url, &cfg_ws);
             info!(%url, "wolfx: spawn ws");
             tasks.push(tokio::spawn(async move {
                 run_ws_loop(
@@ -54,11 +53,11 @@ pub fn spawn(tx: NetTx, cfg: WolfxSourceConfig) -> Vec<JoinHandle<()>> {
                     },
                     move |tx, text| {
                         if is_cwa {
-                            if eew {
+                            if cfg_ws.type_enabled("cwa_eew") {
                                 ingest_wolfx_cwa_eew(tx, text);
                             }
                         } else {
-                            ingest_wolfx_frame(tx, text, eew, eqlist);
+                            ingest_wolfx_frame(tx, text, &cfg_ws);
                         }
                     },
                 )
@@ -69,23 +68,31 @@ pub fn spawn(tx: NetTx, cfg: WolfxSourceConfig) -> Vec<JoinHandle<()>> {
     tasks
 }
 
-fn wolfx_on_open_texts(url: &str, eew_enabled: bool, eqlist_enabled: bool) -> Vec<String> {
+fn wolfx_on_open_texts(url: &str, cfg: &WolfxSourceConfig) -> Vec<String> {
     let mut texts = vec!["ping".into()];
     if url.contains("cwa_eew") {
         return texts;
     }
-    // all_eew 手动查询：冷启动拉取各源最新报
-    if eew_enabled {
-        texts.extend([
-            "query_jmaeew".into(),
-            "query_sceew".into(),
-            "query_fjeew".into(),
-            "query_cqeew".into(),
-            "query_cenceew".into(),
-        ]);
+    if cfg.type_enabled("jma_eew") {
+        texts.push("query_jmaeew".into());
     }
-    if eqlist_enabled {
-        texts.extend(["query_cenceqlist".into(), "query_jmaeqlist".into()]);
+    if cfg.type_enabled("sc_eew") {
+        texts.push("query_sceew".into());
+    }
+    if cfg.type_enabled("fj_eew") {
+        texts.push("query_fjeew".into());
+    }
+    if cfg.type_enabled("cq_eew") {
+        texts.push("query_cqeew".into());
+    }
+    if cfg.type_enabled("cenc_eew") {
+        texts.push("query_cenceew".into());
+    }
+    if cfg.type_enabled("cenc_eqlist") {
+        texts.push("query_cenceqlist".into());
+    }
+    if cfg.type_enabled("jma_eqlist") {
+        texts.push("query_jmaeqlist".into());
     }
     texts
 }

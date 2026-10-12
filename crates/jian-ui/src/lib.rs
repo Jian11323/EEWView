@@ -12,8 +12,7 @@ use egui::{Color32, FontFamily, FontId, Frame, Margin, RichText, Sense, Stroke, 
 use intensity_icons::IntensityIcons;
 use jian_core::palette::color_for;
 use jian_core::{
-    agency_bracket, cn_intensity_text, instrumental_band_rgb, eew_map_markers,
-    eew_sidebar_entries, eew_wave_active, live_wave_eews, place_with_agency,
+    agency_bracket, cn_intensity_text, instrumental_band_rgb, eew_map_markers_spread, eew_sidebar_entries, eew_wave_active_spread, live_wave_eews_spread, place_with_agency,
     prefer_intensity_scale, AppSnapshot, IntensityKind, ListSelection, OverlayMode,
     SidebarTab,
 };
@@ -126,9 +125,9 @@ impl MainShell {
         let show_waves = snap.overlay_mode == OverlayMode::Wave && snap.show_wave_rings;
         let scale = self.intensity_scale.clone();
 
-        let live_refs = live_wave_eews(&snap.eew_list, now_ms, 30 * 60 * 1000);
+        let live_refs = live_wave_eews_spread(&snap.eew_list, now_ms, &snap.wave_spread_km);
         let wave_owned: Vec<_> = live_refs.into_iter().cloned().collect();
-        let marker_refs = eew_map_markers(&snap.eew_list, now_ms);
+        let marker_refs = eew_map_markers_spread(&snap.eew_list, now_ms, &snap.wave_spread_km);
         let marker_owned: Vec<_> = marker_refs.into_iter().cloned().collect();
         // 演示样本：无有效发震时刻时用 map_elapsed 驱动波圈
         let sample_elapsed = self.map_elapsed % 120.0;
@@ -226,9 +225,9 @@ impl MainShell {
                                 ev.latitude,
                                 r,
                                 map_rect.width().min(map_rect.height()),
-                                0.58,
+                                0.72,
                             )
-                            .clamp(6.8, 11.2);
+                            .clamp(7.2, 11.8);
                             self.map.apply_linear_zoom_out(z, 0.10);
                             ctx.request_repaint_after(std::time::Duration::from_millis(16));
                         }
@@ -263,7 +262,7 @@ impl MainShell {
                                         SidebarTab::Eew | SidebarTab::Records => {
                                             let r_km = if tab == SidebarTab::Eew {
                                                 snap.eew_list.get(idx).map(|e| {
-                                                    let live = eew_wave_active(e, now_ms);
+                                                    let live = eew_wave_active_spread(e, now_ms, &snap.wave_spread_km);
                                                     if !live {
                                                         return 90.0;
                                                     }
@@ -293,9 +292,9 @@ impl MainShell {
                                                 lat,
                                                 r_km,
                                                 map_rect.width().min(map_rect.height()),
-                                                0.58,
+                                                0.72,
                                             )
-                                            .clamp(6.8, 11.2);
+                                            .clamp(7.2, 11.8);
                                             let dur = if tab == SidebarTab::Eew {
                                                 1.0
                                             } else {
@@ -517,7 +516,7 @@ const OVERLAY_TOP_Y: f32 = 12.0;
 /// 左上角堆叠条：仍在传播的预警（EEWCN 向下堆叠，不切换单条）。
 fn header_live_eews(snap: &AppSnapshot) -> Vec<&jian_core::EewReport> {
     let now_ms = chrono::Utc::now().timestamp_millis();
-    live_wave_eews(&snap.eew_list, now_ms, 0)
+    live_wave_eews_spread(&snap.eew_list, now_ms, &snap.wave_spread_km)
 }
 
 /// 左上角预警条总高度（海啸条避让）。
@@ -769,7 +768,7 @@ fn draw_realtime_intensity_card(
         return;
     }
     let mut cards: Vec<(&str, &str, f64, i64)> = Vec::new();
-    for (key, label) in [("kmoni", "NIED"), ("snet", "S-Net"), ("kma", "KMA")] {
+    for (key, label) in [("kmoni", "Kmoni"), ("snet", "S-Net"), ("kma", "KMA")] {
         let mut max_inst = -99.0_f64;
         let mut any = false;
         for s in &snap.stations {
@@ -981,17 +980,18 @@ fn draw_legend_bar(ui: &mut Ui, p: &ThemePalette) {
 fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_nied: bool) {
     let local = Local::now();
     let clock = local.format("%Y/%m/%d %H:%M:%S").to_string();
-    let jst_line = if show_nied {
+    let jst_clock = if show_nied {
         let jst = FixedOffset::east_opt(9 * 3600).unwrap();
-        Some(format!(
-            "JST {}",
-            local.with_timezone(&jst).format("%Y/%m/%d %H:%M:%S")
-        ))
+        Some(
+            local
+                .with_timezone(&jst)
+                .format("%Y/%m/%d %H:%M:%S")
+                .to_string(),
+        )
     } else {
         None
     };
 
-    // 对齐 eewcn rowcounter：左本地预估烈度 + 右 M:SS；时钟用比例字体（非等宽）
     egui::Area::new(egui::Id::new("countdown_hud"))
         .pivot(egui::Align2::RIGHT_BOTTOM)
         .fixed_pos(ui.max_rect().right_bottom() + Vec2::new(-5.0, -2.0))
@@ -1006,7 +1006,6 @@ fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_ni
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            // 右侧倒计时 M:SS
                             let mm = sec / 60;
                             let ss = sec % 60;
                             let time_txt = format!("{mm}:{ss:02}");
@@ -1021,7 +1020,6 @@ fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_ni
                                 .show(ui, |ui| {
                                     outlined_label(ui, &time_txt, time_color, 34.0, false);
                                 });
-                            // 左侧本地预估烈度
                             let lv = snap.countdown_local_level;
                             let label = if snap.countdown_local_text.is_empty() {
                                 if lv == 0 {
@@ -1059,13 +1057,33 @@ fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_ni
                     });
                     ui.add_space(4.0);
                 }
-                // 时钟：强制文楷、无描边（描边偏移会显假粗）
-                clock_label(ui, &clock, 18.0);
-                if let Some(jst) = jst_line {
-                    clock_label(ui, &jst, 16.0);
+                draw_tz_clock_block(ui, "BST", "北京时间", &clock);
+                if let Some(jst) = jst_clock {
+                    draw_tz_clock_block(ui, "JST", "日本标准时", &jst);
                 }
             });
         });
+}
+
+fn draw_tz_clock_block(ui: &mut Ui, code: &str, title: &str, datetime: &str) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            let font = FontId::new(28.0, FontFamily::Name("lxgw_wenkai".into()));
+            ui.label(RichText::new(code).font(font).color(Color32::WHITE).strong());
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let f1 = FontId::new(13.0, FontFamily::Name("lxgw_wenkai".into()));
+                let f2 = FontId::new(16.0, FontFamily::Name("lxgw_wenkai".into()));
+                ui.label(
+                    RichText::new(title)
+                        .font(f1)
+                        .color(Color32::from_rgb(0xCC, 0xCC, 0xCC)),
+                );
+                ui.label(RichText::new(datetime).font(f2).color(Color32::WHITE));
+            });
+        });
+    });
 }
 
 fn intensity_fg(bg: Color32) -> Color32 {
@@ -1093,12 +1111,6 @@ fn outlined_label(ui: &mut Ui, text: &str, color: Color32, size: f32, monospace:
         painter.galley(pos + Vec2::new(dx, dy), galley.clone(), stroke);
     }
     painter.galley(pos, galley, color);
-}
-
-/// 右下角时钟：嵌入字体名强制文楷，不加描边。
-fn clock_label(ui: &mut Ui, text: &str, size: f32) {
-    let font = FontId::new(size, FontFamily::Name("lxgw_wenkai".into()));
-    ui.label(RichText::new(text).font(font).color(Color32::WHITE));
 }
 
 enum SideAction {

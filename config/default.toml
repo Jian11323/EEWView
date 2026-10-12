@@ -40,11 +40,15 @@ countdown_pack = "countdown"
 master_volume = 0.8
 countdown_volume = 1.0
 mute = false
+# Windows TTS 语音播报（默认关）
+tts_enabled = false
 
 [travel]
 primary = "jma2001"
 fallback = "ak135"
 linear_last_resort = true
+# 自定义震级→最大传播距离(km)；留空用内置表
+# mag_spread_km = [{ magnitude = 3.0, max_km = 500.0 }, { magnitude = 5.0, max_km = 1600.0 }]
 
 [local]
 # latitude = 35.68
@@ -71,6 +75,14 @@ kma_jian_ws = "wss://api.sismotide.top/kma-station"
 enabled = true
 eew_enabled = true
 eqlist_enabled = true
+jma_eew = true
+sc_eew = true
+fj_eew = true
+cq_eew = true
+cenc_eew = true
+cwa_eew = true
+cenc_eqlist = true
+jma_eqlist = true
 
 [sources.p2pquake]
 enabled = true

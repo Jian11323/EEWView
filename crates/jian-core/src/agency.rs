@@ -117,7 +117,7 @@ pub fn agency_bracket(agency: &str) -> String {
 }
 
 /// 从 `cea-pr` / `cea-pr:四川` 解析省份；非 cea-pr 返回 `None`。
-fn cea_pr_province(agency: &str) -> Option<&str> {
+pub fn cea_pr_province(agency: &str) -> Option<&str> {
     let a = agency.trim();
     let lower = a.to_ascii_lowercase().replace('_', "-");
     if lower == "cea-pr" || lower == "wolfx-cea-pr" {
@@ -307,7 +307,7 @@ impl AgencyFamily {
             Self::Beijing => "北京地震局",
             Self::Hko => "香港天文台 (HKO)",
             Self::Emsc => "欧洲地中海地震中心",
-            Self::Sa => "ShakeAlert (美国)",
+            Self::Sa => "美国ShakeAlert预警",
             Self::Gfz => "德国地学研究中心",
             Self::Bcsf => "法国中央地震研究所",
             Self::Usp => "巴西圣保罗大学",
@@ -321,7 +321,7 @@ impl AgencyFamily {
             Self::Ipma => "葡萄牙气象局",
             Self::Noa => "希腊国家天文台",
             Self::Sed => "瑞士地震服务中心",
-            Self::Scsn => "南加州地震台网",
+            Self::Scsn => "南加州地震数据中心",
             Self::Ipgp => "巴黎地球物理研究所",
             Self::Infp => "罗马尼亚国家地球物理研究所",
             Self::Isc => "国际地震中心",
@@ -553,7 +553,7 @@ mod tests {
     #[test]
     fn sa_is_shakealert_not_sichuan() {
         assert_eq!(agency_family("sa"), AgencyFamily::Sa);
-        assert_eq!(AgencyFamily::Sa.display_name(), "ShakeAlert (美国)");
+        assert_eq!(AgencyFamily::Sa.display_name(), "美国ShakeAlert预警");
         assert_eq!(agency_bracket("sa"), "SA");
     }
 }

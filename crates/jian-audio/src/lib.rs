@@ -5,6 +5,7 @@ mod countdown;
 mod cue;
 mod player;
 mod router;
+mod tts_speak;
 
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
@@ -15,6 +16,7 @@ pub use catalog::SoundCatalog;
 pub use countdown::CountdownMachine;
 pub use cue::{AudioCue, TsunamiCueKind};
 pub use router::Router;
+pub use tts_speak::speak_async;
 
 use player::Player;
 

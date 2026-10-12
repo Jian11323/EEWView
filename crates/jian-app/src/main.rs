@@ -7,10 +7,11 @@ mod logging;
 
 use anyhow::Result;
 use eframe::egui;
-use jian_audio::{AudioCue, AudioEngine, TsunamiCueKind};
+use jian_audio::{speak_async, AudioCue, AudioEngine, TsunamiCueKind};
 use jian_config::AppConfig;
 use jian_core::{
-    agency_family, live_wave_eews, AgencyFamily, AppSnapshot, HealthStatus, IntensityKind,
+    agency_family, build_eew_tts_script, build_record_tts_script, live_wave_eews_spread,
+    AgencyFamily, AppSnapshot, HealthStatus, IntensityKind,
 };
 use jian_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
 use jian_travel::{max_s_wave_spread_km, s_wave_still_spreading, TravelEngine, Wave};
@@ -382,6 +383,9 @@ impl eframe::App for JianApp {
                             );
                         }
                     }
+                    if self.cfg.audio.tts_enabled && !self.cfg.audio.mute && !report.is_cancel {
+                        speak_async(build_eew_tts_script(report));
+                    }
                 }
                 jian_net::apply_event_filtered(
                     &mut self.snap,
@@ -390,6 +394,25 @@ impl eframe::App for JianApp {
                 );
             }
         }
+
+        // 速报 TTS（含预警中的确认速报；跳转与否由 upsert_record 决定）
+        if self.cfg.audio.tts_enabled && !self.cfg.audio.mute {
+            if let Some(rec) = self.snap.pending_tts_record.take() {
+                speak_async(build_record_tts_script(&rec));
+            }
+        } else {
+            self.snap.pending_tts_record = None;
+        }
+
+        // 同步自定义震级传播表到快照（波圈判定用）
+        self.snap.wave_spread_km = self
+            .cfg
+            .travel
+            .mag_spread_km
+            .iter()
+            .map(|p| (p.magnitude, p.max_km))
+            .collect();
+        self.snap.wave_spread_km.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
         self.tick_health_audio();
         self.tick_tsunami_audio();
@@ -418,9 +441,9 @@ impl eframe::App for JianApp {
                             ev.latitude,
                             r.max(35.0),
                             self.shell.map.last_viewport_min_px,
-                            0.58,
+                            0.72,
                         )
-                        .clamp(6.8, 11.2)
+                        .clamp(7.2, 11.8)
                     } else {
                         7.2
                     };
@@ -448,9 +471,12 @@ impl eframe::App for JianApp {
                 .active
                 .as_ref()
                 .is_some_and(|e| e.event_id.starts_with("station:"));
-            if !browsing_station {
-                let now = chrono::Utc::now().timestamp_millis();
-                let live = live_wave_eews(&self.snap.eew_list, now, 30 * 60 * 1000);
+            let now = chrono::Utc::now().timestamp_millis();
+            let live = live_wave_eews_spread(&self.snap.eew_list, now, &self.snap.wave_spread_km);
+            // 新预警必须打断测站浏览；仅轮播停留时保留测站锁定
+            let allow_follow = !browsing_station || !live.is_empty();
+            if allow_follow {
+                let live = live;
                 let seen_key = live
                     .iter()
                     .map(|e| format!("{}|{}", e.agency.0, e.event_id))
@@ -562,7 +588,7 @@ impl eframe::App for JianApp {
         // 无预警：相机始终聚焦最新一条速报
         if !self.auto_center_pending && self.started.elapsed().as_secs_f64() >= 2.5 {
             let now = chrono::Utc::now().timestamp_millis();
-            let eew_live = !jian_core::live_wave_eews(&self.snap.eew_list, now, 30 * 60 * 1000)
+            let eew_live = !live_wave_eews_spread(&self.snap.eew_list, now, &self.snap.wave_spread_km)
                 .is_empty();
             let browsing_station = self
                 .snap
@@ -871,19 +897,19 @@ fn gq_jump_zoom(
     } else {
         elapsed * 5.0
     };
-    // 视野略收：S 圈约占短边 58%，默认更靠近震中
+    // 视野拉近：S 圈约占短边 72%
     let r = s_km
         .min(max_s_wave_spread_km(ev.magnitude))
-        .max(28.0);
-    let fit_s = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.58);
+        .max(22.0);
+    let fit_s = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.72);
     let age_min = if ev.origin_ms > 0 {
         ((now_ms - ev.origin_ms) as f64 / 60_000.0).max(0.0)
     } else {
         0.0
     };
     let scroll = (age_min / 5.0).clamp(0.05, 1.2);
-    let prefer = (12.2 - scroll * 2.0).clamp(7.0, 11.2);
-    prefer.min(fit_s).clamp(6.8, 11.2)
+    let prefer = (12.6 - scroll * 2.0).clamp(7.5, 12.0);
+    prefer.min(fit_s).clamp(7.2, 12.0)
 }
 
 fn tsunami_audio_grade(grade: &str) -> u8 {

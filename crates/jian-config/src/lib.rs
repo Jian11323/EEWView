@@ -126,6 +126,15 @@ pub struct AudioConfig {
     pub master_volume: f32,
     pub countdown_volume: f32,
     pub mute: bool,
+    /// Windows TTS 语音播报（预警/速报文案）
+    #[serde(default)]
+    pub tts_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MagSpreadPoint {
+    pub magnitude: f64,
+    pub max_km: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +142,9 @@ pub struct TravelConfig {
     pub primary: String,
     pub fallback: String,
     pub linear_last_resort: bool,
+    /// 震级→最大 S 波传播距离（km）；空则用内置表
+    #[serde(default)]
+    pub mag_spread_km: Vec<MagSpreadPoint>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -258,17 +270,49 @@ pub struct JianSourceConfig {
 pub struct WolfxSourceConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Wolfx `all_eew` 预警（JMA / 川闽渝 / CENC / CWA）
+    /// Wolfx `all_eew` 预警总开关
     #[serde(default = "default_true")]
     pub eew_enabled: bool,
-    /// Wolfx 速报列表（WS query + HTTP cenc_eqlist）
+    /// Wolfx 速报列表总开关（WS query + HTTP）
     #[serde(default = "default_true")]
     pub eqlist_enabled: bool,
+    #[serde(default = "default_true")]
+    pub jma_eew: bool,
+    #[serde(default = "default_true")]
+    pub sc_eew: bool,
+    #[serde(default = "default_true")]
+    pub fj_eew: bool,
+    #[serde(default = "default_true")]
+    pub cq_eew: bool,
+    #[serde(default = "default_true")]
+    pub cenc_eew: bool,
+    #[serde(default = "default_true")]
+    pub cwa_eew: bool,
+    #[serde(default = "default_true")]
+    pub cenc_eqlist: bool,
+    #[serde(default = "default_true")]
+    pub jma_eqlist: bool,
     #[serde(default = "default_wolfx_ws")]
     pub ws_urls: Vec<String>,
     /// 冷启动速报列表（HTTP JSON）
     #[serde(default = "default_wolfx_eqlist")]
     pub http_eqlist: String,
+}
+
+impl WolfxSourceConfig {
+    pub fn type_enabled(&self, typ: &str) -> bool {
+        match typ {
+            "jma_eew" => self.eew_enabled && self.jma_eew,
+            "sc_eew" => self.eew_enabled && self.sc_eew,
+            "fj_eew" => self.eew_enabled && self.fj_eew,
+            "cq_eew" => self.eew_enabled && self.cq_eew,
+            "cenc_eew" => self.eew_enabled && self.cenc_eew,
+            "cwa_eew" => self.eew_enabled && self.cwa_eew,
+            "cenc_eqlist" => self.eqlist_enabled && self.cenc_eqlist,
+            "jma_eqlist" => self.eqlist_enabled && self.jma_eqlist,
+            _ => true,
+        }
+    }
 }
 
 /// `-1` 不接收；`0` 不过滤；`>0` 最低震级。白名单可绕过震级，但不能绕过「不接收」。
@@ -413,11 +457,13 @@ impl Default for AppConfig {
                 master_volume: 0.8,
                 countdown_volume: 1.0,
                 mute: false,
+                tts_enabled: false,
             },
             travel: TravelConfig {
                 primary: "jma2001".into(),
                 fallback: "ak135".into(),
                 linear_last_resort: true,
+                mag_spread_km: Vec::new(),
             },
             local: LocalConfig {
                 latitude: None,
@@ -437,6 +483,14 @@ impl Default for AppConfig {
                     enabled: true,
                     eew_enabled: true,
                     eqlist_enabled: true,
+                    jma_eew: true,
+                    sc_eew: true,
+                    fj_eew: true,
+                    cq_eew: true,
+                    cenc_eew: true,
+                    cwa_eew: true,
+                    cenc_eqlist: true,
+                    jma_eqlist: true,
                     ws_urls: default_wolfx_ws(),
                     http_eqlist: default_wolfx_eqlist(),
                 },
@@ -592,6 +646,14 @@ impl AppConfig {
             && self.sources.wolfx.enabled == other.sources.wolfx.enabled
             && self.sources.wolfx.eew_enabled == other.sources.wolfx.eew_enabled
             && self.sources.wolfx.eqlist_enabled == other.sources.wolfx.eqlist_enabled
+            && self.sources.wolfx.jma_eew == other.sources.wolfx.jma_eew
+            && self.sources.wolfx.sc_eew == other.sources.wolfx.sc_eew
+            && self.sources.wolfx.fj_eew == other.sources.wolfx.fj_eew
+            && self.sources.wolfx.cq_eew == other.sources.wolfx.cq_eew
+            && self.sources.wolfx.cenc_eew == other.sources.wolfx.cenc_eew
+            && self.sources.wolfx.cwa_eew == other.sources.wolfx.cwa_eew
+            && self.sources.wolfx.cenc_eqlist == other.sources.wolfx.cenc_eqlist
+            && self.sources.wolfx.jma_eqlist == other.sources.wolfx.jma_eqlist
             && self.sources.wolfx.ws_urls == other.sources.wolfx.ws_urls
             && self.sources.wolfx.http_eqlist == other.sources.wolfx.http_eqlist
             && self.sources.p2pquake.enabled == other.sources.p2pquake.enabled

@@ -807,6 +807,7 @@ fn parse_jian_eew(agency: &str, data: &Value) -> Option<EewReport> {
         is_cancel,
         is_assumption,
         is_warn,
+        final_at_ms: 0,
     })
 }
 
@@ -984,29 +985,34 @@ fn cenc_is_auto(agency: &str, data: &Value) -> bool {
     false
 }
 
-/// Wolfx `all_eew` / 单源 WS：按 `type` 分发；`eew_enabled` / `eqlist_enabled` 控制接入。
-pub fn ingest_wolfx_frame(tx: &NetTx, text: &str, eew_enabled: bool, eqlist_enabled: bool) {
+/// Wolfx `all_eew` / 单源 WS：按 `type` 分发；各子源开关见 [`jian_config::WolfxSourceConfig`]。
+pub fn ingest_wolfx_frame(tx: &NetTx, text: &str, cfg: &jian_config::WolfxSourceConfig) {
     let Ok(v) = serde_json::from_str::<Value>(text) else {
         return;
     };
     let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
     match typ {
         "heartbeat" | "pong" => {}
-        "jma_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-jma-eew"),
-        "sc_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-cea-pr:四川"),
-        "fj_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-cea-pr:福建"),
-        "cq_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-cea-pr:重庆"),
-        "cenc_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-cea"),
-        "cwa_eew" if eew_enabled => emit_wolfx_eew(tx, &v, "wolfx-cwa-eew"),
-        "cenc_eqlist" if eqlist_enabled => ingest_wolfx_cenc_eqlist_value(tx, &v),
-        "jma_eqlist" if eqlist_enabled => ingest_wolfx_jma_eqlist_value(tx, &v),
+        "jma_eew" if cfg.type_enabled("jma_eew") => emit_wolfx_eew(tx, &v, "wolfx-jma-eew"),
+        "sc_eew" if cfg.type_enabled("sc_eew") => emit_wolfx_eew(tx, &v, "wolfx-cea-pr:四川"),
+        "fj_eew" if cfg.type_enabled("fj_eew") => emit_wolfx_eew(tx, &v, "wolfx-cea-pr:福建"),
+        "cq_eew" if cfg.type_enabled("cq_eew") => emit_wolfx_eew(tx, &v, "wolfx-cea-pr:重庆"),
+        "cenc_eew" if cfg.type_enabled("cenc_eew") => emit_wolfx_eew(tx, &v, "wolfx-cea"),
+        "cwa_eew" if cfg.type_enabled("cwa_eew") => emit_wolfx_eew(tx, &v, "wolfx-cwa-eew"),
+        "cenc_eqlist" if cfg.type_enabled("cenc_eqlist") => ingest_wolfx_cenc_eqlist_value(tx, &v),
+        "jma_eqlist" if cfg.type_enabled("jma_eqlist") => ingest_wolfx_jma_eqlist_value(tx, &v),
         // 专用 `cwa_eew` 通道可能无 type：HypoCenter + ReportNum（区别于 JMA 的 Hypocenter + Serial）
-        // 专用 `cwa_eew` 通道可能无 type：HypoCenter + ReportNum（区别于 JMA 的 Hypocenter + Serial）
-        "" if eew_enabled && v.get("HypoCenter").is_some() && v.get("ReportNum").is_some() => {
+        "" if cfg.type_enabled("cwa_eew")
+            && v.get("HypoCenter").is_some()
+            && v.get("ReportNum").is_some() =>
+        {
             emit_wolfx_eew(tx, &v, "wolfx-cwa-eew");
         }
         // 旧版单通道 jma_eew 可能省略 type
-        "" if eew_enabled && v.get("Hypocenter").is_some() && v.get("Serial").is_some() => {
+        "" if cfg.type_enabled("jma_eew")
+            && v.get("Hypocenter").is_some()
+            && v.get("Serial").is_some() =>
+        {
             emit_wolfx_eew(tx, &v, "wolfx-jma-eew");
         }
 
@@ -1123,6 +1129,7 @@ fn emit_wolfx_eew(tx: &NetTx, v: &Value, agency: &str) {
         is_cancel,
         is_assumption,
         is_warn,
+        final_at_ms: 0,
     }));
 }
 
@@ -1608,6 +1615,7 @@ fn ingest_pancakes_gq(tx: &NetTx, action: &str, payload: &Value, min_mag: f64) {
             is_cancel: true,
             is_assumption: false,
             is_warn: false,
+            final_at_ms: 0,
         }));
         return;
     }
@@ -1664,6 +1672,7 @@ fn ingest_pancakes_gq(tx: &NetTx, action: &str, payload: &Value, min_mag: f64) {
         is_cancel: false,
         is_assumption: false,
         is_warn: false,
+        final_at_ms: 0,
     }));
 }
 
@@ -1849,7 +1858,21 @@ mod tests {
             "MaxIntensity": 5.0
         }"#;
         let (tx, mut rx) = channel();
-        ingest_wolfx_frame(&tx, body, true, true);
+        ingest_wolfx_frame(&tx, body, &jian_config::WolfxSourceConfig {
+            enabled: true,
+            eew_enabled: true,
+            eqlist_enabled: true,
+            jma_eew: true,
+            sc_eew: true,
+            fj_eew: true,
+            cq_eew: true,
+            cenc_eew: true,
+            cwa_eew: true,
+            cenc_eqlist: true,
+            jma_eqlist: true,
+            ws_urls: vec![],
+            http_eqlist: String::new(),
+        });
         let NetEvent::Eew(e) = rx.try_recv().expect("eew") else {
             panic!("expected Eew");
         };
@@ -1875,7 +1898,21 @@ mod tests {
             }
         }"#;
         let (tx, mut rx) = channel();
-        ingest_wolfx_frame(&tx, body, true, true);
+        ingest_wolfx_frame(&tx, body, &jian_config::WolfxSourceConfig {
+            enabled: true,
+            eew_enabled: true,
+            eqlist_enabled: true,
+            jma_eew: true,
+            sc_eew: true,
+            fj_eew: true,
+            cq_eew: true,
+            cenc_eew: true,
+            cwa_eew: true,
+            cenc_eqlist: true,
+            jma_eqlist: true,
+            ws_urls: vec![],
+            http_eqlist: String::new(),
+        });
         let NetEvent::Record(rec) = rx.try_recv().expect("record") else {
             panic!("expected Record");
         };
@@ -1900,7 +1937,21 @@ mod tests {
             "MaxIntensity": "3"
         }"#;
         let (tx, mut rx) = channel();
-        ingest_wolfx_frame(&tx, body, false, true);
+        ingest_wolfx_frame(&tx, body, &jian_config::WolfxSourceConfig {
+            enabled: true,
+            eew_enabled: false,
+            eqlist_enabled: true,
+            jma_eew: true,
+            sc_eew: true,
+            fj_eew: true,
+            cq_eew: true,
+            cenc_eew: true,
+            cwa_eew: true,
+            cenc_eqlist: true,
+            jma_eqlist: true,
+            ws_urls: vec![],
+            http_eqlist: String::new(),
+        });
         assert!(rx.try_recv().is_err());
     }
 

@@ -4,14 +4,15 @@ pub mod agency;
 pub mod estimate;
 pub mod intensity;
 pub mod palette;
+pub mod tts;
 
 use serde::{Deserialize, Serialize};
 
 pub use agency::{
-    agency_bracket, agency_family, cea_pr_agency_id, eew_feed_priority, place_with_agency,
-    AgencyFamily,
-    EEW_FILTER_FAMILIES, RECORD_FILTER_FAMILIES,
+    agency_bracket, agency_family, cea_pr_agency_id, cea_pr_province, eew_feed_priority,
+    place_with_agency, AgencyFamily, EEW_FILTER_FAMILIES, RECORD_FILTER_FAMILIES,
 };
+pub use tts::{agency_tts_name, build_eew_tts_script, build_record_tts_script};
 pub use estimate::{
     calc_csis, calc_jma_instrumental, estimate_at_site, estimate_epicentral, fill_intensity,
     hypocentral_km,
@@ -63,6 +64,9 @@ pub struct EewReport {
     /// 紧急地震速报（警报）（Wolfx `isWarn` 或震度≥5弱）
     #[serde(default)]
     pub is_warn: bool,
+    /// 收到最终报的本地时刻 unix ms（0=尚未最终）；GQ 用此在最终报后继续画波约 3 分钟
+    #[serde(default)]
+    pub final_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +109,7 @@ impl EqRecord {
             is_cancel: false,
             is_assumption: false,
             is_warn: false,
+            final_at_ms: 0,
         }
     }
 }
@@ -218,6 +223,7 @@ impl StationSample {
             is_cancel: false,
             is_assumption: false,
             is_warn: false,
+            final_at_ms: 0,
         }
     }
 }
@@ -295,6 +301,10 @@ pub struct AppSnapshot {
     pub station_updated_ms: std::collections::HashMap<String, i64>,
     /// 新速报写入后待主循环飞跃的 (lon, lat, zoom)；take 后清空
     pub pending_record_fly: Option<(f64, f64, f64)>,
+    /// 待朗读速报（预警中不跳转时仍可 TTS；主循环 take）
+    pub pending_tts_record: Option<EqRecord>,
+    /// 自定义震级→最大传播距离(km)；空则用内置表
+    pub wave_spread_km: Vec<(f64, f64)>,
 }
 
 impl AppSnapshot {
@@ -317,6 +327,7 @@ impl AppSnapshot {
             is_cancel: false,
             is_assumption: false,
             is_warn: true,
+            final_at_ms: 0,
         };
         let eew_b = EewReport {
             agency: AgencyId("cea".into()),
@@ -335,6 +346,7 @@ impl AppSnapshot {
             is_cancel: false,
             is_assumption: false,
             is_warn: false,
+            final_at_ms: 0,
         };
         let eew_pr = EewReport {
             agency: AgencyId("cea-pr:四川".into()),
@@ -353,6 +365,7 @@ impl AppSnapshot {
             is_cancel: false,
             is_assumption: false,
             is_warn: false,
+            final_at_ms: 0,
         };
         let eew_c = EewReport {
             agency: AgencyId("jma-eew".into()),
@@ -371,6 +384,7 @@ impl AppSnapshot {
             is_cancel: false,
             is_assumption: false,
             is_warn: true,
+            final_at_ms: 0,
         };
 
         Self {
@@ -471,6 +485,8 @@ impl AppSnapshot {
             volcanoes: Vec::new(),
             station_updated_ms: std::collections::HashMap::new(),
             pending_record_fly: None,
+            pending_tts_record: None,
+            wave_spread_km: Vec::new(),
         }
     }
 
@@ -542,6 +558,8 @@ impl AppSnapshot {
             volcanoes: Vec::new(),
             station_updated_ms: std::collections::HashMap::new(),
             pending_record_fly: None,
+            pending_tts_record: None,
+            wave_spread_km: Vec::new(),
         }
     }
 
@@ -650,7 +668,11 @@ impl AppSnapshot {
     /// 插入/更新 EEW：跨 API 同机构族同一事件合并（如 Jian `jma-eew` 与 Wolfx `wolfx-jma-eew`）。
     /// 报数更高优先；报数相同取更高镜像源优先级。不同事件各留一条供多震波圈。
     /// 新预警：刷新左上角 + 切到预警 Tab；不改列表选中（与跟焦解绑，对齐 eewcn）。
-    pub fn upsert_eew(&mut self, report: EewReport) {
+    pub fn upsert_eew(&mut self, mut report: EewReport) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
         let pos = self
             .eew_list
             .iter()
@@ -659,8 +681,22 @@ impl AppSnapshot {
             if !prefer_eew_report(&self.eew_list[pos], &report) {
                 return;
             }
+            let old = &self.eew_list[pos];
+            // 保留已有最终报时间戳；新升最终报则打点
+            if report.is_final {
+                if old.final_at_ms > 0 {
+                    report.final_at_ms = old.final_at_ms;
+                } else if !old.is_final || report.final_at_ms <= 0 {
+                    report.final_at_ms = now_ms;
+                }
+            } else {
+                report.final_at_ms = 0;
+            }
             self.eew_list[pos] = report.clone();
         } else {
+            if report.is_final && report.final_at_ms <= 0 {
+                report.final_at_ms = now_ms;
+            }
             self.eew_list.push(report.clone());
         }
         sort_eew_newest_first(&mut self.eew_list);
@@ -686,8 +722,8 @@ impl AppSnapshot {
     }
 
     /// 插入速报；全源混合后按机构族+发震时刻去重；新→旧。
-    /// 无活跃预警时：新项会选中并写入 `pending_record_fly`（有坐标时）。
-    /// 有预警展示中：只入列表，不抢左上角与地图跟焦。
+    /// 无活跃预警时：收到即选中并飞跃（不论是否列表最新）。
+    /// 有预警展示中：只入列表不跳转；仍排队 TTS（作预警确认播报）。
     pub fn upsert_record(&mut self, record: EqRecord) {
         // 火山不得混入地震速报
         if record.agency.0.eq_ignore_ascii_case("jma-volcano")
@@ -695,6 +731,7 @@ impl AppSnapshot {
         {
             return;
         }
+        let mut is_new_or_upgrade = true;
         // 跨 API 同机构族同一事件：更新槽位（Jian cenc ↔ Wolfx wolfx-cenc；自动→正式）
         if let Some(pos) = self.records.iter().position(|r| same_record_event(r, &record)) {
             let cur = &self.records[pos];
@@ -710,21 +747,27 @@ impl AppSnapshot {
             if prefer_new {
                 self.records[pos] = record.clone();
                 sort_records_newest_first(&mut self.records);
+            } else {
+                is_new_or_upgrade = false;
             }
+        } else {
+            self.records.push(record.clone());
+            sort_records_newest_first(&mut self.records);
+            if self.records.len() > 80 {
+                self.records.truncate(80);
+            }
+        }
+        if !is_new_or_upgrade {
+            return;
+        }
+        // 任意新到/升级速报均可 TTS；预警中则仅 TTS 不跳转
+        self.pending_tts_record = Some(record.clone());
+        if self.active_is_eew_header() {
             return;
         }
         let lon = record.longitude;
         let lat = record.latitude;
         let has_coord = lat.abs() > 0.01 || lon.abs() > 0.01;
-        self.records.push(record.clone());
-        sort_records_newest_first(&mut self.records);
-        if self.records.len() > 80 {
-            self.records.truncate(80);
-        }
-        // 预警展示中不被速报抢焦点（否则左上角空空、也不会跟焦震中）
-        if self.active_is_eew_header() {
-            return;
-        }
         if let Some(i) = self.records.iter().position(|r| {
             r.agency == record.agency
                 && r.place == record.place
@@ -739,7 +782,8 @@ impl AppSnapshot {
             self.active = Some(record.as_header_report());
             self.overlay_mode = OverlayMode::Wave;
             if has_coord {
-                self.pending_record_fly = Some((lon, lat, 6.5));
+                // 收到即跳：对准本条，而非「列表最新」
+                self.pending_record_fly = Some((lon, lat, 7.2));
             }
         }
     }
@@ -871,19 +915,23 @@ impl AppSnapshot {
             self.stations.truncate(2500);
         }
 
+        // 有传播中预警时，测站帧不得把 active 抢回测站（否则左上角预警条/跟焦丢失）
+        let has_live_eew = self.eew_list.iter().any(|e| eew_wave_active(e, now_ms));
         if let Some(id) = keep_id {
-            if let Some((i, s)) = self
-                .stations
-                .iter()
-                .enumerate()
-                .find(|(_, s)| s.id == id)
-            {
-                self.active = Some(s.as_header_report());
-                self.overlay_mode = OverlayMode::MarkerOnly;
-                self.selection = Some(ListSelection {
-                    tab: SidebarTab::Station,
-                    index: i,
-                });
+            if !has_live_eew {
+                if let Some((i, s)) = self
+                    .stations
+                    .iter()
+                    .enumerate()
+                    .find(|(_, s)| s.id == id)
+                {
+                    self.active = Some(s.as_header_report());
+                    self.overlay_mode = OverlayMode::MarkerOnly;
+                    self.selection = Some(ListSelection {
+                        tab: SidebarTab::Station,
+                        index: i,
+                    });
+                }
             }
         }
     }
@@ -930,8 +978,31 @@ fn approx_max_s_km(magnitude: f64) -> f64 {
     }
 }
 
+/// 按自定义表或内置表取 S 波最大传播距离（km）。
+pub fn max_s_spread_km(magnitude: f64, custom: &[(f64, f64)]) -> f64 {
+    if custom.is_empty() {
+        return approx_max_s_km(magnitude);
+    }
+    // custom: (magnitude, max_km)，按震级升序；取不超过当前震级的最大档
+    let mut best = custom[0].1;
+    for &(m, km) in custom {
+        if magnitude + 1e-9 >= m {
+            best = km;
+        } else {
+            break;
+        }
+    }
+    best
+}
+
 /// S 波是否仍在传播（地表等效约 5 km/s，与走时兜底一致；走完即视为结束）。
+/// GQ：收到最终报后额外保留波圈至 `final_at_ms + 3min`（以较晚者为准）。
 pub fn eew_wave_active(e: &EewReport, now_ms: i64) -> bool {
+    eew_wave_active_spread(e, now_ms, &[])
+}
+
+/// 同 [`eew_wave_active`]，可传入自定义震级→传播距离表。
+pub fn eew_wave_active_spread(e: &EewReport, now_ms: i64, custom: &[(f64, f64)]) -> bool {
     if !is_wave_candidate(e) {
         return false;
     }
@@ -943,19 +1014,47 @@ pub fn eew_wave_active(e: &EewReport, now_ms: i64) -> bool {
         return false;
     }
     let elapsed_s = (age_ms as f64 / 1000.0).max(0.0);
-    let max_km = approx_max_s_km(e.magnitude);
-    // 与地图波圈上限对齐；略留余量避免刚走完闪掉
-    elapsed_s * 5.0 < max_km * 1.05
+    let max_km = max_s_spread_km(e.magnitude, custom);
+    let by_travel = elapsed_s * 5.0 < max_km * 1.05;
+    // GlobalQuake：最终报后仍画 PS 波 3 分钟
+    if agency_family(&e.agency.0) == AgencyFamily::Gq && e.is_final {
+        let final_at = if e.final_at_ms > 0 {
+            e.final_at_ms
+        } else {
+            now_ms
+        };
+        let within_grace = now_ms < final_at + 3 * 60 * 1000;
+        return by_travel || within_grace;
+    }
+    by_travel
 }
 
 /// 仍在传播中的多震：PS 走完即排除（不按 30 分钟挂着）。`max_age_ms` 仅兜底。
 pub fn live_wave_eews(list: &[EewReport], now_ms: i64, _max_age_ms: i64) -> Vec<&EewReport> {
-    list.iter().filter(|e| eew_wave_active(e, now_ms)).collect()
+    live_wave_eews_spread(list, now_ms, &[])
+}
+
+pub fn live_wave_eews_spread<'a>(
+    list: &'a [EewReport],
+    now_ms: i64,
+    spread: &[(f64, f64)],
+) -> Vec<&'a EewReport> {
+    list.iter()
+        .filter(|e| eew_wave_active_spread(e, now_ms, spread))
+        .collect()
 }
 
 /// 地图叉标：与波圈相同，PS 消失即去掉（GQ 多震不另留 30 分钟）。
 pub fn eew_map_markers(list: &[EewReport], now_ms: i64) -> Vec<&EewReport> {
     live_wave_eews(list, now_ms, 0)
+}
+
+pub fn eew_map_markers_spread<'a>(
+    list: &'a [EewReport],
+    now_ms: i64,
+    spread: &[(f64, f64)],
+) -> Vec<&'a EewReport> {
+    live_wave_eews_spread(list, now_ms, spread)
 }
 
 /// 预警侧栏：每个机构族只显示最新一条（跨 API 镜像已去重）；波走完仍留这条供回看。
@@ -1190,6 +1289,7 @@ mod eew_dedup_tests {
             is_cancel: false,
             is_assumption: false,
             is_warn: false,
+            final_at_ms: 0,
         }
     }
 

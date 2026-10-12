@@ -1023,6 +1023,29 @@ fn draw_sources(
                     .color(chrome().muted),
             );
         }
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new("Jian /all 预警子源（与「过滤」页机构开关同步）")
+                .size(12.0)
+                .color(chrome().muted),
+        );
+        ui.add_space(6.0);
+        for fam in jian_core::EEW_FILTER_FAMILIES {
+            row_divider(ui);
+            let key = fam.as_filter_key();
+            let mut on = draft.filters.eew_agency_on(key);
+            control_row(
+                ui,
+                fam.display_name(),
+                &format!("[{}]", fam.bracket_label()),
+                "\u{25ce}",
+                |ui| {
+                    if toggle(ui, &mut on).changed() {
+                        draft.filters.set_eew_agency(key, on);
+                    }
+                },
+            );
+        }
     });
 
     section(ui, "Wolfx", "\u{25ce}", |ui| {
@@ -1030,13 +1053,49 @@ fn draw_sources(
             toggle(ui, &mut draft.sources.wolfx.enabled);
         });
         row_divider(ui);
-        control_row(ui, "预警", "all_eew 各源预警", "\u{26a1}", |ui| {
+        control_row(ui, "预警总开关", "关闭后忽略全部 Wolfx 预警子源", "\u{26a1}", |ui| {
             toggle(ui, &mut draft.sources.wolfx.eew_enabled);
         });
+        if draft.sources.wolfx.eew_enabled {
+            row_divider(ui);
+            control_row(ui, "JMA EEW", "jma_eew", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.wolfx.jma_eew);
+            });
+            row_divider(ui);
+            control_row(ui, "四川 EEW", "sc_eew", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.wolfx.sc_eew);
+            });
+            row_divider(ui);
+            control_row(ui, "福建 EEW", "fj_eew", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.wolfx.fj_eew);
+            });
+            row_divider(ui);
+            control_row(ui, "重庆 EEW", "cq_eew", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.wolfx.cq_eew);
+            });
+            row_divider(ui);
+            control_row(ui, "CENC EEW", "cenc_eew", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.wolfx.cenc_eew);
+            });
+            row_divider(ui);
+            control_row(ui, "CWA EEW", "cwa_eew", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.wolfx.cwa_eew);
+            });
+        }
         row_divider(ui);
-        control_row(ui, "速报列表", "CENC / JMA 列表", "\u{25ce}", |ui| {
+        control_row(ui, "速报总开关", "关闭后忽略 Wolfx 速报子源", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.sources.wolfx.eqlist_enabled);
         });
+        if draft.sources.wolfx.eqlist_enabled {
+            row_divider(ui);
+            control_row(ui, "CENC 速报", "cenc_eqlist", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.wolfx.cenc_eqlist);
+            });
+            row_divider(ui);
+            control_row(ui, "JMA 速报", "jma_eqlist", "\u{25ce}", |ui| {
+                toggle(ui, &mut draft.sources.wolfx.jma_eqlist);
+            });
+        }
     });
 
     section(ui, "P2PQuake", "\u{25ce}", |ui| {
@@ -1087,7 +1146,7 @@ fn draw_sources(
         });
         if draft.sources.stations.jma_enabled {
             row_divider(ui);
-            control_row(ui, "JMA 测站源", "原版 kmoni/lmoni 或 Jian 中转", "\u{25ce}", |ui| {
+            control_row(ui, "JMA 测站源", "Kmoni / lmoni / Jian Project", "\u{25ce}", |ui| {
                 egui::ComboBox::from_id_salt("set_jma_station_src")
                     .selected_text(jma_station_src_label(&draft.sources.stations.jma_source))
                     .width(200.0)
@@ -1095,23 +1154,23 @@ fn draw_sources(
                         ui.selectable_value(
                             &mut draft.sources.stations.jma_source,
                             "jian".into(),
-                            "Jian 中转 /kmoni",
+                            "Jian Project",
                         );
                         ui.selectable_value(
                             &mut draft.sources.stations.jma_source,
                             "kmoni".into(),
-                            "原版 NIED kmoni",
+                            "Kmoni",
                         );
                         ui.selectable_value(
                             &mut draft.sources.stations.jma_source,
                             "lmoni".into(),
-                            "原版 NIED lmoni",
+                            "lmoni",
                         );
                     });
             });
         }
         row_divider(ui);
-        control_row(ui, "S-Net", "·上强震网（中转 / 原版 MSIL）", "\u{25ce}", |ui| {
+        control_row(ui, "S-Net", "海上强震网", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.sources.stations.snet_enabled);
         });
         if draft.sources.stations.snet_enabled {
@@ -1124,12 +1183,12 @@ fn draw_sources(
                         ui.selectable_value(
                             &mut draft.sources.stations.snet_source,
                             "jian".into(),
-                            "Jian 中转 /s-net",
+                            "S-Net / Jian Project",
                         );
                         ui.selectable_value(
                             &mut draft.sources.stations.snet_source,
                             "original".into(),
-                            "原版 MSIL 切片",
+                            "S-Net",
                         );
                     });
             });
@@ -1228,6 +1287,10 @@ fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> bool {
             ui.add(
                 egui::Slider::new(&mut draft.audio.countdown_volume, 0.0..=1.0).show_value(true),
             );
+        });
+        row_divider(ui);
+        control_row(ui, "Windows TTS", "预警/速报语音播报（系统朗读）", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.audio.tts_enabled);
         });
         row_divider(ui);
         control_row(ui, "试听", "按草稿音量立即试听（无需先保存）", "\u{25b6}", |ui| {
@@ -1473,6 +1536,63 @@ fn draw_general(
 }
 
 fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<SettingsAction>) {
+    section(ui, "震级传播距离", "\u{25ce}", |ui| {
+        ui.label(
+            RichText::new("自定义震级→最大 S 波传播距离(km)；留空用内置表。")
+                .size(12.0)
+                .color(chrome().muted),
+        );
+        ui.add_space(8.0);
+        let mut remove: Option<usize> = None;
+        for (i, pt) in draft.travel.mag_spread_km.iter_mut().enumerate() {
+            if i > 0 {
+                row_divider(ui);
+            }
+            let title = format!("档位 {}", i + 1);
+            control_row(ui, &title, "震级 / 最大距离 km", "\u{25ce}", |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut pt.magnitude)
+                            .speed(0.1)
+                            .range(0.0..=9.5)
+                            .prefix("M ")
+                            .fixed_decimals(1),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut pt.max_km)
+                            .speed(10.0)
+                            .range(50.0..=9000.0)
+                            .suffix(" km"),
+                    );
+                    if glass_btn(ui, "删", false).clicked() {
+                        remove = Some(i);
+                    }
+                });
+            });
+        }
+        if let Some(i) = remove {
+            draft.travel.mag_spread_km.remove(i);
+        }
+        row_divider(ui);
+        control_row(ui, "添加档位", "按震级升序生效", "\u{25ce}", |ui| {
+            if glass_btn(ui, "添加", false).clicked() {
+                let last_m = draft
+                    .travel
+                    .mag_spread_km
+                    .last()
+                    .map(|p| p.magnitude + 0.5)
+                    .unwrap_or(3.0);
+                draft.travel.mag_spread_km.push(jian_config::MagSpreadPoint {
+                    magnitude: last_m,
+                    max_km: 500.0,
+                });
+            }
+            if glass_btn(ui, "恢复内置", false).clicked() {
+                draft.travel.mag_spread_km.clear();
+            }
+        });
+    });
+
     section(ui, "走时表", "\u{25ce}", |ui| {
         control_row(ui, "主表（近·）", "默认 JMA2001", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("adv_travel_primary")
@@ -1577,16 +1697,16 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
 
 fn jma_station_src_label(s: &str) -> String {
     match s.trim().to_ascii_lowercase().as_str() {
-        "kmoni" => "原版 NIED kmoni".into(),
-        "lmoni" => "原版 NIED lmoni".into(),
-        _ => "Jian 中转 /kmoni".into(),
+        "kmoni" => "Kmoni".into(),
+        "lmoni" => "lmoni".into(),
+        _ => "Jian Project".into(),
     }
 }
 
 fn snet_station_src_label(s: &str) -> String {
     match s.trim().to_ascii_lowercase().as_str() {
-        "original" => "原版 MSIL 切片".into(),
-        _ => "Jian 中转 /s-net".into(),
+        "original" => "S-Net".into(),
+        _ => "S-Net / Jian Project".into(),
     }
 }
 
