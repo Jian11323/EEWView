@@ -213,6 +213,8 @@ pub struct SettingsSession {
     pub capture_view: bool,
     /// 打开时刻（忽略短时虚假 close）
     opened_at: Option<std::time::Instant>,
+    /// 每次打开递增，避免 egui 记住被撑满的尺寸
+    open_gen: u64,
     /// 性能诊断文案
     perf_diag: Option<String>,
 }
@@ -230,6 +232,7 @@ impl Default for SettingsSession {
             map_pick: None,
             capture_view: false,
             opened_at: None,
+            open_gen: 0,
             perf_diag: None,
         }
     }
@@ -246,6 +249,7 @@ impl SettingsSession {
         self.map_pick = None;
         self.capture_view = false;
         self.opened_at = Some(std::time::Instant::now());
+        self.open_gen = self.open_gen.wrapping_add(1);
         self.perf_diag = None;
     }
 
@@ -346,14 +350,22 @@ impl SettingsSession {
                 }
             });
 
+        // 限制在主窗口内，避免内容高度每帧抬升把窗体撑满
+        let max_w = (screen.width() - 48.0).clamp(400.0, 1100.0);
+        let max_h = (screen.height() - 48.0).clamp(320.0, 720.0);
+        let def_w = 960.0_f32.min(max_w);
+        let def_h = 600.0_f32.min(max_h);
+
         let mut still_open = self.open;
         egui::Window::new("EEW View \u{00b7} 设置")
-            .id(egui::Id::new("eewview_settings_embedded"))
+            .id(egui::Id::new(("eewview_settings_embedded", self.open_gen)))
             .open(&mut still_open)
-            .default_size([960.0, 600.0])
-            .min_size([720.0, 480.0])
+            .default_size([def_w, def_h])
+            .min_size([720.0_f32.min(max_w), 480.0_f32.min(max_h)])
+            .max_size([max_w, max_h])
             .resizable(true)
             .collapsible(false)
+            .constrain(true)
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(screen.center())
             .order(egui::Order::Tooltip)
@@ -493,7 +505,8 @@ fn draw_shell(
                 });
 
             let avail = ui.available_size();
-            let body_h = (avail.y - FOOTER_H - 8.0).max(280.0);
+            // 用剩余高度精确分配，禁止 set_min_size 按 avail 抬升（否则窗体会逐帧撑满）
+            let body_h = (avail.y - FOOTER_H - 8.0).max(200.0).min(avail.y.max(200.0));
 
             // 统一面板（RQ .panel）
             Frame::NONE
@@ -502,11 +515,9 @@ fn draw_shell(
                 .corner_radius(14.0)
                 .inner_margin(Margin::ZERO)
                 .show(ui, |ui| {
-                    ui.set_min_size(Vec2::new(avail.x.max(100.0), body_h));
-                    ui.set_max_height(body_h);
-
+                    ui.set_max_size(Vec2::new(avail.x.max(100.0), body_h));
                     ui.allocate_ui_with_layout(
-                        Vec2::new(ui.available_width(), body_h),
+                        Vec2::new(avail.x.max(100.0), body_h),
                         egui::Layout::left_to_right(egui::Align::TOP),
                         |ui| {
                             draw_nav(ui, session, body_h);

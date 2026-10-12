@@ -24,6 +24,24 @@ use theme::{ThemePalette, UiTheme};
 pub use settings::{MapPickKind, SettingsAction, SettingsSession, SourceHealthView};
 pub use theme::UiTheme as AppUiTheme;
 
+
+fn overlay_child<R>(
+    ui: &mut Ui,
+    id_salt: &str,
+    rect: egui::Rect,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    // 与 CentralPanel 同层绘制，避免 Foreground Area 的 Sense::hover 挡住 Background 命中
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(id_salt)
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min))
+            .sense(Sense::hover()),
+    );
+    add(&mut child)
+}
+
 pub struct MainShell {
     pub map: MapViewport,
     /// 地图波圈用经过时间（秒）
@@ -138,7 +156,7 @@ impl MainShell {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
 
-        // SidePanel 保证侧栏命中；勿再用双 scope_builder（易被地图 Sense 吞点击）
+        // SidePanel 保证侧栏命中
         let screen_w = ctx.screen_rect().width();
         let sidebar_w = 280.0_f32.min(screen_w * 0.32).max(234.0);
         let mut side_action = None;
@@ -296,12 +314,16 @@ impl MainShell {
                                 .clamp(7.2, 11.8);
                                 let dur = if tab == SidebarTab::Eew { 1.0 } else { 0.85 };
                                 self.map.fly_to(lon, lat, Some(end_z), dur);
+                                // 手动点选：锁定镜头，避免影院 10s 轮播 / 跟焦把缩放突然改掉
+                                self.map.user_camera_override = true;
                             }
                             SidebarTab::Station => {
                                 self.map.fly_to(lon, lat, Some(zoom.max(8.5)), 0.7);
+                                self.map.user_camera_override = true;
                             }
                             SidebarTab::Volcano => {
                                 self.map.fly_to(lon, lat, Some(zoom.max(7.5)), 0.85);
+                                self.map.user_camera_override = true;
                             }
                         }
                         if snap.overlay_mode == OverlayMode::Wave {
@@ -365,20 +387,18 @@ fn draw_map_pick_banner(ui: &mut Ui, p: &ThemePalette, kind: MapPickKind) {
         MapPickKind::DefaultViewport => "点击地图设置默认视口（Esc 取消）",
         MapPickKind::LocalLocation => "点击地图设置本机位置（Esc 取消）",
     };
-    egui::Area::new(egui::Id::new("map_pick_banner"))
-        .fixed_pos(ui.max_rect().center_top() + Vec2::new(-140.0, 44.0))
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .show(ui.ctx(), |ui| {
-            Frame::NONE
-                .fill(p.panel_glass_soft)
-                .stroke(Stroke::new(1.0_f32, p.accent))
-                .inner_margin(Margin::symmetric(12, 6))
-                .corner_radius(8.0)
-                .show(ui, |ui| {
-                    ui.label(RichText::new(text).size(13.0).color(p.text));
-                });
-        });
+    let pos = ui.max_rect().center_top() + Vec2::new(-140.0, 44.0);
+    let rect = egui::Rect::from_min_size(pos, Vec2::new(280.0, 40.0));
+    overlay_child(ui, "map_pick_banner", rect, |ui| {
+        Frame::NONE
+            .fill(p.panel_glass_soft)
+            .stroke(Stroke::new(1.0_f32, p.accent))
+            .inner_margin(Margin::symmetric(12, 6))
+            .corner_radius(8.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new(text).size(13.0).color(p.text));
+            });
+    });
 }
 
 fn format_header_time(origin_ms: i64) -> String {
@@ -488,20 +508,18 @@ fn draw_map_load_banner(ui: &mut Ui, p: &ThemePalette, state: BasemapLoadState, 
     } else {
         p.text_muted
     };
-    egui::Area::new(egui::Id::new("map_load_banner"))
-        .fixed_pos(ui.max_rect().center_top() + Vec2::new(-120.0, 10.0))
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .show(ui.ctx(), |ui| {
-            Frame::NONE
-                .fill(p.panel_glass_soft)
-                .stroke(Stroke::new(1.0_f32, p.panel_border))
-                .inner_margin(Margin::symmetric(12, 6))
-                .corner_radius(8.0)
-                .show(ui, |ui| {
-                    ui.label(RichText::new(text).size(12.0).color(color));
-                });
-        });
+    let pos = ui.max_rect().center_top() + Vec2::new(-120.0, 10.0);
+    let rect = egui::Rect::from_min_size(pos, Vec2::new(260.0, 36.0));
+    overlay_child(ui, "map_load_banner", rect, |ui| {
+        Frame::NONE
+            .fill(p.panel_glass_soft)
+            .stroke(Stroke::new(1.0_f32, p.panel_border))
+            .inner_margin(Margin::symmetric(12, 6))
+            .corner_radius(8.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new(text).size(12.0).color(color));
+            });
+    });
 }
 
 /// 左上预警框与右上实时震度卡共用顶边。
@@ -558,11 +576,12 @@ fn draw_event_header(
     const LEFT_PANEL_X: f32 = 12.0;
     const LEFT_PANEL_W: f32 = 340.0;
     const ROW_GAP: f32 = 6.0;
-    egui::Area::new(egui::Id::new("event_header"))
-        .fixed_pos(ui.max_rect().left_top() + Vec2::new(LEFT_PANEL_X, OVERLAY_TOP_Y))
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .show(ui.ctx(), |ui| {
+    let pos = ui.max_rect().left_top() + Vec2::new(LEFT_PANEL_X, OVERLAY_TOP_Y);
+    let rect = egui::Rect::from_min_size(
+        pos,
+        Vec2::new(LEFT_PANEL_W + 24.0, ui.max_rect().height().max(120.0)),
+    );
+    overlay_child(ui, "event_header", rect, |ui| {
             ui.spacing_mut().item_spacing.y = ROW_GAP;
             ui.vertical(|ui| {
                 for (i, ev) in live.iter().enumerate() {
@@ -726,11 +745,9 @@ fn draw_tsunami_banner(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot) {
     };
     const LEFT_PANEL_X: f32 = 12.0;
     const LEFT_PANEL_W: f32 = 340.0;
-    egui::Area::new(egui::Id::new("tsunami_banner"))
-        .fixed_pos(ui.max_rect().left_top() + Vec2::new(LEFT_PANEL_X, top_y))
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .show(ui.ctx(), |ui| {
+    let pos = ui.max_rect().left_top() + Vec2::new(LEFT_PANEL_X, top_y);
+    let rect = egui::Rect::from_min_size(pos, Vec2::new(LEFT_PANEL_W + 24.0, 220.0));
+    overlay_child(ui, "tsunami_banner", rect, |ui| {
             Frame::NONE
                 .fill(fill)
                 .stroke(Stroke::new(2.0_f32, border))
@@ -825,12 +842,11 @@ fn draw_realtime_intensity_card(
     const STALE_MS: i64 = 8_000;
     let total_w = CARD_W * cards.len() as f32 + gap * (cards.len().saturating_sub(1) as f32);
     let top_right = ui.max_rect().right_top() + Vec2::new(-12.0, OVERLAY_TOP_Y);
-    egui::Area::new(egui::Id::new("rt_intensity_card"))
-        .pivot(egui::Align2::RIGHT_TOP)
-        .fixed_pos(top_right)
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .show(ui.ctx(), |ui| {
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(top_right.x - total_w.max(72.0), top_right.y),
+        Vec2::new(total_w.max(72.0), CARD_H),
+    );
+    overlay_child(ui, "rt_intensity_card", rect, |ui| {
             ui.set_min_size(Vec2::new(total_w, CARD_H));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
@@ -940,12 +956,13 @@ fn draw_legend_bar(ui: &mut Ui, p: &ThemePalette) {
         ("-2", 3),
         ("-3", 0),
     ];
-    egui::Area::new(egui::Id::new("legend_bar"))
-        .pivot(egui::Align2::LEFT_BOTTOM)
-        .fixed_pos(ui.max_rect().left_bottom() + Vec2::new(4.0, -4.0))
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .show(ui.ctx(), |ui| {
+    let bottom_left = ui.max_rect().left_bottom() + Vec2::new(4.0, -4.0);
+    let h = ROW * N as f32 + 22.0;
+    let rect = egui::Rect::from_min_max(
+        egui::pos2(bottom_left.x, bottom_left.y - h),
+        egui::pos2(bottom_left.x + WIDTH, bottom_left.y),
+    );
+    overlay_child(ui, "legend_bar", rect, |ui| {
             ui.spacing_mut().window_margin = Margin::ZERO;
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             ui.set_min_size(Vec2::new(WIDTH, ROW * N as f32 + 22.0));
@@ -1009,12 +1026,12 @@ fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_ni
         None
     };
 
-    egui::Area::new(egui::Id::new("countdown_hud"))
-        .pivot(egui::Align2::RIGHT_BOTTOM)
-        .fixed_pos(ui.max_rect().right_bottom() + Vec2::new(-5.0, -2.0))
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .show(ui.ctx(), |ui| {
+    let br = ui.max_rect().right_bottom() + Vec2::new(-5.0, -2.0);
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(br.x - 280.0, br.y - 120.0),
+        Vec2::new(280.0, 120.0),
+    );
+    overlay_child(ui, "countdown_hud", rect, |ui| {
             ui.spacing_mut().window_margin = Margin::ZERO;
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
             ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
@@ -1083,12 +1100,14 @@ fn draw_countdown_hud(ui: &mut Ui, p: &ThemePalette, snap: &AppSnapshot, show_ni
 }
 
 fn draw_tz_clock_block(ui: &mut Ui, code: &str, title: &str, datetime: &str) {
-    // right_to_left：整块贴右；先排两行文案再排 BST/JST，视觉仍为「代号 | 标题/时间」
+    // 整块贴右：外层 RTL 只放一个水平组，避免 vertical 吃满宽度把排版撑乱
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        ui.spacing_mut().item_spacing.x = 8.0;
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let font = FontId::new(28.0, FontFamily::Name("lxgw_wenkai".into()));
+            ui.label(RichText::new(code).font(font).color(Color32::WHITE).strong());
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
                 let f1 = FontId::new(13.0, FontFamily::Name("lxgw_wenkai".into()));
                 let f2 = FontId::new(16.0, FontFamily::Name("lxgw_wenkai".into()));
                 ui.label(
@@ -1099,8 +1118,6 @@ fn draw_tz_clock_block(ui: &mut Ui, code: &str, title: &str, datetime: &str) {
                 ui.label(RichText::new(datetime).font(f2).color(Color32::WHITE));
             });
         });
-        let font = FontId::new(28.0, FontFamily::Name("lxgw_wenkai".into()));
-        ui.label(RichText::new(code).font(font).color(Color32::WHITE).strong());
     });
 }
 
