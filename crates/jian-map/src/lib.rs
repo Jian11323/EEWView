@@ -1,6 +1,7 @@
 //! 地图视口：GeoJSON 矢量底图（默认）/ 可选 XYZ 瓦片 + 走时表驱动 P/S 叠加层。
 
 mod camera;
+mod detect;
 mod globe;
 mod marker_icons;
 mod overlay;
@@ -13,12 +14,13 @@ mod vector_basemap;
 pub use camera::{
     cluster_for_fit, fit_events, globe_framed_center, zoom_to_fit_radius_km, CameraFlight,
 };
+pub use detect::{DetectBox, DetectTracker};
 pub use projection::{clamp_lat, km_to_pixels, lonlat_to_screen, normalize_lon, ProjectionMode};
 pub use tile_cache::TileCache;
 pub use vector_basemap::{BasemapLoadState, BasemapMode, VectorBasemap, VectorStyle, OCEAN};
 
 use egui::{Color32, Sense, Stroke, Ui};
-use jian_core::{EewReport, EqRecord, StationSample, TsunamiInfo, VolcanoNotice};
+use jian_core::{EewReport, EqRecord, StationSample, TsunamiInfo, TyphoonInfo, VolcanoNotice};
 use jian_travel::TravelEngine;
 use marker_icons::MarkerIcons;
 use projection::ViewCtx;
@@ -124,8 +126,24 @@ impl MapViewport {
     /// GQ 风格跳转：`smoothTransition` 抛物线飞到目标；近距则瞬时到位。
     /// 球体远距目标会做太平洋侧构图偏置。
     pub fn fly_to(&mut self, lon: f64, lat: f64, zoom: Option<f64>, duration_s: f64) {
+        self.fly_to_inner(lon, lat, zoom, duration_s, true);
+    }
+
+    /// 列表/卡片点选：镜头对准震中经纬，不做球体构图偏置。
+    pub fn fly_to_centered(&mut self, lon: f64, lat: f64, zoom: Option<f64>, duration_s: f64) {
+        self.fly_to_inner(lon, lat, zoom, duration_s, false);
+    }
+
+    fn fly_to_inner(
+        &mut self,
+        lon: f64,
+        lat: f64,
+        zoom: Option<f64>,
+        duration_s: f64,
+        frame_globe: bool,
+    ) {
         let end_zoom = zoom.unwrap_or(self.zoom).clamp(ZOOM_MIN, ZOOM_MAX);
-        let (lon, lat) = if self.projection_mode.is_globe() {
+        let (lon, lat) = if frame_globe && self.projection_mode.is_globe() {
             globe_framed_center(lon, lat, end_zoom)
         } else {
             (lon, lat)
@@ -249,8 +267,11 @@ impl MapViewport {
         records: &[EqRecord],
         volcanoes: &[VolcanoNotice],
         selected_volcano: Option<usize>,
+        typhoons: &[TyphoonInfo],
+        typhoon_forecast_agency: &str,
         home: Option<(f64, f64)>,
         tsunami: Option<&TsunamiInfo>,
+        detect_boxes: &[DetectBox],
     ) -> Option<(f64, f64)> {
         if self.vector.poll() {
             ui.ctx()
@@ -291,20 +312,15 @@ impl MapViewport {
             }
         }
 
-        // 球体暂不贴瓦片
+        // 平面：瓦片作底（暗色 auto=Both）；球体暂不贴瓦片
         if !globe && self.basemap.show_tiles() {
             self.cache
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
 
+        // 矢量只描边、不填陆地：耳切填色在跨日界/简化环上易出灰三角，多次修不好故关掉
         if globe || self.basemap.show_vector() {
-            let fill_land = globe || self.basemap == BasemapMode::Vector;
-            self.vector.paint(
-                ui,
-                &view,
-                fill_land,
-                self.vector_style,
-            );
+            self.vector.paint(ui, &view, false, self.vector_style);
         }
 
         // JMA 海啸：按沿岸预报区描边闪烁（不对中日外轮廓整圈描边）
@@ -327,16 +343,32 @@ impl MapViewport {
                     && !e.event_id.starts_with("record:")
                     && !e.is_cancel
             });
+            detect::paint_detect_boxes(ui, &view, detect_boxes);
             overlay::paint_stations(ui, &view, stations, selected_station, icons, eew_active);
             overlay::paint_records(ui, &view, records, selected_record, icons);
             overlay::paint_volcanoes(ui, &view, volcanoes, selected_volcano);
+            if !typhoons.is_empty() {
+                let hover = resp.hover_pos();
+                let _ = overlay::paint_typhoons(
+                    ui,
+                    &view,
+                    typhoons,
+                    typhoon_forecast_agency,
+                    hover,
+                );
+            }
 
             if let Some((hlon, hlat)) = home {
                 overlay::paint_home(ui, &view, hlon, hlat, icons);
             }
 
             let active_key = active.map(|e| (e.agency.0.as_str(), e.event_id.as_str()));
-            overlay::paint_eew_markers(ui, &view, eew_markers, active_key, icons);
+            // 有传播中波圈时叉标 500ms 闪烁（对齐 eewcn eewMarksTimer）
+            let blink_active = wave_events.iter().any(|e| {
+                !e.event_id.starts_with("station:") && !e.event_id.starts_with("record:")
+            });
+            let show_cross = !blink_active || overlay::eew_mark_blink_on(now_ms);
+            overlay::paint_eew_markers(ui, &view, eew_markers, active_key, icons, show_cross);
 
             if show_waves {
                 let mut painted_active = false;
@@ -358,6 +390,7 @@ impl MapViewport {
                         elapsed,
                         icons,
                         selected,
+                        show_cross,
                     );
                 }
                 if !painted_active {
@@ -372,6 +405,7 @@ impl MapViewport {
                             event_elapsed_s(ev, now_ms),
                             icons,
                             true,
+                            show_cross,
                         );
                     }
                 }

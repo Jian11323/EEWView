@@ -169,12 +169,24 @@ pub fn cn_intensity_text(level: u8) -> &'static str {
 }
 
 /// 按界面「烈度标度」偏好重映射展示（`auto` 保持原文；`jma` / `cn` 强制标度）。
+///
+/// JMA / CWA 官方震度（`JmaShindo`）在强制「中国烈度」时也**不改写**，避免侧栏出现烈度色块。
 pub fn prefer_intensity_scale(
     kind: IntensityKind,
     level: u8,
     text: &str,
     scale: &str,
 ) -> (IntensityKind, u8, String) {
+    let keep_label = |kind: IntensityKind, level: u8, text: &str| -> String {
+        if text.trim().is_empty() {
+            match kind {
+                IntensityKind::JmaShindo => jma_shindo_text(level).into(),
+                IntensityKind::CnIntensity => cn_intensity_text(level).into(),
+            }
+        } else {
+            text.to_string()
+        }
+    };
     match scale.trim().to_ascii_lowercase().as_str() {
         "jma" => {
             let lv = match kind {
@@ -184,39 +196,14 @@ pub fn prefer_intensity_scale(
             (IntensityKind::JmaShindo, lv, jma_shindo_text(lv).into())
         }
         "cn" => {
-            let lv = match kind {
-                IntensityKind::CnIntensity => level.clamp(1, 12),
-                IntensityKind::JmaShindo => jma_to_cn_level(level),
-            };
+            // 气象厅震度保持原标度（含 CWA）
+            if kind == IntensityKind::JmaShindo {
+                return (kind, level.min(9), keep_label(kind, level, text));
+            }
+            let lv = level.clamp(1, 12);
             (IntensityKind::CnIntensity, lv, cn_intensity_text(lv).into())
         }
-        _ => {
-            let label = if text.trim().is_empty() {
-                match kind {
-                    IntensityKind::JmaShindo => jma_shindo_text(level).into(),
-                    IntensityKind::CnIntensity => cn_intensity_text(level).into(),
-                }
-            } else {
-                text.to_string()
-            };
-            (kind, level, label)
-        }
-    }
-}
-
-fn jma_to_cn_level(jma: u8) -> u8 {
-    // 粗映射：震度 0–7 阶级 → 烈度约 1–10
-    match jma.min(9) {
-        0 => 1,
-        1 => 2,
-        2 => 3,
-        3 => 4,
-        4 => 5,
-        5 => 6,
-        6 => 7,
-        7 => 8,
-        8 => 9,
-        _ => 10,
+        _ => (kind, level, keep_label(kind, level, text)),
     }
 }
 

@@ -12,15 +12,15 @@ use jian_config::AppConfig;
 use jian_core::{
     agency_family, build_eew_tts_script, build_record_tts_script, eew_sidebar_entries,
     eew_sidebar_group_key, eew_wave_active_spread, is_wave_candidate, latest_eew_per_source,
-    max_s_spread_km, same_eew_event, should_play_eew_tts, AgencyFamily, AppSnapshot, EewReport,
-    HealthStatus, IntensityKind,
+    max_s_spread_km, origin_is_stale, same_eew_event, should_play_eew_tts, AgencyFamily,
+    AppSnapshot, EewReport, HealthStatus, IntensityKind,
 };
 use std::collections::HashMap;
 use jian_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
 use jian_travel::{
     max_s_wave_spread_km, s_wave_still_spreading_to, TravelEngine, Wave,
 };
-use jian_map::{zoom_to_fit_radius_km, BasemapMode, ProjectionMode};
+use jian_map::{zoom_to_fit_radius_km, BasemapMode, DetectTracker, ProjectionMode};
 use jian_ui::{draw_splash, MainShell, SettingsAction, SplashGate, AppUiTheme};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -293,6 +293,7 @@ fn run_app() -> Result<()> {
                 window_geom_save_at: None,
                 last_window_geom: None,
                 splash: SplashGate::default(),
+                detect: DetectTracker::default(),
             }))
         }),
     )
@@ -472,6 +473,8 @@ struct JianApp {
     window_geom_save_at: Option<Instant>,
     last_window_geom: Option<(f32, f32, Option<f32>, Option<f32>, bool)>,
     splash: SplashGate,
+    /// NIED 检知框状态（激活保持 + 震度升档）
+    detect: DetectTracker,
 }
 
 impl eframe::App for JianApp {
@@ -486,8 +489,10 @@ impl eframe::App for JianApp {
                     _ => None,
                 };
                 if let NetEvent::Eew(ref report) = ev {
+                    // 发震过期：不播预警音（仍可进列表供回看）
+                    let alert_ok = !origin_is_stale(report.origin_ms);
                     // SREV 仅 JMA（对齐要石：issue/update/final/cancel + caution/warn）
-                    if agency_family(&report.agency.0) == AgencyFamily::Jma {
+                    if alert_ok && agency_family(&report.agency.0) == AgencyFamily::Jma {
                         if let Some(audio) = self.audio.as_mut() {
                             // 启动界面期间历史灌入只登记不播
                             if self.splash.active() {
@@ -512,6 +517,14 @@ impl eframe::App for JianApp {
                                 );
                             }
                         }
+                    } else if !alert_ok {
+                        if let Some(audio) = self.audio.as_mut() {
+                            audio.seed_eew_seen(
+                                &report.agency.0,
+                                &report.event_id,
+                                report.serial,
+                            );
+                        }
                     }
                 }
                 jian_net::apply_event_filtered(
@@ -525,6 +538,7 @@ impl eframe::App for JianApp {
                     if self.cfg.audio.tts_enabled
                         && !self.cfg.audio.mute
                         && !report.is_cancel
+                        && !origin_is_stale(report.origin_ms)
                     {
                         if let Some((_, shown)) = eew_sidebar_entries(&self.snap.eew_list)
                             .into_iter()
@@ -829,10 +843,25 @@ impl eframe::App for JianApp {
             audio.tick_countdown(remain);
         }
 
-        if let Some(action) = self
-            .shell
-            .ui(ctx, &mut self.snap, self.travel.as_ref(), &self.cfg)
-        {
+        // 检知框 + 震度升档音（对齐要石：仅新最大值 > 旧值时播 shindo_N）
+        let now_ms_detect = chrono::Utc::now().timestamp_millis();
+        let (detect_boxes, shindo_rise) =
+            self.detect.tick(&self.snap.stations, now_ms_detect);
+        if let Some(n) = shindo_rise {
+            if !self.splash.active() {
+                if let Some(audio) = self.audio.as_mut() {
+                    audio.play(AudioCue::Shindo(n));
+                }
+            }
+        }
+
+        if let Some(action) = self.shell.ui(
+            ctx,
+            &mut self.snap,
+            self.travel.as_ref(),
+            &self.cfg,
+            &detect_boxes,
+        ) {
             match action {
                 SettingsAction::Saved { cfg, close } => {
                     match self.apply_saved_config(cfg) {

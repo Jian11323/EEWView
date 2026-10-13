@@ -14,12 +14,15 @@ use egui::{Color32, FontFamily, FontId, Frame, Margin, RichText, Sense, Stroke, 
 use intensity_icons::IntensityIcons;
 use jian_core::palette::color_for;
 use jian_core::{
-    agency_bracket, cn_intensity_text, instrumental_band_rgb, eew_sidebar_entries,
-    eew_wave_active_spread, is_wave_candidate, max_s_spread_km, place_with_agency,
-    prefer_intensity_scale, AppSnapshot, EewReport, IntensityKind, ListSelection, OverlayMode,
-    SidebarTab,
+    agency_bracket, eew_sidebar_entries, eew_wave_active_spread,
+    is_wave_candidate, max_s_spread_km, place_with_agency, prefer_intensity_scale, AppSnapshot,
+    EewReport, IntensityKind, ListSelection, OverlayMode, SidebarTab,
 };
-use jian_map::{zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, MapViewport, VectorStyle, ProjectionMode, OCEAN};
+use jian_core::palette::{cn_intensity_rgb, instrumental_band_rgb};
+use jian_map::{
+    zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, DetectBox, MapViewport, ProjectionMode,
+    VectorStyle, OCEAN,
+};
 use jian_travel::{max_s_wave_spread_km, s_wave_still_spreading_to, TravelEngine, Wave};
 use std::path::Path;
 use theme::{ThemePalette, UiTheme};
@@ -158,6 +161,7 @@ impl MainShell {
         snap: &mut AppSnapshot,
         travel: Option<&TravelEngine>,
         cfg: &jian_config::AppConfig,
+        detect_boxes: &[DetectBox],
     ) -> Option<SettingsAction> {
         let ui_theme = UiTheme::from_config(&cfg.ui.theme);
         ui_theme.apply_egui(ctx);
@@ -250,6 +254,11 @@ impl MainShell {
                 } else {
                     &[]
                 };
+                let typhoons_for_map = if cfg.ui.show_typhoons && cfg.sources.typhoon.enabled {
+                    snap.typhoons.as_slice()
+                } else {
+                    &[]
+                };
                 map_click = self.map.ui(
                     ui,
                     snap.active.as_ref(),
@@ -262,8 +271,11 @@ impl MainShell {
                     &snap.records,
                     volcanoes_for_map,
                     selected_volcano,
+                    typhoons_for_map,
+                    &cfg.ui.typhoon_forecast_agency,
                     home,
                     snap.tsunami.as_ref(),
+                    detect_boxes,
                 );
                 if cfg.ui.auto_zoom_waves
                     && show_waves
@@ -316,7 +328,7 @@ impl MainShell {
                 draw_tsunami_banner(ui, &p, snap, travel);
                 if let Some(net) = draw_realtime_intensity_card(ui, &p, snap) {
                     if let Some((lon, lat, zoom)) = snap.focus_max_station(net) {
-                        self.map.fly_to(lon, lat, Some(zoom), 0.7);
+                        self.map.fly_to_centered(lon, lat, Some(zoom), 0.7);
                         self.map.user_camera_override = true;
                     }
                 }
@@ -381,16 +393,16 @@ impl MainShell {
                                 )
                                 .clamp(8.0, 12.5);
                                 let dur = if tab == SidebarTab::Eew { 1.0 } else { 0.85 };
-                                self.map.fly_to(lon, lat, Some(end_z), dur);
+                                self.map.fly_to_centered(lon, lat, Some(end_z), dur);
                                 // 手动点选：锁定镜头，避免影院 10s 轮播 / 跟焦把缩放突然改掉
                                 self.map.user_camera_override = true;
                             }
                             SidebarTab::Station => {
-                                self.map.fly_to(lon, lat, Some(zoom.max(9.5)), 0.7);
+                                self.map.fly_to_centered(lon, lat, Some(zoom.max(9.5)), 0.7);
                                 self.map.user_camera_override = true;
                             }
                             SidebarTab::Volcano => {
-                                self.map.fly_to(lon, lat, Some(zoom.max(9.0)), 0.85);
+                                self.map.fly_to_centered(lon, lat, Some(zoom.max(9.0)), 0.85);
                                 self.map.user_camera_override = true;
                             }
                         }
@@ -1056,21 +1068,22 @@ fn format_clock_hms(ms: i64) -> String {
 
 
 fn draw_legend_bar(ui: &mut Ui, p: &ThemePalette) {
-    // 左：中国烈度 I–XII（EEWCN）；中：計測色带（EEWCN getNiedStationColor）；右：震度 -3～7
-    const ROW: f32 = 18.0;
-    const LEFT_W: f32 = 28.0;
-    const BAR_W: f32 = 16.0;
-    const RIGHT_W: f32 = 36.0;
-    const GAP: f32 = 5.0;
-    const WIDTH: f32 = LEFT_W + GAP + BAR_W + GAP + RIGHT_W;
-    const N: usize = 13;
-    // (右栏文案, 要石色带档位 0–20)
-    const INST_ROWS: [(&str, u8); N] = [
+    // 样式：  图例
+    //      12□ □7
+    // 数字紧贴色块；左列个位右对齐；右列强弱用 +/-
+    const ROW: f32 = 17.0;
+    const SW: f32 = 14.0;
+    const MID: f32 = 2.0;
+    const LEFT_W: f32 = 18.0;
+    const RIGHT_W: f32 = 28.0;
+    const CN_N: usize = 12;
+    const SH_N: usize = 13;
+    const SH_ROWS: [(&str, u8); SH_N] = [
         ("7", 20),
-        ("6强", 19),
-        ("6弱", 18),
-        ("5强", 17),
-        ("5弱", 16),
+        ("6+", 19),
+        ("6-", 18),
+        ("5+", 17),
+        ("5-", 16),
         ("4", 15),
         ("3", 13),
         ("2", 11),
@@ -1080,59 +1093,75 @@ fn draw_legend_bar(ui: &mut Ui, p: &ThemePalette) {
         ("-2", 3),
         ("-3", 0),
     ];
+    let width = LEFT_W + SW + MID + SW + RIGHT_W;
+    let rows = CN_N.max(SH_N);
+    let body_h = ROW * rows as f32;
     let bottom_left = ui.max_rect().left_bottom() + Vec2::new(4.0, -4.0);
-    let h = ROW * N as f32 + 22.0;
+    let h = body_h + 22.0;
     let rect = egui::Rect::from_min_max(
         egui::pos2(bottom_left.x, bottom_left.y - h),
-        egui::pos2(bottom_left.x + WIDTH, bottom_left.y),
+        egui::pos2(bottom_left.x + width, bottom_left.y),
     );
     overlay_child(ui, "legend_bar", rect, |ui| {
-            ui.spacing_mut().window_margin = Margin::ZERO;
-            ui.spacing_mut().item_spacing = Vec2::ZERO;
-            ui.set_min_size(Vec2::new(WIDTH, ROW * N as f32 + 22.0));
-            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                ui.set_width(WIDTH);
-                ui.label(
-                    RichText::new("图例")
-                        .color(p.text_muted)
-                        .strong()
-                        .size(15.0),
-                );
-            });
-            let (resp, painter) =
-                ui.allocate_painter(Vec2::new(WIDTH, ROW * N as f32), Sense::hover());
-            let r = resp.rect;
-            let bar_left = r.left() + LEFT_W + GAP;
-            let bar_right = bar_left + BAR_W;
-            for i in 0..N {
-                let y0 = r.top() + ROW * i as f32;
-                let (label, band) = INST_ROWS[i];
-                painter.rect_filled(
-                    egui::Rect::from_min_max(
-                        egui::pos2(bar_left, y0 + 1.0),
-                        egui::pos2(bar_right, y0 + ROW - 1.0),
-                    ),
-                    1.5,
-                    rgb(instrumental_band_rgb(band)),
-                );
-                if i < 12 {
-                    painter.text(
-                        egui::pos2(bar_left - GAP, y0 + ROW * 0.5),
-                        egui::Align2::RIGHT_CENTER,
-                        cn_intensity_text((12 - i) as u8),
-                        FontId::proportional(12.0),
-                        p.text_dim,
-                    );
-                }
-                painter.text(
-                    egui::pos2(bar_right + GAP, y0 + ROW * 0.5),
-                    egui::Align2::LEFT_CENTER,
-                    label,
-                    FontId::proportional(12.0),
-                    p.text_muted,
-                );
-            }
+        ui.spacing_mut().window_margin = Margin::ZERO;
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        ui.set_min_size(Vec2::new(width, h));
+        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+            ui.set_width(width);
+            ui.label(
+                RichText::new("图例")
+                    .color(p.text_muted)
+                    .strong()
+                    .size(15.0),
+            );
         });
+        let (resp, painter) = ui.allocate_painter(Vec2::new(width, body_h), Sense::hover());
+        let r = resp.rect;
+        let cn_sw_x = r.left() + LEFT_W;
+        let sh_sw_x = cn_sw_x + SW + MID;
+
+        for i in 0..CN_N {
+            let lv = (12 - i) as u8;
+            let y0 = r.top() + ROW * i as f32;
+            let cy = y0 + ROW * 0.5;
+            painter.text(
+                egui::pos2(cn_sw_x, cy),
+                egui::Align2::RIGHT_CENTER,
+                format!("{lv}"),
+                FontId::proportional(12.0),
+                p.text_dim,
+            );
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(cn_sw_x, y0 + 1.5),
+                    egui::pos2(cn_sw_x + SW, y0 + ROW - 1.5),
+                ),
+                1.5,
+                rgb(cn_intensity_rgb(lv)),
+            );
+        }
+
+        for i in 0..SH_N {
+            let (label, band) = SH_ROWS[i];
+            let y0 = r.top() + ROW * i as f32;
+            let cy = y0 + ROW * 0.5;
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(sh_sw_x, y0 + 1.5),
+                    egui::pos2(sh_sw_x + SW, y0 + ROW - 1.5),
+                ),
+                1.5,
+                rgb(instrumental_band_rgb(band)),
+            );
+            painter.text(
+                egui::pos2(sh_sw_x + SW, cy),
+                egui::Align2::LEFT_CENTER,
+                label,
+                FontId::proportional(12.0),
+                p.text_muted,
+            );
+        }
+    });
 }
 
 fn draw_countdown_hud(
@@ -1156,103 +1185,123 @@ fn draw_countdown_hud(
         None
     };
 
-    // 贴地图视口右下角：高度随内容，自底向上排，避免单行北京时间悬空
+    // 贴地图视口右下角；时钟用绝对坐标绘制，避免 bottom_up 嵌套把标题/时间叠成重影
     let br = map_rect.right_bottom() + Vec2::new(-4.0, -4.0);
     let hud_w = 280.0_f32;
     let clock_block_h = 36.0_f32;
     let n_clocks = 1 + usize::from(show_nied);
     let countdown_h = if snap.countdown_s.is_some() { 72.0 } else { 0.0 };
-    let hud_h = countdown_h + clock_block_h * n_clocks as f32 + 8.0;
+    let gap = 6.0_f32;
+    let hud_h = countdown_h + clock_block_h * n_clocks as f32 + gap + 8.0;
     let rect = egui::Rect::from_min_size(
         egui::pos2(br.x - hud_w, br.y - hud_h),
         Vec2::new(hud_w, hud_h),
     );
     overlay_child(ui, "countdown_hud", rect, |ui| {
-            ui.spacing_mut().window_margin = Margin::ZERO;
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
-            // 自底向上：时钟永远贴底；倒计时块用嵌套 top_down 保持标题在上
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::Max), |ui| {
-                if let Some(jst) = jst_clock.as_ref() {
-                    draw_tz_clock_block(ui, "东京时间", jst);
-                }
-                draw_tz_clock_block(ui, "北京时间", &clock);
-                if let Some(sec) = snap.countdown_s {
-                    ui.add_space(6.0);
-                    ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
-                        let title = if sec > 0 { "S波即将到达" } else { "S波已到达" };
-                        outlined_label(ui, title, Color32::WHITE, 14.0, false);
-                        ui.allocate_ui_with_layout(
-                            Vec2::new(ui.available_width(), 44.0),
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.spacing_mut().item_spacing.x = 6.0;
-                                let mm = sec / 60;
-                                let ss = sec % 60;
-                                let time_txt = format!("{mm}:{ss:02}");
-                                let time_color = if sec > 10 {
-                                    Color32::from_rgb(0xFF, 0xEB, 0x3B)
+        ui.spacing_mut().window_margin = Margin::ZERO;
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        let r = ui.max_rect();
+        let mut y_bottom = r.bottom() - 2.0;
+
+        // 自下而上：北京时间 →（可选）东京时间
+        y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, "北京时间", &clock);
+        if let Some(jst) = jst_clock.as_ref() {
+            y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, "东京时间", jst);
+        }
+
+        if let Some(sec) = snap.countdown_s {
+            let cd_top = (y_bottom - gap - countdown_h).max(r.top());
+            let cd_rect = egui::Rect::from_min_max(
+                egui::pos2(r.left(), cd_top),
+                egui::pos2(r.right(), y_bottom - gap),
+            );
+            ui.scope_builder(egui::UiBuilder::new().max_rect(cd_rect), |ui| {
+                ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+                    let title = if sec > 0 { "S波即将到达" } else { "S波已到达" };
+                    outlined_label(ui, title, Color32::WHITE, 14.0, false);
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(ui.available_width(), 44.0),
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            let mm = sec / 60;
+                            let ss = sec % 60;
+                            let time_txt = format!("{mm}:{ss:02}");
+                            let time_color = if sec > 10 {
+                                Color32::from_rgb(0xFF, 0xEB, 0x3B)
+                            } else {
+                                p.danger
+                            };
+                            Frame::NONE
+                                .fill(Color32::from_rgba_unmultiplied(0x66, 0x66, 0x66, 0x80))
+                                .inner_margin(Margin::symmetric(6, 2))
+                                .show(ui, |ui| {
+                                    outlined_label(ui, &time_txt, time_color, 34.0, false);
+                                });
+                            let lv = snap.countdown_local_level;
+                            let label = if snap.countdown_local_text.is_empty() {
+                                if lv == 0 {
+                                    "0".into()
                                 } else {
-                                    p.danger
-                                };
-                                Frame::NONE
-                                    .fill(Color32::from_rgba_unmultiplied(0x66, 0x66, 0x66, 0x80))
-                                    .inner_margin(Margin::symmetric(6, 2))
-                                    .show(ui, |ui| {
-                                        outlined_label(ui, &time_txt, time_color, 34.0, false);
-                                    });
-                                let lv = snap.countdown_local_level;
-                                let label = if snap.countdown_local_text.is_empty() {
-                                    if lv == 0 {
-                                        "0".into()
-                                    } else {
-                                        lv.to_string()
-                                    }
-                                } else {
-                                    snap.countdown_local_text.clone()
-                                };
-                                let bg = if lv == 0 {
-                                    Color32::from_rgb(0x2A, 0x2A, 0x2E)
-                                } else {
-                                    rgb(color_for(snap.countdown_local_kind, lv))
-                                };
-                                let fg = intensity_fg(bg);
-                                let border = if lv == 0 {
-                                    Stroke::new(1.0_f32, Color32::WHITE)
-                                } else {
-                                    Stroke::NONE
-                                };
-                                Frame::NONE
-                                    .fill(bg)
-                                    .stroke(border)
-                                    .inner_margin(Margin::symmetric(8, 2))
-                                    .show(ui, |ui| {
-                                        ui.label(
-                                            RichText::new(label)
-                                                .color(fg)
-                                                .strong()
-                                                .size(34.0),
-                                        );
-                                    });
-                            },
-                        );
-                    });
-                }
+                                    lv.to_string()
+                                }
+                            } else {
+                                snap.countdown_local_text.clone()
+                            };
+                            let bg = if lv == 0 {
+                                Color32::from_rgb(0x2A, 0x2A, 0x2E)
+                            } else {
+                                rgb(color_for(snap.countdown_local_kind, lv))
+                            };
+                            let fg = intensity_fg(bg);
+                            let border = if lv == 0 {
+                                Stroke::new(1.0_f32, Color32::WHITE)
+                            } else {
+                                Stroke::NONE
+                            };
+                            Frame::NONE
+                                .fill(bg)
+                                .stroke(border)
+                                .inner_margin(Margin::symmetric(8, 2))
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        RichText::new(label)
+                                            .color(fg)
+                                            .strong()
+                                            .size(34.0),
+                                    );
+                                });
+                        },
+                    );
+                });
             });
-        });
+        }
+    });
 }
 
-fn draw_tz_clock_block(ui: &mut Ui, title: &str, datetime: &str) {
-    ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        let f1 = FontId::new(13.0, FontFamily::Name("lxgw_wenkai".into()));
-        let f2 = FontId::new(15.0, FontFamily::Name("lxgw_wenkai".into()));
-        ui.label(
-            RichText::new(title)
-                .font(f1)
-                .color(Color32::from_rgb(0xCC, 0xCC, 0xCC)),
-        );
-        ui.label(RichText::new(datetime).font(f2).color(Color32::WHITE));
-    });
+/// 在右下角绝对位置绘制一块时钟；返回下一块可用的 bottom y。
+fn paint_tz_clock_at(ui: &mut Ui, right: f32, bottom: f32, title: &str, datetime: &str) -> f32 {
+    let h = 36.0_f32;
+    let top = bottom - h;
+    let x = right.floor();
+    let painter = ui.painter();
+    let title_font = FontId::new(13.0, FontFamily::Proportional);
+    let time_font = FontId::new(15.0, FontFamily::Proportional);
+    painter.text(
+        egui::pos2(x, (top + 12.0).floor()),
+        egui::Align2::RIGHT_CENTER,
+        title,
+        title_font,
+        Color32::from_rgb(0xCC, 0xCC, 0xCC),
+    );
+    painter.text(
+        egui::pos2(x, (top + 28.0).floor()),
+        egui::Align2::RIGHT_CENTER,
+        datetime,
+        time_font,
+        Color32::WHITE,
+    );
+    top - 2.0
 }
 
 fn intensity_fg(bg: Color32) -> Color32 {

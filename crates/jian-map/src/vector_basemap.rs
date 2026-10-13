@@ -79,14 +79,14 @@ impl BasemapMode {
         }
     }
 
-    /// `auto`：暗色→要石矢量，亮色→地形瓦片；其它值按 `parse`。
+    /// `auto`：亮色→地形瓦片；暗色→瓦片+矢量描边（陆地不再耳切填色，避免灰三角）。
     pub fn resolve(configured: &str, theme: &str) -> Self {
         match configured.trim().to_ascii_lowercase().as_str() {
             "auto" | "" => {
                 if theme.eq_ignore_ascii_case("light") {
                     Self::Tiles
                 } else {
-                    Self::Vector
+                    Self::Both
                 }
             }
             other => Self::parse(other),

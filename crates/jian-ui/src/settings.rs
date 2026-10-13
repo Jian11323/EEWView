@@ -1181,6 +1181,23 @@ fn draw_sources(
 
 
 
+    section(ui, "台风", "\u{25ce}", |ui| {
+        control_row(ui, "启用台风源", "轮询活跃台风路径与风圈", "\u{26a1}", |ui| {
+            toggle(ui, &mut draft.sources.typhoon.enabled);
+        });
+        if draft.sources.typhoon.enabled {
+            row_divider(ui);
+            control_row(ui, "轮询间隔", "秒；默认 15", "\u{25ce}", |ui| {
+                ui.add(
+                    egui::DragValue::new(&mut draft.sources.typhoon.poll_secs)
+                        .speed(1.0)
+                        .range(10..=120)
+                        .suffix(" s"),
+                );
+            });
+        }
+    });
+
     section(ui, "实时测站", "\u{25ce}", |ui| {
         control_row(ui, "日本 JMA/NIED", "总开关", "\u{26a1}", |ui| {
             toggle(ui, &mut draft.sources.stations.jma_enabled);
@@ -1503,6 +1520,25 @@ fn draw_general(
         control_row(ui, "火山标注", "地图三角标与火山列表图标", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_volcanoes);
         });
+        row_divider(ui);
+        control_row(ui, "台风路径", "活跃台风路径、风圈与预报线", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.ui.show_typhoons);
+        });
+        row_divider(ui);
+        control_row(ui, "台风预报源", "地图预报路径所用机构", "\u{25ce}", |ui| {
+            egui::ComboBox::from_id_salt("typhoon_fc_agency")
+                .selected_text(&draft.ui.typhoon_forecast_agency)
+                .width(120.0)
+                .show_ui(ui, |ui| {
+                    for a in ["全部", "中国", "中国台湾", "日本", "美国", "中国香港"] {
+                        ui.selectable_value(
+                            &mut draft.ui.typhoon_forecast_agency,
+                            a.to_string(),
+                            a,
+                        );
+                    }
+                });
+        });
     });
 
     section(ui, "界面偏好", "\u{2630}", |ui| {
@@ -1534,7 +1570,7 @@ fn draw_general(
                 });
         });
         row_divider(ui);
-        control_row(ui, "烈度标度", "列表与色标优先使用的标度", "\u{25ce}", |ui| {
+        control_row(ui, "烈度标度", "自动跟机构；强制中国烈度时 JMA/CWA 仍用震度", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("gen_intensity_scale")
                 .selected_text(scale_display(&draft.ui.intensity_scale))
                 .width(160.0)
@@ -1938,6 +1974,7 @@ fn draw_about(ui: &mut Ui) {
                 \u{00b7} PancakesAPI（GQ + JMA-Atom）\n\
 \u{00b7} Wolfx（all_eew 预警与速报）\n\
 \u{00b7} P2PQuake（气象厅地震情报）\n\
+\u{00b7} 台风路径（sismotide /get/typhoon）\n\
 \u{00b7} NIED kmoni / lmoni 原版测站图像（可选）",
             )
             .size(12.0)
