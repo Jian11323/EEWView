@@ -600,7 +600,7 @@ pub fn paint_intensity_rings(
     ev: &EewReport,
     selected: bool,
 ) {
-    // 允许 `record:`（速报右键预览）；测站点选不画环
+    // 允许 `record:`（速报右键预览，仍受设置开关）；测站点选不画环
     if ev.is_cancel || ev.event_id.starts_with("station:") {
         return;
     }
