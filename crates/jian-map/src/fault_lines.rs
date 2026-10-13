@@ -163,7 +163,10 @@ impl SegLayer {
     fn query_candidates(&self, min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64) -> Vec<u32> {
         let mut out = Vec::with_capacity(512);
         let mut seen = vec![false; self.segs.len()];
-        for cell in view_cells(min_lon, min_lat, max_lon, max_lat) {
+        // 格顺序固定，避免 HashMap 迭代导致预算内选段抖动
+        let mut cells = view_cells(min_lon, min_lat, max_lon, max_lat);
+        cells.sort_unstable();
+        for cell in cells {
             let Some(list) = self.grid.get(&cell) else {
                 continue;
             };
@@ -175,6 +178,12 @@ impl SegLayer {
                 }
             }
         }
+        // 长断层优先占用绘制预算，同长按索引稳定
+        out.sort_by(|&a, &b| {
+            let da = self.segs[a as usize].diag;
+            let db = self.segs[b as usize].diag;
+            db.total_cmp(&da).then_with(|| a.cmp(&b))
+        });
         out
     }
 }

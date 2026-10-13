@@ -1897,7 +1897,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
             );
         });
         row_divider(ui);
-        control_row(ui, "日志目录", "相对资源根或绝对·径", "\u{25ce}", |ui| {
+        control_row(ui, "日志目录", "相对资源根或绝对路径", "\u{25ce}", |ui| {
             framed_edit(ui, &mut draft.log.dir, 180.0);
         });
         row_divider(ui);
