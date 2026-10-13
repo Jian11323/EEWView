@@ -1516,7 +1516,7 @@ fn draw_general(
         control_row(
             ui,
             "烈度区划填色",
-            "按行政区划质心估烈度填色；与本机估烈度同一衰减",
+            "按市级区划三角形质心估烈度；区内随距离衰减",
             "\u{25ce}",
             |ui| {
                 toggle(ui, &mut draft.ui.show_intensity_rings);

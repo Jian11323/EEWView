@@ -548,7 +548,7 @@ pub struct AppSnapshot {
     pub selection: Option<ListSelection>,
     /// 图例 P-S：是否绘制走时波圈
     pub show_wave_rings: bool,
-    /// 是否绘制衰减估算烈度/震度同心环
+    /// 是否绘制衰减估算烈度（市级三角形填色 / 回退同心环）
     pub show_intensity_rings: bool,
     /// 当前有效的 JMA 海啸情报（取消后为 None）
     pub tsunami: Option<TsunamiInfo>,

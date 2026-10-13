@@ -88,7 +88,7 @@ pub struct UiConfig {
     /// 绘制 P/S 走时波圈
     #[serde(default = "default_true")]
     pub show_wave_rings: bool,
-    /// 绘制衰减估算烈度：优先行政区划填色，无区划时回退同心环
+    /// 绘制衰减估算烈度：优先市级区划三角形填色，无区划时回退同心环
     #[serde(default = "default_true")]
     pub show_intensity_rings: bool,
     /// 地图左下角烈度图例

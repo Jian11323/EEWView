@@ -23,7 +23,7 @@ GQ Special 世界层已含调整后的中国国界（含藏南）；另叠内置
 | 2 | `globalquake/jp-prefectures.geojson` → `日本/` → 要石 | 日本都道府县 |
 | 3 | `globalquake/cn-prefectures.geojson` / 要石省级 | 仅当中国扫盘为空时回退；远距外轮廓溶解仍优先用一级区划 |
 
-近距区划与烈度区划填色使用地市/区县边界（例如内蒙古按盟旗市填色，而非整省一块）。
+近距区划与烈度区划填色使用地市/区县边界；烈度按耳切三角形质心估档（大区内随距离衰减，非整块一色）。
 
 要石来源：[Lipomoea/kanameishi](https://github.com/Lipomoea/kanameishi)（AGPL-3.0）。详见 [`kanameishi/README.md`](kanameishi/README.md)。  
 GQ Special 说明见 [`globalquake/README.md`](globalquake/README.md)。
