@@ -1516,7 +1516,7 @@ fn draw_general(
         control_row(
             ui,
             "烈度区划填色",
-            "按市级区划三角形质心估烈度；区内随距离衰减",
+            "区划作陆地掩膜，按衰减环半径分带填色",
             "\u{25ce}",
             |ui| {
                 toggle(ui, &mut draft.ui.show_intensity_rings);

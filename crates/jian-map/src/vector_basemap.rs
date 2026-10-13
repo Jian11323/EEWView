@@ -629,10 +629,9 @@ impl VectorBasemap {
         painter.extend(shapes);
     }
 
-    /// 按市级/区县耳切三角形填色：各三角形质心用 `estimate_at_site` 估档。
+    /// 市级/区县陆地裁切的衰减填色：颜色边界跟震中距环走，区划只作陆地掩膜。
     ///
-    /// 不再把「震中所在整块区划」强行按距 0 填最高档（阿拉善左旗一类大区会吞掉中间衰减）。
-    /// 大边三角形会细分，使区内随距离出现正常档位带。无命中时返回 `false`。
+    /// 不用耳切斜边当分色边界（否则海岸/大区会长出放射尖刺）。无命中时返回 `false`。
     pub fn paint_intensity_regions(
         &self,
         ui: &mut Ui,
@@ -657,6 +656,8 @@ impl VectorBasemap {
         let max_r_km = max_r_km.max(25.0);
         // 粗筛：有感半径 + 区划半对角 + 小余量（勿过大，否则远省被误填）
         let cull_km = max_r_km + 80.0;
+        // 由近到远的环外半径，用于把三角形按等距切开
+        let band_radii: Vec<f64> = rings.iter().map(|(_, r)| *r).collect();
 
         let rect = view.rect;
         let painter = ui.painter_at(rect);
@@ -755,7 +756,7 @@ impl VectorBasemap {
                         continue;
                     }
 
-                    // 跨多档：按耳切三角形质心估档；过大边再细分
+                    // 跨多档：区划三角形作陆地掩膜，按环半径切开再填色
                     let verts = ring_lonlat_vertices(ring);
                     if verts.len() < 3 {
                         continue;
@@ -765,13 +766,14 @@ impl VectorBasemap {
                         if i0 >= verts.len() || i1 >= verts.len() || i2 >= verts.len() {
                             continue;
                         }
-                        painted += paint_intensity_tri_recursive(
+                        painted += paint_intensity_tri_banded(
                             &mut meshes,
                             view,
                             lon_shift,
                             max_edge_px,
                             fill_alpha,
                             ev,
+                            &band_radii,
                             verts[i0],
                             verts[i1],
                             verts[i2],
@@ -853,65 +855,258 @@ fn ring_lonlat_vertices(ring: &RingSet) -> Vec<[f32; 2]> {
     out
 }
 
-/// 烈度填色：三角形最长边超过此值（km）且三顶点档位不一致时细分。
-const INTENSITY_TRI_SPLIT_KM: f64 = 28.0;
-const INTENSITY_TRI_MAX_DEPTH: u8 = 3;
+/// 大边先几何细分，保证环半径插值准确；再按等震中距切开。
+const INTENSITY_TRI_SPLIT_KM: f64 = 36.0;
+const INTENSITY_TRI_MAX_DEPTH: u8 = 6;
 
-/// 按三角形质心估档填色；大边且跨档时四分细化。返回新增三角形数。
-fn paint_intensity_tri_recursive(
+/// 区划三角形按衰减环半径分带填色（颜色边界≈等距圆，避免耳切斜边尖刺）。
+fn paint_intensity_tri_banded(
     meshes: &mut HashMap<u8, egui::epaint::Mesh>,
     view: &ViewCtx,
     lon_shift: f64,
     max_edge_px: f32,
     fill_alpha: u8,
     ev: &EewReport,
+    band_radii: &[f64],
     a: [f32; 2],
     b: [f32; 2],
     c: [f32; 2],
     depth: u8,
 ) -> usize {
-    let level_at = |lon: f64, lat: f64| -> u8 {
-        let dist = haversine_km(ev.longitude, ev.latitude, lon, lat);
-        jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, dist).0
-    };
-    let la = level_at(a[0] as f64, a[1] as f64);
-    let lb = level_at(b[0] as f64, b[1] as f64);
-    let lc = level_at(c[0] as f64, c[1] as f64);
-    let clon = (a[0] as f64 + b[0] as f64 + c[0] as f64) / 3.0;
-    let clat = (a[1] as f64 + b[1] as f64 + c[1] as f64) / 3.0;
-    let level = level_at(clon, clat);
+    // 硬顶：浮点/退化时避免无限切环
+    if depth > 14 {
+        let clon = (a[0] as f64 + b[0] as f64 + c[0] as f64) / 3.0;
+        let clat = (a[1] as f64 + b[1] as f64 + c[1] as f64) / 3.0;
+        let dist = haversine_km(ev.longitude, ev.latitude, clon, clat);
+        let level =
+            jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, dist).0;
+        if level < 1 {
+            return 0;
+        }
+        return usize::from(emit_intensity_screen_tri(
+            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, level, a, b, c,
+        ));
+    }
 
+    let dist = |p: [f32; 2]| haversine_km(ev.longitude, ev.latitude, p[0] as f64, p[1] as f64);
     let e_ab = haversine_km(a[0] as f64, a[1] as f64, b[0] as f64, b[1] as f64);
     let e_bc = haversine_km(b[0] as f64, b[1] as f64, c[0] as f64, c[1] as f64);
     let e_ca = haversine_km(c[0] as f64, c[1] as f64, a[0] as f64, a[1] as f64);
     let max_e = e_ab.max(e_bc).max(e_ca);
-    let cross_level = la != lb || lb != lc || la != level;
 
-    if depth < INTENSITY_TRI_MAX_DEPTH && max_e > INTENSITY_TRI_SPLIT_KM && cross_level {
+    // 边太长时先四分，再切环（弦近似弧才稳）
+    if depth < INTENSITY_TRI_MAX_DEPTH && max_e > INTENSITY_TRI_SPLIT_KM {
         let m_ab = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
         let m_bc = [(b[0] + c[0]) * 0.5, (b[1] + c[1]) * 0.5];
         let m_ca = [(c[0] + a[0]) * 0.5, (c[1] + a[1]) * 0.5];
         let d = depth + 1;
-        return paint_intensity_tri_recursive(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, a, m_ab, m_ca, d,
-        ) + paint_intensity_tri_recursive(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, m_ab, b, m_bc, d,
-        ) + paint_intensity_tri_recursive(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, m_ca, m_bc, c, d,
-        ) + paint_intensity_tri_recursive(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, m_ab, m_bc, m_ca, d,
+        return paint_intensity_tri_banded(
+            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, a, m_ab, m_ca, d,
+        ) + paint_intensity_tri_banded(
+            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, m_ab, b, m_bc, d,
+        ) + paint_intensity_tri_banded(
+            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, m_ca, m_bc, c, d,
+        ) + paint_intensity_tri_banded(
+            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, m_ab, m_bc, m_ca, d,
         );
     }
 
-    if level < 1 {
+    let da = dist(a);
+    let db = dist(b);
+    let dc = dist(c);
+    let mut d_lo = da.min(db).min(dc);
+    let d_hi = da.max(db).max(dc);
+    if point_in_tri_lonlat(ev.longitude, ev.latitude, a, b, c) {
+        d_lo = 0.0;
+    }
+
+    let lv_lo = jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, d_lo).0;
+    let lv_hi = jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, d_hi).0;
+    if lv_lo < 1 && lv_hi < 1 {
         return 0;
     }
-    if emit_intensity_screen_tri(meshes, view, lon_shift, max_edge_px, fill_alpha, ev, level, a, b, c)
-    {
-        1
-    } else {
-        0
+    if lv_lo == lv_hi {
+        if lv_lo < 1 {
+            return 0;
+        }
+        return usize::from(emit_intensity_screen_tri(
+            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, lv_lo, a, b, c,
+        ));
     }
+
+    // 取落在 (d_lo, d_hi) 内的最近环外半径，把三角切成「环内 / 环外」
+    let Some(&split_r) = band_radii
+        .iter()
+        .find(|&&r| r > d_lo + 1e-6 && r < d_hi - 1e-6)
+    else {
+        let mid = 0.5 * (d_lo + d_hi);
+        let level =
+            jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, mid).0;
+        if level < 1 {
+            return 0;
+        }
+        return usize::from(emit_intensity_screen_tri(
+            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, level, a, b, c,
+        ));
+    };
+
+    let (inside, outside) = clip_tri_by_radius(ev.longitude, ev.latitude, a, b, c, split_r);
+    let mut n = 0usize;
+    for poly in inside {
+        n += paint_intensity_poly_tris(
+            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, &poly, depth,
+        );
+    }
+    for poly in outside {
+        n += paint_intensity_poly_tris(
+            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, &poly, depth,
+        );
+    }
+    n
+}
+
+fn paint_intensity_poly_tris(
+    meshes: &mut HashMap<u8, egui::epaint::Mesh>,
+    view: &ViewCtx,
+    lon_shift: f64,
+    max_edge_px: f32,
+    fill_alpha: u8,
+    ev: &EewReport,
+    band_radii: &[f64],
+    poly: &[[f32; 2]],
+    depth: u8,
+) -> usize {
+    if poly.len() < 3 {
+        return 0;
+    }
+    if poly.len() == 3 {
+        return paint_intensity_tri_banded(
+            meshes,
+            view,
+            lon_shift,
+            max_edge_px,
+            fill_alpha,
+            ev,
+            band_radii,
+            poly[0],
+            poly[1],
+            poly[2],
+            depth.saturating_add(1),
+        );
+    }
+    // 扇形三角化（凸：圆裁切三角形得到的块）
+    let mut n = 0usize;
+    for i in 1..poly.len() - 1 {
+        n += paint_intensity_tri_banded(
+            meshes,
+            view,
+            lon_shift,
+            max_edge_px,
+            fill_alpha,
+            ev,
+            band_radii,
+            poly[0],
+            poly[i],
+            poly[i + 1],
+            depth.saturating_add(1),
+        );
+    }
+    n
+}
+
+/// 射线法：震中是否在三角形内（经纬度平面）。
+fn point_in_tri_lonlat(lon: f64, lat: f64, a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> bool {
+    point_in_ring(lon, lat, &[a, b, c])
+}
+
+/// 边上二分求距震中 = R 的点。
+fn edge_point_at_radius(
+    epi_lon: f64,
+    epi_lat: f64,
+    p0: [f32; 2],
+    p1: [f32; 2],
+    r_km: f64,
+) -> Option<[f32; 2]> {
+    let d0 = haversine_km(epi_lon, epi_lat, p0[0] as f64, p0[1] as f64);
+    let d1 = haversine_km(epi_lon, epi_lat, p1[0] as f64, p1[1] as f64);
+    if (d0 - r_km).abs() < 1e-4 {
+        return Some(p0);
+    }
+    if (d1 - r_km).abs() < 1e-4 {
+        return Some(p1);
+    }
+    if (d0 - r_km) * (d1 - r_km) > 0.0 {
+        return None;
+    }
+    let mut lo = 0.0_f64;
+    let mut hi = 1.0_f64;
+    let mut mid_pt = p0;
+    for _ in 0..28 {
+        let t = 0.5 * (lo + hi);
+        mid_pt = [
+            (p0[0] as f64 + (p1[0] as f64 - p0[0] as f64) * t) as f32,
+            (p0[1] as f64 + (p1[1] as f64 - p0[1] as f64) * t) as f32,
+        ];
+        let d = haversine_km(epi_lon, epi_lat, mid_pt[0] as f64, mid_pt[1] as f64);
+        if (d0 < r_km) == (d < r_km) {
+            lo = t;
+        } else {
+            hi = t;
+        }
+    }
+    Some(mid_pt)
+}
+
+/// 用震中距 R 切开三角形 → (环内多边形列表, 环外多边形列表)。
+fn clip_tri_by_radius(
+    epi_lon: f64,
+    epi_lat: f64,
+    a: [f32; 2],
+    b: [f32; 2],
+    c: [f32; 2],
+    r_km: f64,
+) -> (Vec<Vec<[f32; 2]>>, Vec<Vec<[f32; 2]>>) {
+    let pts = [a, b, c];
+    let inside = [
+        haversine_km(epi_lon, epi_lat, a[0] as f64, a[1] as f64) <= r_km,
+        haversine_km(epi_lon, epi_lat, b[0] as f64, b[1] as f64) <= r_km,
+        haversine_km(epi_lon, epi_lat, c[0] as f64, c[1] as f64) <= r_km,
+    ];
+    let n_in = inside.iter().filter(|&&x| x).count();
+    if n_in == 0 {
+        return (vec![], vec![pts.to_vec()]);
+    }
+    if n_in == 3 {
+        return (vec![pts.to_vec()], vec![]);
+    }
+
+    let mut in_poly: Vec<[f32; 2]> = Vec::with_capacity(4);
+    let mut out_poly: Vec<[f32; 2]> = Vec::with_capacity(4);
+    for i in 0..3 {
+        let j = (i + 1) % 3;
+        let pi = pts[i];
+        let pj = pts[j];
+        if inside[i] {
+            in_poly.push(pi);
+        } else {
+            out_poly.push(pi);
+        }
+        if inside[i] != inside[j] {
+            if let Some(hit) = edge_point_at_radius(epi_lon, epi_lat, pi, pj, r_km) {
+                in_poly.push(hit);
+                out_poly.push(hit);
+            }
+        }
+    }
+    let mut insides = Vec::new();
+    let mut outsides = Vec::new();
+    if in_poly.len() >= 3 {
+        insides.push(in_poly);
+    }
+    if out_poly.len() >= 3 {
+        outsides.push(out_poly);
+    }
+    (insides, outsides)
 }
 
 fn emit_intensity_screen_tri(
