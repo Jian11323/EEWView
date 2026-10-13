@@ -121,15 +121,24 @@ fn paint_epicenter_marker(
 
 
 fn felt_level(s: &StationSample) -> u8 {
-    if s.intensity_kind == jian_core::IntensityKind::JmaShindo {
-        if s.intensity_level >= 1 {
-            return s.intensity_level.min(9);
+    match s.intensity_kind {
+        jian_core::IntensityKind::JmaShindo => {
+            if s.intensity_level >= 1 {
+                return s.intensity_level.min(9);
+            }
+            if s.instrumental >= 0.5 {
+                return jian_core::jma_from_instrumental(s.instrumental).0;
+            }
+            0
         }
-        if s.instrumental >= 0.5 {
-            return jian_core::jma_from_instrumental(s.instrumental).0;
+        jian_core::IntensityKind::CnIntensity => {
+            if s.intensity_level >= 1 {
+                s.intensity_level.min(12)
+            } else {
+                0
+            }
         }
     }
-    0
 }
 
 /// 测站散点：震度 >=1 用 `shindo_inst`；其余計測色点。有预警时有感点始终显示。
@@ -173,9 +182,13 @@ pub fn paint_stations(
     let mut quiet_i = 0usize;
     for idx in order {
         let s = &stations[idx];
-        let felt = s.intensity_level >= 1
-            || (s.intensity_kind == jian_core::IntensityKind::JmaShindo && s.instrumental >= 0.5);
-        let quiet = !felt && s.intensity_level == 0;
+        let felt = match s.intensity_kind {
+            jian_core::IntensityKind::JmaShindo => {
+                s.intensity_level >= 1 || s.instrumental >= 0.5
+            }
+            jian_core::IntensityKind::CnIntensity => s.intensity_level >= 1,
+        };
+        let quiet = !felt;
         if quiet {
             if !show_quiet {
                 if selected_id != Some(s.id.as_str()) {
@@ -234,14 +247,32 @@ pub fn paint_stations(
                 continue;
             }
         }
-        let rgb = if s.instrumental >= -3.0 {
-            jian_core::instrumental_rgb(s.instrumental)
-        } else {
-            color_for(s.intensity_kind, s.intensity_level)
+        // KMA 等烈度网：按 intensity_kind 上色；JMA 計測用色带（勿把 MMI 当計測震度）
+        let rgb = match s.intensity_kind {
+            jian_core::IntensityKind::CnIntensity => {
+                if s.intensity_level >= 1 {
+                    color_for(s.intensity_kind, s.intensity_level)
+                } else {
+                    jian_core::palette::Rgb::new(0x66, 0x66, 0x66)
+                }
+            }
+            jian_core::IntensityKind::JmaShindo => {
+                if s.instrumental >= -3.0 {
+                    jian_core::instrumental_rgb(s.instrumental)
+                } else {
+                    color_for(s.intensity_kind, s.intensity_level)
+                }
+            }
         };
         let fill = Color32::from_rgb(rgb.r, rgb.g, rgb.b);
         let r = if selected {
             5.5
+        } else if s.intensity_kind == jian_core::IntensityKind::CnIntensity && felt {
+            match s.intensity_level {
+                1..=3 => 3.6,
+                4..=6 => 4.4,
+                _ => 5.2,
+            }
         } else if quiet {
             2.2
         } else {

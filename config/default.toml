@@ -29,8 +29,8 @@ device = "gpu"
 gpu_api = "opengl"
 # eco 节能 | normal 正常 | extreme 极致（档位热重载，无需重启）
 profile = "normal"
-# 目标帧率（空闲/波圈重绘）；默认 60，范围 20–300
-target_fps = 60
+# 目标帧率（空闲/波圈重绘）；默认 30，范围 20–300（老 CPU 建议 30 + 节能档）
+target_fps = 30
 
 [window]
 # 主窗口几何（调整后自动写入用户配置）

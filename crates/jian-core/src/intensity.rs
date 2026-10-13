@@ -239,7 +239,9 @@ fn cn_to_jma_level(cn: u8) -> u8 {
 pub fn intensity_kind_for_agency(agency: &str) -> IntensityKind {
     use crate::agency::{agency_family, AgencyFamily};
     match agency_family(agency) {
-        AgencyFamily::Jma | AgencyFamily::Cwa | AgencyFamily::Kma => IntensityKind::JmaShindo,
+        AgencyFamily::Jma | AgencyFamily::Cwa => IntensityKind::JmaShindo,
+        // KMA / PEWS 使用 MMI 烈度，与 EEWCN 一致按中国烈度色展示
+        AgencyFamily::Kma => IntensityKind::CnIntensity,
         _ => IntensityKind::CnIntensity,
     }
 }

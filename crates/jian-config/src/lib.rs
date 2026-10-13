@@ -144,7 +144,7 @@ pub struct PerformanceConfig {
     /// `eco` 节能 | `normal` 正常 | `extreme` 极致
     #[serde(default = "default_perf_profile")]
     pub profile: String,
-    /// 目标帧率（空闲/波圈重绘）；默认 60，范围 20–300
+    /// 目标帧率（空闲/波圈重绘）；默认 30，范围 20–300
     #[serde(default = "default_target_fps")]
     pub target_fps: u32,
 }
@@ -159,7 +159,7 @@ fn default_perf_profile() -> String {
     "normal".into()
 }
 fn default_target_fps() -> u32 {
-    60
+    30
 }
 
 impl Default for PerformanceConfig {

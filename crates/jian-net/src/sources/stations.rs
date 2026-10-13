@@ -47,6 +47,8 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
                             periodic_texts: Vec::new(),
                             periodic_secs: 0,
                             backoff_max_secs: 60,
+                            // EEWCN: ~1s 帧，僵死约 15s 重连
+                            stale_secs: 15,
                         },
                         move |tx, text| ingest_kmoni_frame(&mut state, tx, text),
                     )
@@ -86,6 +88,7 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
                     periodic_texts: Vec::new(),
                     periodic_secs: 0,
                     backoff_max_secs: 60,
+                    stale_secs: 15,
                 },
                 move |tx, text| ingest_kma_station_frame(&mut state, tx, text),
             )
@@ -109,6 +112,8 @@ fn spawn_snet_jian(tx: NetTx, url: String) -> JoinHandle<()> {
                 periodic_texts: Vec::new(),
                 periodic_secs: 0,
                 backoff_max_secs: 60,
+                // S-Net ~1min/帧
+                stale_secs: 120,
             },
             move |tx, text| ingest_snet_frame(&mut state, tx, text),
         )

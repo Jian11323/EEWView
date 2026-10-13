@@ -79,6 +79,7 @@ pub fn spawn(tx: NetTx, cfg: JianSourceConfig) -> Vec<JoinHandle<()>> {
                     periodic_texts: list_cmds,
                     periodic_secs: period,
                     backoff_max_secs: 60,
+                    stale_secs: 0,
                 },
                 move |tx, text| ingest_jian_frame(tx, text, Some(&cfg_all)),
             )
@@ -112,6 +113,7 @@ fn spawn_kmoni_if(tx: &NetTx, cfg: &JianSourceConfig) -> Vec<JoinHandle<()>> {
                 periodic_texts: Vec::new(),
                 periodic_secs: 0,
                 backoff_max_secs: 60,
+                stale_secs: 15,
             },
             move |tx, text| ingest_kmoni_frame(&mut state, tx, text),
         )

@@ -15,7 +15,7 @@ pub use camera::{
 };
 pub use projection::{clamp_lat, km_to_pixels, lonlat_to_screen, normalize_lon, ProjectionMode};
 pub use tile_cache::TileCache;
-pub use vector_basemap::{BasemapLoadState, BasemapMode, VectorBasemap, VectorStyle};
+pub use vector_basemap::{BasemapLoadState, BasemapMode, VectorBasemap, VectorStyle, OCEAN};
 
 use egui::{Color32, Sense, Stroke, Ui};
 use jian_core::{EewReport, EqRecord, StationSample, TsunamiInfo, VolcanoNotice};
@@ -24,7 +24,6 @@ use marker_icons::MarkerIcons;
 use projection::ViewCtx;
 use tsunami_coast::TsunamiCoast;
 use tile_cache::TileCache as Cache;
-use vector_basemap::OCEAN;
 
 const ZOOM_MIN: f64 = 2.0;
 const ZOOM_MAX: f64 = 12.0;

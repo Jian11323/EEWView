@@ -48,6 +48,7 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
                     periodic_texts: Vec::new(),
                     periodic_secs: 0,
                     backoff_max_secs: 60,
+                    stale_secs: 0,
                 },
                 move |tx, text| ingest_pancakes_event(tx, text, &filter),
             )

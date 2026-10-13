@@ -213,6 +213,12 @@ pub enum BasemapLoadState {
     Failed,
 }
 
+/// 视口不变时复用投影后的 Shape，避免每帧全量投影抬高 CPU。
+struct VectorPaintCache {
+    key: u64,
+    shapes: Vec<egui::Shape>,
+}
+
 pub struct VectorBasemap {
     world: LayerLods,
     /// 中日省界 / 都道府县（近距）
@@ -226,6 +232,7 @@ pub struct VectorBasemap {
     gen: u64,
     rx: Option<Receiver<(u64, LoadPacket)>>,
     loaded_dir: Option<PathBuf>,
+    paint_cache: Option<VectorPaintCache>,
 }
 
 impl Default for VectorBasemap {
@@ -253,6 +260,7 @@ impl Default for VectorBasemap {
             gen: 0,
             rx: None,
             loaded_dir: None,
+            paint_cache: None,
         }
     }
 }
@@ -298,25 +306,14 @@ impl VectorBasemap {
         self.gen = self.gen.wrapping_add(1);
         let gen = self.gen;
         self.loaded_dir = Some(dir.clone());
-        self.world = LayerLods {
-            coarse: Vec::new(),
-            medium: Vec::new(),
-            fine: Vec::new(),
-        };
-        self.regional = LayerLods {
-            coarse: Vec::new(),
-            medium: Vec::new(),
-            fine: Vec::new(),
-        };
-        self.national = LayerLods {
-            coarse: Vec::new(),
-            medium: Vec::new(),
-            fine: Vec::new(),
-        };
-        self.world_ready = false;
-        self.regional_ready = false;
-        self.state = BasemapLoadState::LoadingWorld;
-        self.status = "正在加载世界底图…".into();
+        // 保留已加载层，避免重载时闪成纯海洋黑底；新包到达后再替换
+        if self.world_ready || self.regional_ready {
+            self.state = BasemapLoadState::LoadingRegional;
+            self.status = "正在更新底图…".into();
+        } else {
+            self.state = BasemapLoadState::LoadingWorld;
+            self.status = "正在加载世界底图…".into();
+        }
 
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
@@ -377,6 +374,7 @@ impl VectorBasemap {
                 continue;
             }
             changed = true;
+            self.paint_cache = None;
             match packet {
                 LoadPacket::World {
                     lods,
@@ -440,7 +438,7 @@ impl VectorBasemap {
     }
 
     pub fn paint(
-        &self,
+        &mut self,
         ui: &mut Ui,
         view: &ViewCtx,
         fill_land: bool,
@@ -453,6 +451,13 @@ impl VectorBasemap {
         let rect = view.rect;
         let zoom = view.zoom;
         let painter = ui.painter_at(rect);
+        let cache_key = paint_cache_key(view, fill_land, style, self.gen);
+        if let Some(c) = self.paint_cache.as_ref() {
+            if c.key == cache_key {
+                painter.extend(c.shapes.clone());
+                return;
+            }
+        }
         let mut shapes = Vec::with_capacity(512);
 
         if view.mode.is_globe() {
@@ -538,6 +543,10 @@ impl VectorBasemap {
                     0.0,
                 );
             }
+            self.paint_cache = Some(VectorPaintCache {
+                key: cache_key,
+                shapes: shapes.clone(),
+            });
             painter.extend(shapes);
             return;
         }
@@ -636,8 +645,31 @@ impl VectorBasemap {
             }
         }
 
+        self.paint_cache = Some(VectorPaintCache {
+            key: cache_key,
+            shapes: shapes.clone(),
+        });
         painter.extend(shapes);
     }
+}
+
+fn paint_cache_key(view: &ViewCtx, fill_land: bool, style: VectorStyle, gen: u64) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    gen.hash(&mut h);
+    view.center_lon.to_bits().hash(&mut h);
+    view.center_lat.to_bits().hash(&mut h);
+    view.zoom.to_bits().hash(&mut h);
+    (view.rect.width() as i32).hash(&mut h);
+    (view.rect.height() as i32).hash(&mut h);
+    (view.rect.min.x as i32).hash(&mut h);
+    (view.rect.min.y as i32).hash(&mut h);
+    fill_land.hash(&mut h);
+    style.land_fill.to_array().hash(&mut h);
+    style.world_border.to_array().hash(&mut h);
+    style.admin_border.to_array().hash(&mut h);
+    std::mem::discriminant(&view.mode).hash(&mut h);
+    h.finish()
 }
 
 fn paint_rings(

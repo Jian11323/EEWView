@@ -871,6 +871,43 @@ impl AppSnapshot {
         Some((lon, lat, zoom, key))
     }
 
+    /// 选中指定台网当前震度/烈度最大的测站，并返回镜头目标。
+    /// `network` 为 `kmoni` / `snet` / `kma`；`all` 表示全网。
+    pub fn focus_max_station(&mut self, network: &str) -> Option<(f64, f64, f64)> {
+        let prefix = format!("{network}:");
+        let best = self
+            .stations
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                if network == "all" {
+                    true
+                } else {
+                    s.id.starts_with(&prefix)
+                }
+            })
+            .filter(|(_, s)| {
+                s.latitude.abs() > 1e-6 || s.longitude.abs() > 1e-6
+            })
+            .max_by(|(_, a), (_, b)| {
+                let ka = station_rank_key(a);
+                let kb = station_rank_key(b);
+                ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        let (idx, s) = best?;
+        let lon = s.longitude;
+        let lat = s.latitude;
+        let report = s.as_header_report();
+        self.tab = SidebarTab::Station;
+        self.selection = Some(ListSelection {
+            tab: SidebarTab::Station,
+            index: idx,
+        });
+        self.active = Some(report);
+        self.overlay_mode = OverlayMode::Wave;
+        Some((lon, lat, 10.0))
+    }
+
     /// 用一帧有感测站快照替换列表（按震度降序，上限 120）
     pub fn replace_stations(&mut self, stations: Vec<StationSample>) {
         self.merge_stations("default", stations);
@@ -955,6 +992,14 @@ impl AppSnapshot {
 }
 
 /// 可作为地图波圈绘制的预警（非测站/速报头、未取消、有坐标）。
+/// 台网内「最大」排序键：烈度用等级，震度用計測值。
+fn station_rank_key(s: &StationSample) -> f64 {
+    match s.intensity_kind {
+        IntensityKind::CnIntensity => s.intensity_level as f64,
+        IntensityKind::JmaShindo => s.instrumental,
+    }
+}
+
 pub fn is_wave_candidate(e: &EewReport) -> bool {
     !e.is_cancel
         && !e.event_id.starts_with("station:")

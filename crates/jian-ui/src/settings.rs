@@ -357,8 +357,9 @@ impl SettingsSession {
             });
 
         // 定死尺寸：禁止内容/avail 反馈抬升（先长高再拉宽的根因）
-        let max_w = (screen.width() - 48.0).clamp(400.0, 1100.0);
-        let max_h = (screen.height() - 48.0).clamp(320.0, 720.0);
+        // 留边更大，避免小屏下窗体贴边/内容被系统标题栏裁切
+        let max_w = (screen.width() * 0.92).clamp(360.0, 1100.0);
+        let max_h = (screen.height() * 0.88).clamp(280.0, 680.0);
         let win_w = 960.0_f32.min(max_w);
         let win_h = 600.0_f32.min(max_h);
 
@@ -755,8 +756,10 @@ fn draw_main(
             );
             paint_fade_rule(ui, head, 14.0);
 
+            let scroll_h = (body_h - HEADER_H - 4.0).max(64.0);
             ScrollArea::vertical()
                 .auto_shrink([false, false])
+                .max_height(scroll_h)
                 .id_salt("settings_body")
                 .show(ui, |ui| {
                     // 只限宽，不把 available 写成 min（避免窗体逐帧加宽）

@@ -329,8 +329,8 @@ fn idle_repaint_ms(perf: &jian_config::PerformanceConfig, busy: bool) -> u64 {
     }
     match perf.profile.to_ascii_lowercase().as_str() {
         "extreme" => perf.repaint_interval_ms(),
-        "eco" => 250,  // ~4 fps
-        _ => 120,      // ~8 fps（normal）
+        "eco" => 333,  // ~3 fps
+        _ => 200,      // ~5 fps（normal）；矢量缓存命中时进一步降 CPU
     }
 }
 

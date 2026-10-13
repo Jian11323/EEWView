@@ -50,6 +50,7 @@ pub fn spawn(tx: NetTx, cfg: WolfxSourceConfig) -> Vec<JoinHandle<()>> {
                         periodic_texts: vec!["ping".into()],
                         periodic_secs: 30,
                         backoff_max_secs: 60,
+                        stale_secs: 0,
                     },
                     move |tx, text| {
                         if is_cwa {

@@ -1,7 +1,7 @@
 //! 官方震度/烈度色。
 //!
-//! 震度：气象厅《配色に関する設定指針》表２－２（令和2年7月）。
-//! 烈度：按 GB/T 38226—2019 附录摘录（见 assets/palette/cn_intensity.toml）。
+//! 震度計測色带与中国烈度色对齐 EEWCN（`getNiedStationColor` / `getIntColors`）。
+//! 离散 JMA 震度阶级色仍参考气象厅配色指针；中国烈度见 assets/palette/cn_intensity.toml。
 
 use crate::IntensityKind;
 
@@ -38,21 +38,21 @@ pub fn jma_shindo_rgb(level: u8) -> Rgb {
     }
 }
 
-/// 中国烈度 1–12（RGB 以 palette 文件与国标附录为准）
+/// 中国烈度 1–12（对齐 EEWCN `getIntColors`）
 pub fn cn_intensity_rgb(level: u8) -> Rgb {
     match level.clamp(1, 12) {
-        1 => Rgb::new(200, 220, 255),
-        2 => Rgb::new(160, 200, 255),
-        3 => Rgb::new(100, 180, 255),
-        4 => Rgb::new(80, 200, 120),
-        5 => Rgb::new(255, 255, 100),
-        6 => Rgb::new(255, 200, 50),
-        7 => Rgb::new(255, 140, 0),
-        8 => Rgb::new(255, 60, 0),
-        9 => Rgb::new(200, 0, 40),
-        10 => Rgb::new(140, 0, 80),
-        11 => Rgb::new(100, 0, 100),
-        _ => Rgb::new(60, 0, 60),
+        1 => Rgb::new(0x9b, 0xc4, 0xe4),
+        2 => Rgb::new(0x00, 0xa0, 0xf1),
+        3 => Rgb::new(0x00, 0x62, 0xf5),
+        4 => Rgb::new(0x46, 0xbc, 0x67),
+        5 => Rgb::new(0x12, 0x99, 0x4e),
+        6 => Rgb::new(0xf6, 0xb7, 0x2d),
+        7 => Rgb::new(0xff, 0x84, 0x00),
+        8 => Rgb::new(0xfa, 0x51, 0x51),
+        9 => Rgb::new(0xf4, 0x44, 0x0d),
+        10 => Rgb::new(0xff, 0x00, 0x0d),
+        11 => Rgb::new(0xc2, 0x00, 0x07),
+        _ => Rgb::new(0xfd, 0x2f, 0xc2),
     }
 }
 
@@ -63,30 +63,30 @@ pub fn color_for(kind: IntensityKind, level: u8) -> Rgb {
     }
 }
 
-/// 要石 / NIED 計測震度色带（level 0–20，对应约 -3～7）。
-/// `#0003cf` 为 -3 深蓝。
+/// EEWCN / NIED 計測震度色带（level 0–20，对应约 -3～7）。
+/// 对齐 `MapStationLogic.js` `getNiedStationColor`。
 const INSTRUMENTAL_BAND: [Rgb; 21] = [
-    Rgb::new(0x00, 0x03, 0xcf),
-    Rgb::new(0x00, 0x14, 0xda),
-    Rgb::new(0x00, 0x37, 0xf0),
-    Rgb::new(0x00, 0x6c, 0xdc),
-    Rgb::new(0x00, 0xb3, 0xa2),
-    Rgb::new(0x12, 0xdc, 0x72),
-    Rgb::new(0x31, 0xf0, 0x49),
-    Rgb::new(0x64, 0xfb, 0x2a),
-    Rgb::new(0x9d, 0xfe, 0x17),
-    Rgb::new(0xcc, 0xff, 0x09),
-    Rgb::new(0xeb, 0xff, 0x03),
-    Rgb::new(0xff, 0xf5, 0x00),
-    Rgb::new(0xff, 0xe5, 0x00),
-    Rgb::new(0xff, 0xca, 0x00),
-    Rgb::new(0xff, 0xa6, 0x00),
+    Rgb::new(0x97, 0xb7, 0xcc),
+    Rgb::new(0x90, 0xb3, 0xca),
+    Rgb::new(0x89, 0xaf, 0xc8),
+    Rgb::new(0x71, 0xa2, 0xcb),
+    Rgb::new(0x5e, 0xa7, 0xac),
+    Rgb::new(0x38, 0xa4, 0x77),
+    Rgb::new(0x0f, 0xb0, 0x2b),
+    Rgb::new(0xf4, 0xe2, 0x00),
+    Rgb::new(0xfb, 0xc3, 0x00),
+    Rgb::new(0xff, 0xaf, 0x00),
+    Rgb::new(0xff, 0x99, 0x00),
     Rgb::new(0xff, 0x7e, 0x00),
-    Rgb::new(0xff, 0x59, 0x00),
-    Rgb::new(0xfd, 0x35, 0x00),
-    Rgb::new(0xf8, 0x11, 0x00),
-    Rgb::new(0xe5, 0x00, 0x00),
-    Rgb::new(0xbd, 0x00, 0x00),
+    Rgb::new(0xff, 0x62, 0x00),
+    Rgb::new(0xfc, 0x4c, 0x02),
+    Rgb::new(0xf5, 0x36, 0x05),
+    Rgb::new(0xf1, 0x15, 0x20),
+    Rgb::new(0xed, 0x00, 0x47),
+    Rgb::new(0xe3, 0x00, 0x71),
+    Rgb::new(0xdc, 0x00, 0x9c),
+    Rgb::new(0xc9, 0x00, 0xba),
+    Rgb::new(0xb6, 0x00, 0xd7),
 ];
 
 /// 計測震度 → 色带档位 0–20（对齐要石 `getLevelFromInstShindo`）。

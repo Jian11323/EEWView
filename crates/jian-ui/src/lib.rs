@@ -19,7 +19,7 @@ use jian_core::{
     prefer_intensity_scale, AppSnapshot, EewReport, IntensityKind, ListSelection, OverlayMode,
     SidebarTab,
 };
-use jian_map::{zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, MapViewport, VectorStyle, ProjectionMode};
+use jian_map::{zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, MapViewport, VectorStyle, ProjectionMode, OCEAN};
 use jian_travel::{max_s_wave_spread_km, s_wave_still_spreading_to, TravelEngine, Wave};
 use std::path::Path;
 use theme::{ThemePalette, UiTheme};
@@ -162,7 +162,8 @@ impl MainShell {
         let ui_theme = UiTheme::from_config(&cfg.ui.theme);
         ui_theme.apply_egui(ctx);
         let p = ui_theme.palette();
-        self.map.set_ocean_fill(p.map_bg);
+        // 暗色：要石海洋 #202124；亮色：主题 map_bg（避免纯黑闪底）
+        self.map.set_ocean_fill(if ui_theme.is_light() { p.map_bg } else { OCEAN });
         self.map
             .set_vector_style(VectorStyle::for_theme(&cfg.ui.theme));
 
@@ -189,9 +190,17 @@ impl MainShell {
             ctx.request_repaint_after(std::time::Duration::from_millis(ms));
         }
 
-        // SidePanel 保证侧栏命中
+        // SidePanel：小窗优先保地图宽度，侧栏可缩到下限
         let screen_w = ctx.screen_rect().width();
-        let sidebar_w = 280.0_f32.min(screen_w * 0.32).max(234.0);
+        const MAP_MIN_W: f32 = 360.0;
+        const SIDE_IDEAL: f32 = 280.0;
+        const SIDE_MIN: f32 = 168.0;
+        let sidebar_w = if screen_w < MAP_MIN_W + SIDE_MIN {
+            (screen_w * 0.36).clamp(140.0, SIDE_MIN)
+        } else {
+            let cap = (screen_w - MAP_MIN_W).min(SIDE_IDEAL);
+            cap.min(screen_w * 0.28).max(SIDE_MIN)
+        };
         let mut side_action = None;
 
         egui::SidePanel::right("eew_sidebar")
@@ -305,7 +314,12 @@ impl MainShell {
                 }
                 draw_event_header(ui, &p, snap, scale.as_str(), &self.intensity_icons, travel);
                 draw_tsunami_banner(ui, &p, snap, travel);
-                draw_realtime_intensity_card(ui, &p, snap, &self.intensity_icons);
+                if let Some(net) = draw_realtime_intensity_card(ui, &p, snap) {
+                    if let Some((lon, lat, zoom)) = snap.focus_max_station(net) {
+                        self.map.fly_to(lon, lat, Some(zoom), 0.7);
+                        self.map.user_camera_override = true;
+                    }
+                }
                 if cfg.ui.show_legend {
                     draw_legend_bar(ui, &p);
                 }
@@ -869,32 +883,39 @@ fn draw_tsunami_banner(
         });
 }
 
-/// 地图右上角实时震度卡片（对齐要石 sourceMaxCard：网名 / 計測值 / 时刻）。
+/// 地图右上角实时震度/烈度卡片（对齐 EEWCN sourceMaxCard）。
+/// 点击卡片返回台网 key，供跳转到该网最大测站。
 fn draw_realtime_intensity_card(
     ui: &mut Ui,
     _p: &ThemePalette,
     snap: &AppSnapshot,
-    _icons: &IntensityIcons,
-) {
+) -> Option<&'static str> {
     if snap.stations.is_empty() {
-        return;
+        return None;
     }
-    let mut cards: Vec<(&str, &str, f64, i64)> = Vec::new();
+    // (key, label, max_value, is_kma_mmi, ts)
+    let mut cards: Vec<(&'static str, &'static str, f64, bool, i64)> = Vec::new();
     for (key, label) in [("kmoni", "Kmoni"), ("snet", "S-Net"), ("kma", "KMA")] {
-        let mut max_inst = -99.0_f64;
+        let mut max_v = -99.0_f64;
         let mut any = false;
+        let is_kma = key == "kma";
         for s in &snap.stations {
             if !s.id.starts_with(&format!("{key}:")) {
                 continue;
             }
             any = true;
-            if s.instrumental > max_inst {
-                max_inst = s.instrumental;
+            let v = if is_kma {
+                s.intensity_level as f64
+            } else {
+                s.instrumental
+            };
+            if v > max_v {
+                max_v = v;
             }
         }
         if any {
             let ts = snap.station_updated_ms.get(key).copied().unwrap_or(0);
-            cards.push((key, label, max_inst, ts));
+            cards.push((key, label, max_v, is_kma, ts));
         }
     }
     if cards.is_empty() {
@@ -909,15 +930,13 @@ fn draw_realtime_intensity_card(
             .copied()
             .max()
             .unwrap_or(0);
-        cards.push(("all", "NIED", max_inst, ts));
+        cards.push(("all", "NIED", max_inst, false, ts));
     }
 
-    const CARD_W: f32 = 72.0;
-    // 与左上预警框（72 烈度块 + 边距）同顶、接近同高
+    const CARD_W: f32 = 76.0;
     const CARD_H: f32 = 88.0;
     let gap = 6.0_f32;
     let now_ms = chrono::Utc::now().timestamp_millis();
-    // 超过该间隔未刷新视为测站 API 断开（原版 NIED ~0.8s；WS 心跳略宽）
     const STALE_MS: i64 = 8_000;
     let total_w = CARD_W * cards.len() as f32 + gap * (cards.len().saturating_sub(1) as f32);
     let top_right = ui.max_rect().right_top() + Vec2::new(-12.0, OVERLAY_TOP_Y);
@@ -925,77 +944,103 @@ fn draw_realtime_intensity_card(
         egui::pos2(top_right.x - total_w.max(72.0), top_right.y),
         Vec2::new(total_w.max(72.0), CARD_H),
     );
+    let mut clicked: Option<&'static str> = None;
     overlay_child(ui, "rt_intensity_card", rect, |ui| {
-            ui.set_min_size(Vec2::new(total_w, CARD_H));
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = gap;
-                for (k, label, inst, ts) in &cards {
-                    let value = if *inst >= -3.0 {
-                        jian_core::instrumental_half_step_text(*inst)
+        ui.set_min_size(Vec2::new(total_w, CARD_H));
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for (k, label, val, is_kma, ts) in &cards {
+                let (value, value_color) = if *is_kma {
+                    if *val >= 1.0 {
+                        let lv = (*val).round().clamp(1.0, 12.0) as u8;
+                        let rgb = jian_core::palette::cn_intensity_rgb(lv);
+                        (format!("{lv}"), Color32::from_rgb(rgb.r, rgb.g, rgb.b))
                     } else {
-                        "-".into()
-                    };
-                    let rgb = jian_core::instrumental_rgb(*inst);
-                    let value_color = if *inst >= -3.0 {
-                        Color32::from_rgb(rgb.r, rgb.g, rgb.b)
-                    } else {
-                        Color32::from_rgb(0x66, 0x66, 0x66)
-                    };
-                    let time_text = if *ts > 0 {
-                        format_clock_hms(*ts)
-                    } else {
-                        "--:--:--".into()
-                    };
-                    // S-Net 约每分钟一帧，断线阈值放宽到 90s
-                    let stale = if *k == "snet" { 90_000_i64 } else { STALE_MS };
-                    let connected = *ts > 0 && (now_ms - *ts).abs() <= stale;
-                    let time_color = if connected {
-                        Color32::WHITE
-                    } else {
-                        Color32::from_rgb(0xFF, 0x44, 0x44)
-                    };
+                        ("-".into(), Color32::from_rgb(0x66, 0x66, 0x66))
+                    }
+                } else if *val >= -3.0 {
+                    let rgb = jian_core::instrumental_rgb(*val);
+                    (
+                        jian_core::instrumental_half_step_text(*val),
+                        Color32::from_rgb(rgb.r, rgb.g, rgb.b),
+                    )
+                } else {
+                    ("-".into(), Color32::from_rgb(0x66, 0x66, 0x66))
+                };
+                let time_text = if *ts > 0 {
+                    format_clock_hms(*ts)
+                } else {
+                    "--:--:--".into()
+                };
+                let stale = if *k == "snet" { 90_000_i64 } else { STALE_MS };
+                let connected = *ts > 0 && (now_ms - *ts).abs() <= stale;
+                let time_color = if connected {
+                    Color32::WHITE
+                } else {
+                    Color32::from_rgb(0xFF, 0x44, 0x44)
+                };
 
-                    let (r, _) =
-                        ui.allocate_exact_size(Vec2::new(CARD_W, CARD_H), Sense::hover());
-                    let painter = ui.painter();
-                    painter.rect_filled(r, 6.0, Color32::from_rgb(0x1A, 0x1A, 0x1A));
-                    let head = egui::Rect::from_min_size(r.min, Vec2::new(r.width(), 20.0));
-                    painter.rect_filled(head, 0.0, Color32::from_rgb(0x2D, 0x2D, 0x2D));
-                    painter.rect_stroke(
-                        r,
-                        6.0,
-                        Stroke::new(1.0_f32, Color32::from_rgb(0x40, 0x40, 0x40)),
-                        egui::StrokeKind::Inside,
-                    );
-                    painter.hline(
-                        r.x_range(),
-                        head.bottom(),
-                        Stroke::new(1.0_f32, Color32::from_rgb(0x40, 0x40, 0x40)),
-                    );
-                    painter.text(
-                        head.center(),
-                        egui::Align2::CENTER_CENTER,
-                        *label,
-                        FontId::proportional(12.0),
-                        Color32::WHITE,
-                    );
-                    painter.text(
-                        egui::pos2(r.center().x, head.bottom() + 22.0),
-                        egui::Align2::CENTER_CENTER,
-                        value,
-                        FontId::proportional(22.0),
-                        value_color,
-                    );
-                    painter.text(
-                        egui::pos2(r.center().x, r.bottom() - 14.0),
-                        egui::Align2::CENTER_CENTER,
-                        time_text,
-                        FontId::proportional(12.0),
-                        time_color,
-                    );
+                let (r, resp) =
+                    ui.allocate_exact_size(Vec2::new(CARD_W, CARD_H), Sense::click());
+                if resp.clicked() {
+                    clicked = Some(*k);
                 }
-            });
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                let painter = ui.painter();
+                painter.rect_filled(r, 6.0, Color32::from_rgb(0x1A, 0x1A, 0x1A));
+                let head = egui::Rect::from_min_size(r.min, Vec2::new(r.width(), 20.0));
+                painter.rect_filled(head, 0.0, Color32::from_rgb(0x2D, 0x2D, 0x2D));
+                painter.rect_stroke(
+                    r,
+                    6.0,
+                    Stroke::new(1.0_f32, Color32::from_rgb(0x40, 0x40, 0x40)),
+                    egui::StrokeKind::Inside,
+                );
+                painter.hline(
+                    r.x_range(),
+                    head.bottom(),
+                    Stroke::new(1.0_f32, Color32::from_rgb(0x40, 0x40, 0x40)),
+                );
+                painter.text(
+                    head.center(),
+                    egui::Align2::CENTER_CENTER,
+                    *label,
+                    FontId::proportional(12.0),
+                    Color32::WHITE,
+                );
+                let body = egui::Rect::from_min_max(
+                    egui::pos2(r.left(), head.bottom()),
+                    egui::pos2(r.right(), r.bottom() - 18.0),
+                );
+                // 加粗：双层叠绘
+                let value_font = FontId::new(28.0, FontFamily::Proportional);
+                painter.text(
+                    body.center() + Vec2::new(0.35, 0.0),
+                    egui::Align2::CENTER_CENTER,
+                    &value,
+                    value_font.clone(),
+                    value_color,
+                );
+                painter.text(
+                    body.center(),
+                    egui::Align2::CENTER_CENTER,
+                    &value,
+                    value_font,
+                    value_color,
+                );
+                painter.text(
+                    egui::pos2(r.center().x, r.bottom() - 10.0),
+                    egui::Align2::CENTER_CENTER,
+                    time_text,
+                    FontId::proportional(11.0),
+                    time_color,
+                );
+            }
         });
+    });
+    clicked
 }
 
 
@@ -1011,7 +1056,7 @@ fn format_clock_hms(ms: i64) -> String {
 
 
 fn draw_legend_bar(ui: &mut Ui, p: &ThemePalette) {
-    // 左：中国烈度 I–XII；中：要石計測色带；右：震度/計測 -3～7（-3 深蓝 #0003cf）
+    // 左：中国烈度 I–XII（EEWCN）；中：計測色带（EEWCN getNiedStationColor）；右：震度 -3～7
     const ROW: f32 = 18.0;
     const LEFT_W: f32 = 28.0;
     const BAR_W: f32 = 16.0;
@@ -1111,10 +1156,13 @@ fn draw_countdown_hud(
         None
     };
 
-    // 贴地图视口右下角
+    // 贴地图视口右下角：高度随内容，自底向上排，避免单行北京时间悬空
     let br = map_rect.right_bottom() + Vec2::new(-4.0, -4.0);
     let hud_w = 280.0_f32;
-    let hud_h = if snap.countdown_s.is_some() { 148.0 } else { 78.0 };
+    let clock_block_h = 36.0_f32;
+    let n_clocks = 1 + usize::from(show_nied);
+    let countdown_h = if snap.countdown_s.is_some() { 72.0 } else { 0.0 };
+    let hud_h = countdown_h + clock_block_h * n_clocks as f32 + 8.0;
     let rect = egui::Rect::from_min_size(
         egui::pos2(br.x - hud_w, br.y - hud_h),
         Vec2::new(hud_w, hud_h),
@@ -1122,70 +1170,72 @@ fn draw_countdown_hud(
     overlay_child(ui, "countdown_hud", rect, |ui| {
             ui.spacing_mut().window_margin = Margin::ZERO;
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
-            // 整列从右侧往左排，避免 horizontal 撑满后内容靠左
-            ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
-                if let Some(sec) = snap.countdown_s {
-                    let title = if sec > 0 { "S波即将到达" } else { "S波已到达" };
-                    outlined_label(ui, title, Color32::WHITE, 14.0, false);
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(ui.available_width(), 44.0),
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
-                            let mm = sec / 60;
-                            let ss = sec % 60;
-                            let time_txt = format!("{mm}:{ss:02}");
-                            let time_color = if sec > 10 {
-                                Color32::from_rgb(0xFF, 0xEB, 0x3B)
-                            } else {
-                                p.danger
-                            };
-                            Frame::NONE
-                                .fill(Color32::from_rgba_unmultiplied(0x66, 0x66, 0x66, 0x80))
-                                .inner_margin(Margin::symmetric(6, 2))
-                                .show(ui, |ui| {
-                                    outlined_label(ui, &time_txt, time_color, 34.0, false);
-                                });
-                            let lv = snap.countdown_local_level;
-                            let label = if snap.countdown_local_text.is_empty() {
-                                if lv == 0 {
-                                    "0".into()
-                                } else {
-                                    lv.to_string()
-                                }
-                            } else {
-                                snap.countdown_local_text.clone()
-                            };
-                            let bg = if lv == 0 {
-                                Color32::from_rgb(0x2A, 0x2A, 0x2E)
-                            } else {
-                                rgb(color_for(snap.countdown_local_kind, lv))
-                            };
-                            let fg = intensity_fg(bg);
-                            let border = if lv == 0 {
-                                Stroke::new(1.0_f32, Color32::WHITE)
-                            } else {
-                                Stroke::NONE
-                            };
-                            Frame::NONE
-                                .fill(bg)
-                                .stroke(border)
-                                .inner_margin(Margin::symmetric(8, 2))
-                                .show(ui, |ui| {
-                                    ui.label(
-                                        RichText::new(label)
-                                            .color(fg)
-                                            .strong()
-                                            .size(34.0),
-                                    );
-                                });
-                        },
-                    );
-                    ui.add_space(6.0);
+            // 自底向上：时钟永远贴底；倒计时块用嵌套 top_down 保持标题在上
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::Max), |ui| {
+                if let Some(jst) = jst_clock.as_ref() {
+                    draw_tz_clock_block(ui, "东京时间", jst);
                 }
                 draw_tz_clock_block(ui, "北京时间", &clock);
-                if let Some(jst) = jst_clock {
-                    draw_tz_clock_block(ui, "东京时间", &jst);
+                if let Some(sec) = snap.countdown_s {
+                    ui.add_space(6.0);
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+                        let title = if sec > 0 { "S波即将到达" } else { "S波已到达" };
+                        outlined_label(ui, title, Color32::WHITE, 14.0, false);
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(ui.available_width(), 44.0),
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                let mm = sec / 60;
+                                let ss = sec % 60;
+                                let time_txt = format!("{mm}:{ss:02}");
+                                let time_color = if sec > 10 {
+                                    Color32::from_rgb(0xFF, 0xEB, 0x3B)
+                                } else {
+                                    p.danger
+                                };
+                                Frame::NONE
+                                    .fill(Color32::from_rgba_unmultiplied(0x66, 0x66, 0x66, 0x80))
+                                    .inner_margin(Margin::symmetric(6, 2))
+                                    .show(ui, |ui| {
+                                        outlined_label(ui, &time_txt, time_color, 34.0, false);
+                                    });
+                                let lv = snap.countdown_local_level;
+                                let label = if snap.countdown_local_text.is_empty() {
+                                    if lv == 0 {
+                                        "0".into()
+                                    } else {
+                                        lv.to_string()
+                                    }
+                                } else {
+                                    snap.countdown_local_text.clone()
+                                };
+                                let bg = if lv == 0 {
+                                    Color32::from_rgb(0x2A, 0x2A, 0x2E)
+                                } else {
+                                    rgb(color_for(snap.countdown_local_kind, lv))
+                                };
+                                let fg = intensity_fg(bg);
+                                let border = if lv == 0 {
+                                    Stroke::new(1.0_f32, Color32::WHITE)
+                                } else {
+                                    Stroke::NONE
+                                };
+                                Frame::NONE
+                                    .fill(bg)
+                                    .stroke(border)
+                                    .inner_margin(Margin::symmetric(8, 2))
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            RichText::new(label)
+                                                .color(fg)
+                                                .strong()
+                                                .size(34.0),
+                                        );
+                                    });
+                            },
+                        );
+                    });
                 }
             });
         });
@@ -1347,17 +1397,30 @@ fn draw_sidebar(
                                         tab: SidebarTab::Station,
                                         index: i,
                                     });
-                                let col = if s.instrumental >= -3.0 {
-                                    let c = jian_core::instrumental_rgb(s.instrumental);
-                                    Color32::from_rgb(c.r, c.g, c.b)
-                                } else {
-                                    intensity_chip(
-                                        s.intensity_kind,
-                                        s.intensity_level,
-                                        &s.intensity_text,
-                                        scale,
-                                    )
-                                    .2
+                                let col = match s.intensity_kind {
+                                    IntensityKind::CnIntensity => {
+                                        if s.intensity_level >= 1 {
+                                            let c = jian_core::palette::cn_intensity_rgb(
+                                                s.intensity_level,
+                                            );
+                                            Color32::from_rgb(c.r, c.g, c.b)
+                                        } else {
+                                            Color32::from_rgb(0x66, 0x66, 0x66)
+                                        }
+                                    }
+                                    IntensityKind::JmaShindo if s.instrumental >= -3.0 => {
+                                        let c = jian_core::instrumental_rgb(s.instrumental);
+                                        Color32::from_rgb(c.r, c.g, c.b)
+                                    }
+                                    _ => {
+                                        intensity_chip(
+                                            s.intensity_kind,
+                                            s.intensity_level,
+                                            &s.intensity_text,
+                                            scale,
+                                        )
+                                        .2
+                                    }
                                 };
                                 if list_row(
                                     ui,
