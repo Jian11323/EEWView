@@ -27,7 +27,7 @@ SetCompressor /SOLID lzma
 !define MUI_ICON "${DIST_DIR}\assets\brand\app.ico"
 !define MUI_UNICON "${DIST_DIR}\assets\brand\app.ico"
 
-; 安装向导侧栏 / 欢迎页使用启动图（BMP，打包时由 splash_bg.png 生成）
+; Welcome/finish sidebar bitmap (generated from splash_bg.png at pack time)
 !define MUI_WELCOMEFINISHPAGE_BITMAP "${SPLASH_BMP}"
 !define MUI_UNWELCOMEFINISHPAGE_BITMAP "${SPLASH_BMP}"
 
