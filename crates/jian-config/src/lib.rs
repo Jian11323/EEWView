@@ -89,7 +89,7 @@ pub struct UiConfig {
     #[serde(default = "default_true")]
     pub show_wave_rings: bool,
     /// 绘制衰减估算烈度：优先市级区划三角形填色，无区划时回退同心环
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub show_intensity_rings: bool,
     /// 地图左下角烈度图例
     #[serde(default = "default_true")]
@@ -101,7 +101,7 @@ pub struct UiConfig {
     #[serde(default = "default_true")]
     pub show_typhoons: bool,
     /// 地图绘制活动断层（全球 GEM + 中国 CAFD）
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub show_faults: bool,
     /// 预报机构：全部 / 中国 / 中国台湾 / 日本 / 美国 / 中国香港
     #[serde(default = "default_typhoon_forecast_agency")]
@@ -654,11 +654,11 @@ impl Default for AppConfig {
                 auto_follow_eew: true,
                 auto_zoom_waves: true,
                 show_wave_rings: true,
-                show_intensity_rings: true,
+                show_intensity_rings: false,
                 show_legend: true,
                 show_volcanoes: true,
                 show_typhoons: true,
-                show_faults: true,
+                show_faults: false,
                 typhoon_forecast_agency: default_typhoon_forecast_agency(),
             },
             performance: PerformanceConfig::default(),

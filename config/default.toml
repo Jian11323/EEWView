@@ -18,11 +18,11 @@ always_on_top = false
 auto_follow_eew = true
 auto_zoom_waves = true
 show_wave_rings = true
-show_intensity_rings = true
+show_intensity_rings = false
 show_legend = true
 show_volcanoes = true
 show_typhoons = true
-show_faults = true
+show_faults = false
 # 全部 | 中国 | 中国台湾 | 日本 | 美国 | 中国香港
 typhoon_forecast_agency = "中国"
 
