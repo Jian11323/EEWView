@@ -20,8 +20,8 @@ use jian_core::{
 };
 use jian_core::palette::{cn_intensity_rgb, instrumental_band_rgb};
 use jian_map::{
-    zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, DetectBox, MapViewport, ProjectionMode,
-    VectorStyle, OCEAN,
+    zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, DetectBox, MapUiResult, MapViewport,
+    ProjectionMode, TyphoonHoverHit, VectorStyle, OCEAN,
 };
 use jian_travel::{max_s_wave_spread_km, s_wave_still_spreading_to, TravelEngine, Wave};
 use std::path::Path;
@@ -186,7 +186,7 @@ impl MainShell {
         let marker_owned = wave_owned.clone();
         // 演示样本：无有效发震时刻时用 map_elapsed 驱动波圈
         let sample_elapsed = self.map_elapsed % 120.0;
-        let mut map_click = None;
+        let mut map_ui = MapUiResult::default();
 
         // 波圈动画按目标帧率重绘，避免 uncapped request_repaint 拉高 CPU
         if show_waves && !wave_owned.is_empty() {
@@ -259,7 +259,7 @@ impl MainShell {
                 } else {
                     &[]
                 };
-                map_click = self.map.ui(
+                map_ui = self.map.ui(
                     ui,
                     snap.active.as_ref(),
                     &wave_for_map,
@@ -326,7 +326,15 @@ impl MainShell {
                 }
                 draw_event_header(ui, &p, snap, scale.as_str(), &self.intensity_icons, travel);
                 draw_tsunami_banner(ui, &p, snap, travel);
-                if let Some(net) = draw_realtime_intensity_card(ui, &p, snap) {
+                let station_card_bottom = draw_realtime_intensity_card(ui, &p, snap);
+                draw_typhoon_detail_below_stations(
+                    ui,
+                    &p,
+                    map_ui.typhoon_hover.as_ref(),
+                    typhoons_for_map,
+                    station_card_bottom.bottom_y,
+                );
+                if let Some(net) = station_card_bottom.clicked {
                     if let Some((lon, lat, zoom)) = snap.focus_max_station(net) {
                         self.map.fly_to_centered(lon, lat, Some(zoom), 0.7);
                         self.map.user_camera_override = true;
@@ -417,7 +425,7 @@ impl MainShell {
             }
         }
 
-        if let Some((lon, lat)) = map_click {
+        if let Some((lon, lat)) = map_ui.click {
             self.apply_map_pick(lon, lat);
         }
 
@@ -895,15 +903,222 @@ fn draw_tsunami_banner(
         });
 }
 
+
+/// 台风实况详情：固定在测站卡片下方，避免地图锚点浮层带尾巴。
+fn draw_typhoon_detail_below_stations(
+    ui: &mut Ui,
+    p: &ThemePalette,
+    hover: Option<&TyphoonHoverHit>,
+    typhoons: &[jian_core::TyphoonInfo],
+    station_bottom_y: f32,
+) {
+    let hit_owned;
+    let hit: Option<&TyphoonHoverHit> = if let Some(h) = hover {
+        Some(h)
+    } else if let Some(tf) = typhoons.first() {
+        let last = tf.points.last();
+        let time_text = last.map(|x| x.time_text.clone()).unwrap_or_default();
+        let strong = if tf.strong.is_empty() {
+            last.map(|x| x.strong.clone()).unwrap_or_default()
+        } else {
+            tf.strong.clone()
+        };
+        hit_owned = TyphoonHoverHit {
+            anchor: egui::pos2(0.0, 0.0),
+            id: tf.id.clone(),
+            name: tf.name.clone(),
+            strong,
+            power: if tf.power > 0 {
+                tf.power
+            } else {
+                last.map(|x| x.power).unwrap_or(0)
+            },
+            time_text,
+            longitude: tf.longitude,
+            latitude: tf.latitude,
+            speed_ms: last
+                .map(|x| x.speed_ms)
+                .filter(|&v| v > 0.0)
+                .unwrap_or(tf.wind_speed_ms),
+            pressure_hpa: last
+                .map(|x| x.pressure_hpa)
+                .filter(|&v| v > 0.0)
+                .unwrap_or(tf.pressure_hpa),
+            move_direction: last
+                .map(|x| x.move_direction.clone())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| tf.move_direction.clone()),
+            move_speed_kmh: last
+                .map(|x| x.move_speed_kmh)
+                .filter(|&v| v > 0.0)
+                .unwrap_or(tf.move_speed_kmh),
+            is_center: true,
+        };
+        Some(&hit_owned)
+    } else {
+        None
+    };
+    let Some(hit) = hit else {
+        return;
+    };
+
+    let time = format_typhoon_time_ui(&hit.time_text);
+    let header = if time.is_empty() {
+        format!("{} {}", hit.strong, hit.name)
+    } else {
+        format!("{} {}  {}", hit.strong, hit.name, time)
+    };
+    let power = if hit.power > 0 {
+        format!("{}级", hit.power)
+    } else {
+        "\u{2014}".into()
+    };
+    let speed = if hit.speed_ms > 0.0 {
+        format!("{:.0} m/s ({power})", hit.speed_ms)
+    } else {
+        format!("\u{2014} ({power})")
+    };
+    let pressure = if hit.pressure_hpa > 0.0 {
+        format!("{:.0} hPa", hit.pressure_hpa)
+    } else {
+        "\u{2014}".into()
+    };
+    let mv = if hit.move_direction.is_empty() && hit.move_speed_kmh <= 0.0 {
+        "\u{2014}".into()
+    } else {
+        format!(
+            "{} ({:.0} KM/H)",
+            if hit.move_direction.is_empty() {
+                "\u{2014}"
+            } else {
+                hit.move_direction.as_str()
+            },
+            hit.move_speed_kmh
+        )
+    };
+    let lines = [
+        format!("编号: {}", hit.id),
+        format!(
+            "中心位置: ({:.1}\u{00b0}N, {:.1}\u{00b0}E)",
+            hit.latitude, hit.longitude
+        ),
+        format!("最大风速: {speed}"),
+        format!("中心气压: {pressure}"),
+        format!("移动速度: {mv}"),
+    ];
+
+    const CARD_W: f32 = 248.0;
+    let pad = 8.0_f32;
+    let line_h = 16.0_f32;
+    let header_h = 26.0_f32;
+    let body_h = pad + line_h * lines.len() as f32 + 4.0;
+    let total_h = header_h + 2.0 + body_h;
+    let top_right = ui.max_rect().right_top() + Vec2::new(-12.0, 0.0);
+    let origin = egui::pos2(top_right.x - CARD_W, station_bottom_y + 8.0);
+    let rect = egui::Rect::from_min_size(origin, Vec2::new(CARD_W, total_h));
+    let (r, g, b) = jian_core::typhoon_color_rgb(&hit.strong, hit.power);
+    overlay_child(ui, "typhoon_detail_card", rect, |ui| {
+        let painter = ui.painter();
+        let header_rect = egui::Rect::from_min_size(rect.min, Vec2::new(CARD_W, header_h));
+        let body_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.min.x, header_rect.bottom() + 2.0),
+            Vec2::new(CARD_W, body_h),
+        );
+        painter.rect_filled(header_rect, 4.0, Color32::from_rgb(r, g, b).gamma_multiply(0.85));
+        painter.rect_stroke(
+            header_rect,
+            4.0,
+            Stroke::new(1.0_f32, Color32::from_rgb(0xAA, 0xAA, 0xBB)),
+            egui::StrokeKind::Outside,
+        );
+        painter.rect_filled(
+            body_rect,
+            4.0,
+            Color32::from_rgba_unmultiplied(0x12, 0x14, 0x1C, 0xF0),
+        );
+        painter.rect_stroke(
+            body_rect,
+            4.0,
+            Stroke::new(1.0_f32, Color32::from_rgb(0x44, 0x48, 0x58)),
+            egui::StrokeKind::Outside,
+        );
+        painter.text(
+            egui::pos2(header_rect.min.x + pad, header_rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            header,
+            FontId::proportional(13.0),
+            Color32::WHITE,
+        );
+        let mut y = body_rect.min.y + pad * 0.6;
+        for line in &lines {
+            painter.text(
+                egui::pos2(body_rect.min.x + pad, y),
+                egui::Align2::LEFT_TOP,
+                line,
+                FontId::proportional(12.0),
+                p.text,
+            );
+            y += line_h;
+        }
+    });
+}
+
+fn format_typhoon_time_ui(time_str: &str) -> String {
+    let bytes = time_str.as_bytes();
+    let mut i = 0usize;
+    while i + 10 <= bytes.len() {
+        if bytes[i].is_ascii_digit()
+            && bytes[i + 1].is_ascii_digit()
+            && bytes[i + 2].is_ascii_digit()
+            && bytes[i + 3].is_ascii_digit()
+            && (bytes[i + 4] == b'-' || bytes[i + 4] == b'/')
+        {
+            let day = std::str::from_utf8(&bytes[i + 8..i + 10])
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok());
+            let mut j = i + 10;
+            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'T') {
+                j += 1;
+            }
+            if let Some(day) = day {
+                if j + 2 <= bytes.len()
+                    && bytes[j].is_ascii_digit()
+                    && bytes[j + 1].is_ascii_digit()
+                {
+                    if let Ok(hour) = std::str::from_utf8(&bytes[j..j + 2])
+                        .unwrap_or("")
+                        .parse::<u32>()
+                    {
+                        return format!("{day}日{hour}时");
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    time_str.to_string()
+}
+
+/// 测站网实时震度卡片布局结果。
+struct StationCardLayout {
+    clicked: Option<&'static str>,
+    /// 卡片底边 Y；无卡片时为顶栏下方起点，供台风详情承接。
+    bottom_y: f32,
+}
+
 /// 地图右上角实时震度/烈度卡片（对齐 EEWCN sourceMaxCard）。
 /// 点击卡片返回台网 key，供跳转到该网最大测站。
 fn draw_realtime_intensity_card(
     ui: &mut Ui,
     _p: &ThemePalette,
     snap: &AppSnapshot,
-) -> Option<&'static str> {
+) -> StationCardLayout {
+    let top_y = ui.max_rect().right_top().y + OVERLAY_TOP_Y;
     if snap.stations.is_empty() {
-        return None;
+        return StationCardLayout {
+            clicked: None,
+            bottom_y: top_y,
+        };
     }
     // (key, label, max_value, is_kma_mmi, ts)
     let mut cards: Vec<(&'static str, &'static str, f64, bool, i64)> = Vec::new();
@@ -1052,7 +1267,10 @@ fn draw_realtime_intensity_card(
             }
         });
     });
-    clicked
+    StationCardLayout {
+        clicked,
+        bottom_y: rect.bottom(),
+    }
 }
 
 

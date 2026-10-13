@@ -20,6 +20,9 @@ auto_zoom_waves = true
 show_wave_rings = true
 show_legend = true
 show_volcanoes = true
+show_typhoons = true
+# 全部 | 中国 | 中国台湾 | 日本 | 美国 | 中国香港
+typhoon_forecast_agency = "中国"
 
 
 [performance]
@@ -170,3 +173,8 @@ ga = 0.0
 igepn = 0.0
 peru = 0.0
 other = 0.0
+
+[sources.typhoon]
+enabled = true
+url = "https://api.sismotide.top/get/typhoon.php"
+poll_secs = 15

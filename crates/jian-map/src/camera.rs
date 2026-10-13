@@ -132,6 +132,7 @@ fn lerp_lon(a: f64, b: f64, t: f64) -> f64 {
 
 /// 球体构图：西太平洋震中略向东偏，减少左侧欧亚/俄罗斯占比、留出美洲侧。
 /// `zoom` 越大越近；跟焦常用 9–13，故在 zoom < 11 即开始偏置。
+/// 仅日本—西太平洋带（约 125°E 以东）施加东偏；中国内陆（如固原 ~106°E）必须对准震中。
 pub fn globe_framed_center(lon: f64, lat: f64, zoom: f64) -> (f64, f64) {
     let lon = normalize_lon(lon);
     let lat = clamp_lat(lat);
@@ -139,8 +140,8 @@ pub fn globe_framed_center(lon: f64, lat: f64, zoom: f64) -> (f64, f64) {
         return (lon, lat);
     }
     let t = ((11.0 - zoom) / 8.0).clamp(0.0, 1.0);
-    // 东亚—西太平洋：震中偏左，镜头中心东移
-    if (95.0..170.0).contains(&lon) && (-10.0..60.0).contains(&lat) {
+    // 日本—西太平洋：震中偏左，镜头中心东移（不含中国内陆）
+    if (125.0..170.0).contains(&lon) && (-10.0..60.0).contains(&lat) {
         let bias = 12.0 + 20.0 * t; // 约 12°–32°
         return (normalize_lon(lon + bias), lat);
     }
@@ -269,4 +270,29 @@ pub fn fit_events(
         0.78,
     );
     Some((center_lon, center_lat, z))
+}
+
+
+#[cfg(test)]
+mod framed_center_tests {
+    use super::globe_framed_center;
+
+    #[test]
+    fn guyuan_stays_on_epicenter() {
+        let (lon, lat) = globe_framed_center(106.2, 36.0, 8.5);
+        assert!((lon - 106.2).abs() < 1e-9, "lon={lon}");
+        assert!((lat - 36.0).abs() < 1e-9, "lat={lat}");
+    }
+
+    #[test]
+    fn japan_gets_east_bias_when_zoomed_out() {
+        let (lon, _) = globe_framed_center(140.0, 35.0, 8.5);
+        assert!(lon > 140.0, "lon={lon}");
+    }
+
+    #[test]
+    fn near_zoom_no_bias() {
+        let (lon, _) = globe_framed_center(140.0, 35.0, 11.5);
+        assert!((lon - 140.0).abs() < 1e-9);
+    }
 }

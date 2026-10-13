@@ -14,8 +14,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use tracing::{info, warn};
 
-/// 海洋/缺数据底色（对齐 RhythmQuake / 要石 KA：#202124）
-pub const OCEAN: Color32 = Color32::from_rgb(0x20, 0x21, 0x24);
+/// 海洋底色（对齐 GlobalQuake `FeatureGeoPolygons.oceanColor` = rgb(5,20,30)）
+pub const OCEAN: Color32 = Color32::from_rgb(5, 20, 30);
 
 /// 矢量陆地 / 边界色（随界面主题切换）。
 #[derive(Debug, Clone, Copy)]
@@ -28,10 +28,10 @@ pub struct VectorStyle {
 impl VectorStyle {
     pub fn dark() -> Self {
         Self {
-            // 陆地灰 / 边界略亮，便于在黑海上分清区划
-            land_fill: Color32::from_rgb(0x4A, 0x4A, 0x4E),
-            world_border: Color32::from_rgb(0xC8, 0xC8, 0xCC),
-            admin_border: Color32::from_rgb(0xA8, 0xA8, 0xB0),
+            // 对齐 GQ：landColor(15,47,68) / borderColor(153,153,153)
+            land_fill: Color32::from_rgb(15, 47, 68),
+            world_border: Color32::from_rgb(153, 153, 153),
+            admin_border: Color32::from_rgb(130, 130, 130),
         }
     }
 
@@ -79,14 +79,14 @@ impl BasemapMode {
         }
     }
 
-    /// `auto`：亮色→地形瓦片；暗色→瓦片+矢量描边（陆地不再耳切填色，避免灰三角）。
+    /// `auto`：亮色→地形瓦片；暗色→矢量（GQ 风格：海洋底 + 陆地 Path 填色）。
     pub fn resolve(configured: &str, theme: &str) -> Self {
         match configured.trim().to_ascii_lowercase().as_str() {
             "auto" | "" => {
                 if theme.eq_ignore_ascii_case("light") {
                     Self::Tiles
                 } else {
-                    Self::Both
+                    Self::Vector
                 }
             }
             other => Self::parse(other),
@@ -461,11 +461,12 @@ impl VectorBasemap {
         let mut shapes = Vec::with_capacity(512);
 
         if view.mode.is_globe() {
+            // 收紧跨段阈值：过松会把地平线两侧顶点连成穿海弦线
             let max_jump_px = view
                 .horizon_radius()
-                .map(|r| r * 0.35)
-                .unwrap_or(80.0)
-                .max(40.0);
+                .map(|r| r * 0.14)
+                .unwrap_or(48.0)
+                .clamp(28.0, 96.0);
             // 球体：半球可见，不做横向副本
             let (min_lon, min_lat, max_lon, max_lat) = (-180.0, -90.0, 180.0, 90.0);
             if !self.world.fine.is_empty() {
@@ -519,6 +520,7 @@ impl VectorBasemap {
                 } else {
                     1.0_f32
                 };
+                // 球体近距：省界只描边不填色，避免与外轮廓叠填产生斑纹/灰块
                 paint_rings(
                     &mut shapes,
                     rings,
@@ -537,7 +539,7 @@ impl VectorBasemap {
                         },
                         style.admin_border,
                     ),
-                    fill_land,
+                    false,
                     zoom >= ZOOM_REGIONAL_FINE,
                     style.land_fill,
                     0.0,
@@ -688,16 +690,10 @@ fn paint_rings(
     land_fill: Color32,
     lon_shift: f64,
 ) {
-    // 先填后描。灰底在加载时预剖分，绘制时只投影；球体按三角形常驻裁剪，
-    // 不因整环有一点落在地平线后就整片丢弃。
+    // 先填后描。平面：屏幕 Path fill；球体：屏幕耳切 Mesh（PathShape 在透视下易斑纹/穿海三角）。
     if fill {
-        let mut land = egui::epaint::Mesh::default();
         for ring in rings {
-            if ring.tris.is_empty() {
-                continue;
-            }
-            if view.mode.is_globe() {
-                append_globe_fill_tris(&mut land, ring, view, land_fill);
+            if !ring.may_fill() {
                 continue;
             }
             if !ring_visible(
@@ -709,20 +705,25 @@ fn paint_rings(
             ) {
                 continue;
             }
-            if let Some(verts) = project_fill_vertices(ring, view, lon_shift) {
-                let base = land.vertices.len() as u32;
-                land.reserve_vertices(verts.len());
-                land.reserve_triangles(ring.tris.len() / 3);
-                for p in verts {
-                    land.colored_vertex(p, land_fill);
+            if let Some(pts) =
+                project_exterior_path_fill(ring, view, lon_shift, max_jump_px)
+            {
+                if pts.len() < 3 {
+                    continue;
                 }
-                for tri in ring.tris.chunks_exact(3) {
-                    land.add_triangle(base + tri[0], base + tri[1], base + tri[2]);
+                if view.mode.is_globe() {
+                    if let Some(mesh) = mesh_fill_screen_ring(&pts, land_fill, max_jump_px) {
+                        shapes.push(egui::Shape::mesh(mesh));
+                    }
+                } else {
+                    shapes.push(egui::Shape::Path(egui::epaint::PathShape {
+                        points: pts,
+                        closed: true,
+                        fill: land_fill,
+                        stroke: egui::epaint::PathStroke::NONE,
+                    }));
                 }
             }
-        }
-        if !land.indices.is_empty() {
-            shapes.push(land.into());
         }
     }
 
@@ -817,7 +818,8 @@ fn triangulate_ring(exterior: &[[f32; 2]], holes: &[Vec<[f32; 2]>]) -> Vec<u32> 
     }
 }
 
-/// 球体填色：优先用地平线内顶点；至少两顶点可见时用 raw 补第三点，减少美/俄球缘缺块。
+/// 球体耳切填色（已弃用：改用 `project_exterior_path_fill` 屏幕 Path）。
+#[allow(dead_code)]
 fn append_globe_fill_tris(
     land: &mut egui::epaint::Mesh,
     ring: &RingSet,
@@ -894,7 +896,108 @@ fn append_globe_fill_tris(
     }
 }
 
+/// 外环 → 屏幕闭合路径（GQ：投影后再 fill）。孔洞忽略（与 GQ 只取外环一致）。
+fn project_exterior_path_fill(
+    ring: &RingSet,
+    view: &ViewCtx,
+    lon_shift: f64,
+    max_jump_px: f32,
+) -> Option<Vec<Pos2>> {
+    if ring.exterior.len() < 3 {
+        return None;
+    }
+    if view.mode.is_globe() {
+        // 球体：全部顶点需落在地平线内，且相邻/首尾无大跳，否则跳过填色（只留描边）
+        let mut pts = Vec::with_capacity(ring.exterior.len());
+        let mut prev: Option<Pos2> = None;
+        for p in &ring.exterior {
+            let lon = p[0] as f64 + lon_shift;
+            let lat = p[1] as f64;
+            let Some(sp) = view.project(lon, lat) else {
+                return None;
+            };
+            if let Some(q) = prev {
+                if (sp - q).length() > max_jump_px {
+                    return None;
+                }
+            }
+            pts.push(sp);
+            prev = Some(sp);
+        }
+        if pts.len() < 3 {
+            return None;
+        }
+        if (pts[0] - pts[pts.len() - 1]).length() > max_jump_px {
+            return None;
+        }
+        // 周长过长相对包围盒 → 多半是透视畸变弦，宁可不填
+        let bb = Rect::from_points(&pts);
+        let peri: f32 = pts
+            .windows(2)
+            .map(|w| (w[1] - w[0]).length())
+            .sum::<f32>()
+            + (pts[0] - pts[pts.len() - 1]).length();
+        let diag = bb.width().hypot(bb.height()).max(1.0);
+        if peri > diag * 8.0 {
+            return None;
+        }
+        Some(pts)
+    } else {
+        project_ring_points_fill(&ring.exterior, view, lon_shift)
+    }
+}
+
+/// 屏幕环耳切填色；丢弃边长超过阈值的三角，避免穿海灰块。
+fn mesh_fill_screen_ring(
+    pts: &[Pos2],
+    fill: Color32,
+    max_edge_px: f32,
+) -> Option<egui::epaint::Mesh> {
+    if pts.len() < 3 {
+        return None;
+    }
+    let mut flat: Vec<f64> = Vec::with_capacity(pts.len() * 2);
+    for p in pts {
+        flat.push(p.x as f64);
+        flat.push(p.y as f64);
+    }
+    let idx = earcutr::earcut(&flat, &[], 2).ok()?;
+    if idx.len() < 3 {
+        return None;
+    }
+    let max_e2 = (max_edge_px * 1.25).powi(2);
+    let mut mesh = egui::epaint::Mesh::default();
+    mesh.reserve_vertices(pts.len());
+    mesh.reserve_triangles(idx.len() / 3);
+    for p in pts {
+        mesh.colored_vertex(*p, fill);
+    }
+    let mut any = false;
+    for tri in idx.chunks_exact(3) {
+        let i0 = tri[0] as u32;
+        let i1 = tri[1] as u32;
+        let i2 = tri[2] as u32;
+        let a = pts[tri[0]];
+        let b = pts[tri[1]];
+        let c = pts[tri[2]];
+        if (a - b).length_sq() > max_e2
+            || (b - c).length_sq() > max_e2
+            || (c - a).length_sq() > max_e2
+        {
+            continue;
+        }
+        mesh.add_triangle(i0, i1, i2);
+        any = true;
+    }
+    if any {
+        Some(mesh)
+    } else {
+        None
+    }
+}
+
 /// 平面填色：整环连续解缠 + `lon_shift`，避免按点 wrap 在视口边缘撕环丢填色。
+#[allow(dead_code)]
 fn project_fill_vertices(
     ring: &RingSet,
     view: &ViewCtx,

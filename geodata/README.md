@@ -36,3 +36,15 @@
 |------|------|
 | `world/cn_boundary_patches.geojson` | 历史补丁（运行时不加载；钓鱼岛已内置） |
 | `*/`、`日本/` | 中国地市 / 日本都道府县（无要石区划时） |
+
+## 含藏南调整的公开矢量（备选）
+
+球体模式不贴瓦片，始终用矢量轮廓。若需更换世界国界数据，可参考：
+
+| 资源 | 说明 |
+|------|------|
+| [jiangzihan/world-geo-json-zh](https://github.com/jiangzihan/world-geo-json-zh) | 基于 Natural Earth 1:50m，已按审图资料调整藏南、阿里、钓鱼岛、十段线；GeoJSON 可直接替换世界层 |
+| [Natural Earth China POV](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/) | 官方 1:10m Countries（China POV）国界视角包 |
+| [GMT CN-border](https://docs.gmt-china.org/latest/dataset-CN/CN-border/) | 国界/省界/十段线（GMT 格式，需自行转 GeoJSON） |
+
+当前仓库仍以要石 `cn.province` 西藏面叠盖世界层表达藏南；公开展示地图请自行确认审图要求。

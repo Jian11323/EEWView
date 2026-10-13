@@ -799,8 +799,9 @@ pub fn paint_typhoons(
             );
         }
 
-        // 预报路径
+        // 预报路径（「全部」时线更细、透明度更低，减轻多源叠线杂乱）
         if let Some(pt) = last {
+            let mut drawn = 0usize;
             for fc in &pt.forecasts {
                 if !show_all {
                     let norm = normalize_typhoon_agency(&fc.agency);
@@ -812,22 +813,25 @@ pub fn paint_typhoons(
                     continue;
                 }
                 let (r, g, bl) = jian_core::typhoon_forecast_agency_rgb(&fc.agency);
-                let stroke = Stroke::new(
-                    2.0_f32,
-                    Color32::from_rgba_unmultiplied(r, g, bl, 200),
-                );
-                for w in fc.points.windows(2) {
+                let (w, a) = if show_all {
+                    (1.35_f32, 150_u8)
+                } else {
+                    (2.0_f32, 210_u8)
+                };
+                let stroke = Stroke::new(w, Color32::from_rgba_unmultiplied(r, g, bl, a));
+                for seg in fc.points.windows(2) {
                     paint_geodesic_segment(
                         &painter,
                         view,
-                        w[0].longitude,
-                        w[0].latitude,
-                        w[1].longitude,
-                        w[1].latitude,
+                        seg[0].longitude,
+                        seg[0].latitude,
+                        seg[1].longitude,
+                        seg[1].latitude,
                         stroke,
                     );
                 }
-                if !show_all {
+                drawn += 1;
+                if !show_all || drawn >= 5 {
                     break;
                 }
             }
@@ -966,12 +970,8 @@ pub fn paint_typhoons(
         }
     }
 
-    if let Some((_, hit)) = best_hit {
-        paint_typhoon_detail(&painter, &hit);
-        Some(hit)
-    } else {
-        None
-    }
+    // 详情改由 UI 画在测站卡片下方，避免地图上带尾巴的浮层
+    best_hit.map(|(_, hit)| hit)
 }
 
 fn project_near(view: &ViewCtx, lon: f64, lat: f64) -> Option<Pos2> {
@@ -1050,110 +1050,6 @@ fn paint_typhoon_badge(
         Color32::WHITE,
     );
     full.expand(2.0)
-}
-
-fn paint_typhoon_detail(painter: &egui::Painter, hit: &TyphoonHoverHit) {
-    let time = format_typhoon_time(&hit.time_text);
-    let header = if time.is_empty() {
-        format!("{} {}", hit.strong, hit.name)
-    } else {
-        format!("{} {}  {}", hit.strong, hit.name, time)
-    };
-    let lat_s = format!("{:.1}", hit.latitude);
-    let lon_s = format!("{:.1}", hit.longitude);
-    let power = if hit.power > 0 {
-        format!("{}级", hit.power)
-    } else {
-        "—".into()
-    };
-    let speed = if hit.speed_ms > 0.0 {
-        format!("{:.0} m/s ({power})", hit.speed_ms)
-    } else {
-        format!("— ({power})")
-    };
-    let pressure = if hit.pressure_hpa > 0.0 {
-        format!("{:.0} hPa", hit.pressure_hpa)
-    } else {
-        "—".into()
-    };
-    let mv = if hit.move_direction.is_empty() && hit.move_speed_kmh <= 0.0 {
-        "—".into()
-    } else {
-        format!(
-            "{} ({:.0} KM/H)",
-            if hit.move_direction.is_empty() {
-                "—"
-            } else {
-                hit.move_direction.as_str()
-            },
-            hit.move_speed_kmh
-        )
-    };
-    let lines = [
-        format!("编号: {}", hit.id),
-        format!("中心位置: ({lat_s}°N, {lon_s}°E)"),
-        format!("最大风速: {speed}"),
-        format!("中心气压: {pressure}"),
-        format!("移动速度: {mv}"),
-    ];
-
-    let font = egui::FontId::proportional(12.0);
-    let header_gal = painter.layout_no_wrap(header, font.clone(), Color32::WHITE);
-    let body: Vec<_> = lines
-        .iter()
-        .map(|l| painter.layout_no_wrap(l.clone(), font.clone(), Color32::WHITE))
-        .collect();
-    let body_w = body
-        .iter()
-        .map(|g| g.size().x)
-        .fold(header_gal.size().x, f32::max)
-        .max(200.0);
-    let pad = 8.0_f32;
-    let gap = 2.0_f32;
-    let header_h = header_gal.size().y + pad;
-    let body_h = body.iter().map(|g| g.size().y).sum::<f32>()
-        + gap * (body.len().saturating_sub(1) as f32)
-        + pad;
-    let w = body_w + pad * 2.0;
-    let origin = egui::pos2(hit.anchor.x + 12.0, hit.anchor.y + 14.0);
-    let header_rect = Rect::from_min_size(origin, Vec2::new(w, header_h));
-    let body_rect = Rect::from_min_size(
-        egui::pos2(origin.x, origin.y + header_h + 2.0),
-        Vec2::new(w, body_h),
-    );
-    painter.rect_filled(
-        header_rect,
-        3.0,
-        Color32::from_rgba_unmultiplied(0x44, 0x88, 0xCC, 0xEE),
-    );
-    painter.rect_stroke(
-        header_rect,
-        3.0,
-        Stroke::new(1.0_f32, Color32::WHITE),
-        egui::StrokeKind::Outside,
-    );
-    painter.rect_filled(
-        body_rect,
-        3.0,
-        Color32::from_rgba_unmultiplied(0x11, 0x11, 0x22, 0xEE),
-    );
-    painter.rect_stroke(
-        body_rect,
-        3.0,
-        Stroke::new(1.0_f32, Color32::from_rgb(0x66, 0x66, 0x88)),
-        egui::StrokeKind::Outside,
-    );
-    painter.galley(
-        egui::pos2(header_rect.min.x + pad, header_rect.center().y - header_gal.size().y * 0.5),
-        header_gal,
-        Color32::WHITE,
-    );
-    let mut y = body_rect.min.y + pad * 0.5;
-    for g in body {
-        let h = g.size().y;
-        painter.galley(egui::pos2(body_rect.min.x + pad, y), g, Color32::WHITE);
-        y += h + gap;
-    }
 }
 
 fn normalize_typhoon_agency(a: &str) -> String {
@@ -1260,81 +1156,89 @@ fn paint_wind_quad(
     let Some(center) = project_near(view, lon, lat) else {
         return;
     };
-    // 连续方位采样：每象限用该象限半径；r=0 则落到中心（与 eewcn 跳过象限等价但闭合正确）
+    let quads = q.as_array();
+    if quads.iter().all(|&r| r <= 0.0) {
+        return;
+    }
+    // 象限边界平滑过渡；r=0 用邻象限非零半径，避免落到中心造成扇形缺口/斑纹
     let r_at = |az: f64| -> f64 {
         let a = az.rem_euclid(360.0);
-        if a < 90.0 {
-            q.ne
-        } else if a < 180.0 {
-            q.se
-        } else if a < 270.0 {
-            q.sw
+        let sector = (a / 90.0).floor() as usize % 4;
+        let local = a - sector as f64 * 90.0;
+        let r0 = quads[sector];
+        let r1 = quads[(sector + 1) % 4];
+        let blend = 12.0_f64;
+        let base = if r0 > 0.0 {
+            r0
+        } else if r1 > 0.0 {
+            r1
         } else {
-            q.nw
+            quads
+                .iter()
+                .copied()
+                .filter(|&x| x > 0.0)
+                .fold(0.0_f64, f64::max)
+        };
+        if r0 > 0.0 && r1 > 0.0 && local > 90.0 - blend {
+            let t = ((local - (90.0 - blend)) / blend).clamp(0.0, 1.0);
+            let t = t * t * (3.0 - 2.0 * t);
+            r0 * (1.0 - t) + r1 * t
+        } else {
+            base
         }
     };
-    let step = 4.0_f64;
-    let mut ring: Vec<Pos2> = Vec::with_capacity(100);
+    let step = 3.0_f64;
+    let mut ring: Vec<Pos2> = Vec::with_capacity(130);
     let mut az = 0.0_f64;
     while az < 360.0 - 1e-6 {
         let r_km = r_at(az);
-        let p = if r_km > 0.0 {
+        if r_km > 0.0 {
             let (olon, olat) = crate::globe::move_on_globe(lon, lat, r_km, az);
-            project_near(view, olon, olat)
-        } else {
-            Some(center)
-        };
-        if let Some(p) = p {
-            ring.push(p);
+            if let Some(p) = project_near(view, olon, olat) {
+                ring.push(p);
+            }
         }
         az += step;
     }
-    // 闭合：360°
-    {
-        let r_km = r_at(0.0);
-        let p = if r_km > 0.0 {
-            let (olon, olat) = crate::globe::move_on_globe(lon, lat, r_km, 0.0);
-            project_near(view, olon, olat)
-        } else {
-            Some(center)
-        };
-        if let Some(p) = p {
-            ring.push(p);
-        }
+    if let Some(p0) = ring.first().copied() {
+        ring.push(p0);
     }
-    if ring.len() < 3 {
+    if ring.len() < 4 {
         return;
     }
-    // 中心扇形三角网填充（避免 PathShape 对凹/阶梯边界错误 tessellate）
-    for w in ring.windows(2) {
-        painter.add(egui::Shape::convex_polygon(
-            vec![center, w[0], w[1]],
-            fill,
-            Stroke::NONE,
-        ));
+    // 闭环耳切填色（均匀、无中心扇形缝）
+    let mut flat: Vec<f64> = Vec::with_capacity((ring.len() - 1) * 2);
+    for p in &ring[..ring.len() - 1] {
+        flat.push(p.x as f64);
+        flat.push(p.y as f64);
     }
-    // 外轮廓描边（跳过落到中心的退化段）
-    let mut stroke_pts: Vec<Pos2> = Vec::new();
-    for p in &ring {
-        let on_center = (p.x - center.x).abs() < 0.5 && (p.y - center.y).abs() < 0.5;
-        if on_center {
-            if stroke_pts.len() >= 2 {
-                painter.add(egui::Shape::line(
-                    stroke_pts.clone(),
-                    Stroke::new(1.8_f32, border),
-                ));
-            }
-            stroke_pts.clear();
-            continue;
+    if let Ok(idx) = earcutr::earcut(&flat, &[], 2) {
+        let mut mesh = egui::epaint::Mesh::default();
+        let n = ring.len() - 1;
+        mesh.reserve_vertices(n);
+        mesh.reserve_triangles(idx.len() / 3);
+        for p in &ring[..n] {
+            mesh.colored_vertex(*p, fill);
         }
-        stroke_pts.push(*p);
+        for tri in idx.chunks_exact(3) {
+            mesh.add_triangle(tri[0] as u32, tri[1] as u32, tri[2] as u32);
+        }
+        if !mesh.indices.is_empty() {
+            painter.add(egui::Shape::mesh(mesh));
+        }
+    } else {
+        for w in ring.windows(2) {
+            painter.add(egui::Shape::convex_polygon(
+                vec![center, w[0], w[1]],
+                fill,
+                Stroke::NONE,
+            ));
+        }
     }
-    if stroke_pts.len() >= 2 {
-        painter.add(egui::Shape::line(
-            stroke_pts,
-            Stroke::new(1.8_f32, border),
-        ));
-    }
+    painter.add(egui::Shape::line(
+        ring,
+        Stroke::new(1.8_f32, border),
+    ));
 }
 
 fn paint_geodesic_segment(

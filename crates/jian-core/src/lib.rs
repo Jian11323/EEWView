@@ -189,6 +189,196 @@ pub fn tsunami_grade_zh(grade: &str) -> &'static str {
     }
 }
 
+
+/// 台风风圈四象限半径（km）：东北 / 东南 / 西南 / 西北；0 表示该象限无数据。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct TyphoonQuadrants {
+    pub ne: f64,
+    pub se: f64,
+    pub sw: f64,
+    pub nw: f64,
+}
+
+impl TyphoonQuadrants {
+    pub fn from_pipe(s: &str) -> Option<Self> {
+        let t = s.trim();
+        if t.is_empty() {
+            return None;
+        }
+        let parts: Vec<&str> = t.split('|').collect();
+        if parts.len() == 1 {
+            let v: f64 = parts[0].trim().parse().ok()?;
+            if v <= 0.0 {
+                return None;
+            }
+            return Some(Self {
+                ne: v,
+                se: v,
+                sw: v,
+                nw: v,
+            });
+        }
+        let mut q = [0.0_f64; 4];
+        for i in 0..4 {
+            if i < parts.len() {
+                q[i] = parts[i].trim().parse::<f64>().unwrap_or(0.0).max(0.0);
+            }
+        }
+        if q.iter().sum::<f64>() <= 0.0 {
+            return None;
+        }
+        Some(Self {
+            ne: q[0],
+            se: q[1],
+            sw: q[2],
+            nw: q[3],
+        })
+    }
+
+    pub fn max_km(self) -> f64 {
+        self.ne.max(self.se).max(self.sw).max(self.nw)
+    }
+
+    pub fn as_array(self) -> [f64; 4] {
+        [self.ne, self.se, self.sw, self.nw]
+    }
+}
+
+/// 预报路径点。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TyphoonForecastPoint {
+    pub longitude: f64,
+    pub latitude: f64,
+    #[serde(default)]
+    pub time_text: String,
+    #[serde(default)]
+    pub strong: String,
+    #[serde(default)]
+    pub power: i32,
+}
+
+/// 某一机构的预报路径。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TyphoonForecast {
+    /// 机构名：中国 / 中国台湾 / 日本 / 美国 / 中国香港 等
+    pub agency: String,
+    pub points: Vec<TyphoonForecastPoint>,
+}
+
+/// 实况路径点。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TyphoonTrackPoint {
+    pub longitude: f64,
+    pub latitude: f64,
+    #[serde(default)]
+    pub time_text: String,
+    #[serde(default)]
+    pub strong: String,
+    #[serde(default)]
+    pub power: i32,
+    #[serde(default)]
+    pub speed_ms: f64,
+    #[serde(default)]
+    pub pressure_hpa: f64,
+    #[serde(default)]
+    pub move_direction: String,
+    #[serde(default)]
+    pub move_speed_kmh: f64,
+    #[serde(default)]
+    pub radius7: Option<TyphoonQuadrants>,
+    #[serde(default)]
+    pub radius10: Option<TyphoonQuadrants>,
+    #[serde(default)]
+    pub radius12: Option<TyphoonQuadrants>,
+    /// 仅最新点通常带多源预报
+    #[serde(default)]
+    pub forecasts: Vec<TyphoonForecast>,
+}
+
+/// 活跃台风一条（路径 + 当前中心 + 风圈）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TyphoonInfo {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub name_en: String,
+    /// 等级文案，如「强热带风暴」
+    #[serde(default)]
+    pub strong: String,
+    #[serde(default)]
+    pub power: i32,
+    pub longitude: f64,
+    pub latitude: f64,
+    #[serde(default)]
+    pub pressure_hpa: f64,
+    #[serde(default)]
+    pub wind_speed_ms: f64,
+    #[serde(default)]
+    pub move_direction: String,
+    #[serde(default)]
+    pub move_speed_kmh: f64,
+    #[serde(default)]
+    pub update_text: String,
+    pub points: Vec<TyphoonTrackPoint>,
+}
+
+/// 台风等级色（对齐 eewcn）：超强紫 / 强台粉 / 台风橙红 / 强热橙 / 热黄 / 低压蓝。
+pub fn typhoon_grade_level(strong: &str, power: i32) -> usize {
+    let s = strong
+        .chars()
+        .filter(|c| *c != '(' && *c != ')' && *c != '\u{ff08}' && *c != '\u{ff09}')
+        .collect::<String>();
+    let keys = [
+        "超强台风",
+        "强台风",
+        "台风",
+        "强热带风暴",
+        "热带风暴",
+        "热带低压",
+    ];
+    for (i, k) in keys.iter().enumerate() {
+        if s.contains(k) {
+            return i;
+        }
+    }
+    if power >= 16 {
+        0
+    } else if power >= 14 {
+        1
+    } else if power >= 12 {
+        2
+    } else if power >= 10 {
+        3
+    } else if power >= 8 {
+        4
+    } else {
+        5
+    }
+}
+
+pub fn typhoon_color_rgb(strong: &str, power: i32) -> (u8, u8, u8) {
+    const TABLE: [(u8, u8, u8); 6] = [
+        (0xCC, 0x00, 0xCC),
+        (0xFF, 0x00, 0x66),
+        (0xFF, 0x44, 0x00),
+        (0xFF, 0x88, 0x00),
+        (0xFF, 0xCC, 0x00),
+        (0x33, 0x99, 0xFF),
+    ];
+    TABLE[typhoon_grade_level(strong, power).min(5)]
+}
+
+pub fn typhoon_forecast_agency_rgb(agency: &str) -> (u8, u8, u8) {
+    match agency.trim() {
+        "中国台湾" | "台湾" => (0x00, 0xAA, 0xFF),
+        "中国香港" | "香港" => (0xFF, 0xDD, 0x00),
+        "日本" => (0xFF, 0x66, 0x00),
+        "美国" => (0x44, 0xDD, 0x44),
+        "中国" => (0xCC, 0x00, 0xCC),
+        _ => (0xCC, 0x00, 0xCC),
+    }
+}
+
 /// JMA 火山情报（降灰预报等；不进地震速报列表）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolcanoNotice {
@@ -299,6 +489,8 @@ pub struct AppSnapshot {
     pub tsunami: Option<TsunamiInfo>,
     /// JMA 火山情报（与 records 分离）
     pub volcanoes: Vec<VolcanoNotice>,
+    /// 活跃台风（路径 / 风圈 / 预报）
+    pub typhoons: Vec<TyphoonInfo>,
     /// 各测站网最近一帧到达时刻 unix ms（kmoni/snet/kma）
     pub station_updated_ms: std::collections::HashMap<String, i64>,
     /// 新速报写入后待主循环飞跃的 (lon, lat, zoom)；take 后清空
@@ -485,6 +677,7 @@ impl AppSnapshot {
             show_wave_rings: true,
             tsunami: None,
             volcanoes: Vec::new(),
+            typhoons: Vec::new(),
             station_updated_ms: std::collections::HashMap::new(),
             pending_record_fly: None,
             pending_tts_record: None,
@@ -558,6 +751,7 @@ impl AppSnapshot {
             show_wave_rings: true,
             tsunami: None,
             volcanoes: Vec::new(),
+            typhoons: Vec::new(),
             station_updated_ms: std::collections::HashMap::new(),
             pending_record_fly: None,
             pending_tts_record: None,
@@ -670,7 +864,9 @@ impl AppSnapshot {
     /// 插入/更新 EEW：跨 API 同机构族同一事件合并（如 Jian `jma-eew` 与 Wolfx `wolfx-jma-eew`）。
     /// 报数更高优先；报数相同取更高镜像源优先级。不同事件各留一条供多震波圈。
     /// 新预警：刷新左上角 + 切到预警 Tab；不改列表选中（与跟焦解绑，对齐 eewcn）。
+    /// 发震时刻超过 [`ORIGIN_STALE_MAX_AGE_MS`]：仍进列表供回看，但不切 Tab、不抢 active、不挡速报飞跃。
     pub fn upsert_eew(&mut self, mut report: EewReport) {
+        let fresh = !origin_is_stale(report.origin_ms);
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -703,6 +899,10 @@ impl AppSnapshot {
         }
         sort_eew_newest_first(&mut self.eew_list);
         prune_eew_list(&mut self.eew_list, 14 * 24 * 60 * 60 * 1000, 80);
+        // 过期推送：只维护列表，不触发预警态
+        if !fresh {
+            return;
+        }
         if let Some(pos) = self
             .eew_list
             .iter()
@@ -730,6 +930,7 @@ impl AppSnapshot {
     /// 插入速报；全源混合后按机构族+发震时刻去重；新→旧。
     /// 无传播中预警时：收到即选中并飞跃（不论是否列表最新）。
     /// 有传播中预警：只入列表不跳转、不改 active/Tab；符合条件时仍排队 TTS。
+    /// 发震时刻超过 [`ORIGIN_STALE_MAX_AGE_MS`]：仍可进列表，但不 TTS、不切 Tab、不飞跃。
     pub fn upsert_record(&mut self, record: EqRecord) {
         // 火山不得混入地震速报
         if record.agency.0.eq_ignore_ascii_case("jma-volcano")
@@ -737,6 +938,7 @@ impl AppSnapshot {
         {
             return;
         }
+        let fresh = record_fresh_for_tts(record.origin_ms);
         let mut is_new_or_upgrade = true;
         let mut announce_tts = false;
         // 跨 API 同机构族同一事件：更新槽位（Jian cenc ↔ Wolfx wolfx-cenc；自动→正式）
@@ -757,8 +959,8 @@ impl AppSnapshot {
                 pn > po || (pn == po && record.origin_ms > cur.origin_ms)
             };
             if prefer_new {
-                // 仅「自动→正式」或足够新的事件才朗读，避免历史列表刷屏
-                announce_tts = auto_to_final || record_fresh_for_tts(record.origin_ms);
+                // 近时窗口内才朗读（自动→正式亦同）；过期推送只更新列表
+                announce_tts = fresh;
                 self.records[pos] = record.clone();
                 sort_records_newest_first(&mut self.records);
             } else {
@@ -771,9 +973,13 @@ impl AppSnapshot {
                 self.records.truncate(80);
             }
             // 新条目：仅近时事件朗读（冷启动/定期 list 里的旧报不读）
-            announce_tts = record_fresh_for_tts(record.origin_ms);
+            announce_tts = fresh;
         }
         if !is_new_or_upgrade {
+            return;
+        }
+        // 过期：只维护列表，不触发播报/跟焦
+        if !fresh {
             return;
         }
         if announce_tts {
@@ -805,6 +1011,11 @@ impl AppSnapshot {
         }
     }
 
+    /// 整表替换活跃台风列表（轮询快照）。
+    pub fn replace_typhoons(&mut self, list: Vec<TyphoonInfo>) {
+        self.typhoons = list;
+    }
+
     /// 插入火山情报；按 name+title+time 去重；新→旧。
     pub fn upsert_volcano(&mut self, notice: VolcanoNotice) {
         let dup = self.volcanoes.iter().any(|v| {
@@ -823,10 +1034,13 @@ impl AppSnapshot {
     }
 
     /// 启动/空闲时跟焦最新预警；切 Tab + 刷新左上角，不锁列表选中。
+    /// 跳过发震过期条目（仍在列表，但不自动触发预警态）。
     /// 返回 `(lon, lat, zoom)`。
     pub fn focus_latest_event(&mut self) -> Option<(f64, f64, f64)> {
         let idx = self.eew_list.iter().position(|e| {
-            !e.is_cancel && (e.latitude.abs() > 0.01 || e.longitude.abs() > 0.01)
+            !e.is_cancel
+                && !origin_is_stale(e.origin_ms)
+                && (e.latitude.abs() > 0.01 || e.longitude.abs() > 0.01)
         })?;
         let ev = self.eew_list[idx].clone();
         let lon = ev.longitude;
@@ -1070,6 +1284,10 @@ pub fn eew_wave_active_spread(e: &EewReport, now_ms: i64, custom: &[(f64, f64, f
     if e.origin_ms <= 0 {
         return true; // 演示样本
     }
+    // 过期推送：列表可留，但不算传播中（无波圈/跟焦/预警态）
+    if origin_is_stale(e.origin_ms) {
+        return false;
+    }
     let age_ms = now_ms - e.origin_ms;
     if age_ms < -60_000 {
         return false;
@@ -1176,8 +1394,11 @@ fn records_content_equivalent(a: &EqRecord, b: &EqRecord) -> bool {
         && (a.longitude - b.longitude).abs() < 0.02
 }
 
-/// 近时速报才触发 TTS（避免冷启动/定期 list 朗读历史条目）。
-fn record_fresh_for_tts(origin_ms: i64) -> bool {
+/// 发震时刻相对现在超过此年龄则视为过期（防 API 推送陈旧预警/速报）。
+pub const ORIGIN_STALE_MAX_AGE_MS: i64 = 10 * 60 * 1000;
+
+/// `origin_ms <= 0`（未知）不判过期；已知且年龄超过 [`ORIGIN_STALE_MAX_AGE_MS`] 则为过期。
+pub fn origin_is_stale(origin_ms: i64) -> bool {
     if origin_ms <= 0 {
         return false;
     }
@@ -1185,7 +1406,12 @@ fn record_fresh_for_tts(origin_ms: i64) -> bool {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
-    now.saturating_sub(origin_ms) < 45 * 60 * 1000
+    now.saturating_sub(origin_ms) > ORIGIN_STALE_MAX_AGE_MS
+}
+
+/// 近时速报才触发 TTS（与入库过期窗口一致）。
+fn record_fresh_for_tts(origin_ms: i64) -> bool {
+    origin_ms > 0 && !origin_is_stale(origin_ms)
 }
 
 /// 跨 API 是否同一 EEW 事件（同机构族 + 同 EventID，或发震时刻/震中接近）。
@@ -1359,6 +1585,13 @@ fn sort_records_newest_first(list: &mut [EqRecord]) {
 mod eew_dedup_tests {
     use super::*;
 
+    fn now_ms() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    }
+
     fn sample(agency: &str, event_id: &str, serial: u32) -> EewReport {
         EewReport {
             agency: AgencyId(agency.into()),
@@ -1369,7 +1602,7 @@ mod eew_dedup_tests {
             depth_km: 10.0,
             latitude: 24.8,
             longitude: 125.3,
-            origin_ms: 1_728_650_000_000,
+            origin_ms: now_ms(),
             max_intensity_text: "2".into(),
             intensity_kind: IntensityKind::JmaShindo,
             intensity_level: 2,
@@ -1402,12 +1635,11 @@ mod eew_dedup_tests {
         cea.place = "缅甸".into();
         cea.latitude = 22.0;
         cea.longitude = 98.5;
-        cea.origin_ms = 1_728_650_000_000;
         let mut pr = sample("cea-pr:云南", "pr-1", 1);
         pr.place = "云南某地".into();
         pr.latitude = 25.0;
         pr.longitude = 102.0;
-        pr.origin_ms = 1_728_651_000_000;
+        pr.origin_ms = now_ms() - 30_000;
         snap.upsert_eew(cea);
         snap.upsert_eew(pr);
         let side = eew_sidebar_entries(&snap.eew_list);
@@ -1421,21 +1653,22 @@ mod eew_dedup_tests {
     fn sidebar_merges_all_cea_pr_provinces_to_one_slot() {
         let mut snap = AppSnapshot::offline_sample();
         snap.eew_list.clear();
+        let t0 = now_ms();
         let mut nx = sample("cea-pr:宁夏", "nx-1", 1);
         nx.place = "宁夏隆德县".into();
         nx.latitude = 35.6;
         nx.longitude = 106.1;
-        nx.origin_ms = 1_728_650_000_000;
+        nx.origin_ms = t0 - 60_000;
         let mut gs = sample("cea-pr:甘肃", "gs-1", 2);
         gs.place = "宁夏固原市原州区".into();
         gs.latitude = 36.0;
         gs.longitude = 106.2;
-        gs.origin_ms = 1_728_650_000_000;
+        gs.origin_ms = t0;
         let mut cn = sample("cea", "cn-1", 2);
         cn.place = "宁夏固原市原州区".into();
         cn.latitude = 36.0;
         cn.longitude = 106.2;
-        cn.origin_ms = 1_728_650_000_000;
+        cn.origin_ms = t0;
         snap.upsert_eew(nx);
         snap.upsert_eew(gs);
         snap.upsert_eew(cn);
@@ -1470,11 +1703,13 @@ mod eew_dedup_tests {
     }
 
     #[test]
-    fn stale_record_list_replay_skips_tts() {
+    fn stale_origin_record_lists_without_side_effects() {
         let mut snap = AppSnapshot::offline_sample();
         snap.eew_list.clear();
         snap.records.clear();
         snap.pending_tts_record = None;
+        snap.pending_record_fly = None;
+        let tab0 = snap.tab;
         let old = EqRecord {
             agency: AgencyId("cenc".into()),
             place: "测试地点".into(),
@@ -1486,14 +1721,30 @@ mod eew_dedup_tests {
             latitude: 30.0,
             longitude: 104.0,
             depth_km: 10.0,
-            origin_ms: 1_577_836_800_000, // 2020
+            origin_ms: 1_577_836_800_000, // 2020，远超 10 分钟窗口
             is_auto: false,
         };
-        snap.upsert_record(old.clone());
-        assert!(snap.pending_tts_record.is_none());
-        // 同内容重放仍不应 TTS
         snap.upsert_record(old);
+        assert!(snap.records.iter().any(|r| r.place == "测试地点"));
         assert!(snap.pending_tts_record.is_none());
+        assert!(snap.pending_record_fly.is_none());
+        assert_eq!(snap.tab, tab0);
+    }
+
+    #[test]
+    fn stale_origin_eew_enters_list_without_alert() {
+        let mut snap = AppSnapshot::offline_sample();
+        snap.eew_list.clear();
+        snap.active = None;
+        let tab0 = snap.tab;
+        let mut eew = sample("jma-eew", "old-evt", 1);
+        eew.origin_ms = now_ms() - ORIGIN_STALE_MAX_AGE_MS - 1_000;
+        snap.upsert_eew(eew);
+        assert_eq!(snap.eew_list.len(), 1);
+        assert_eq!(snap.eew_list[0].event_id, "old-evt");
+        assert!(snap.active.is_none());
+        assert_eq!(snap.tab, tab0);
+        assert!(!eew_wave_active(&snap.eew_list[0], now_ms()));
     }
 
     #[test]

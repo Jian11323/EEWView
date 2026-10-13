@@ -254,6 +254,36 @@ impl ViewCtx {
         self.globe.map(|c| c.horizon_dist as f32)
     }
 
+    /// 屏幕像素 → 地表 km（仅球体；平面返回 `None`）。
+    pub fn px_to_km(&self, px: f32) -> Option<f64> {
+        self.globe.map(|c| c.px_to_km(px))
+    }
+
+    /// 球体贴面方块四角（TL/TR/BR/BL）。对齐 GQ `createSquare`：大圆偏移后 ECEF 投影。
+    /// 任一角低于地平线则 `None`（调用方可回退中心 billboard）。
+    pub fn project_surface_square(
+        &self,
+        lon: f64,
+        lat: f64,
+        side_px: f32,
+    ) -> Option<[Pos2; 4]> {
+        let cam = self.globe?;
+        if side_px < 1.0 {
+            return None;
+        }
+        // 边长 side → 中心到角点 = side/2 * √2
+        let half_km = cam.px_to_km(side_px * 0.5);
+        let corner_km = half_km * std::f64::consts::SQRT_2;
+        // 北向上：NW / NE / SE / SW → 屏幕 TL / TR / BR / BL
+        const BEARINGS: [f64; 4] = [315.0, 45.0, 135.0, 225.0];
+        let mut out = [Pos2::ZERO; 4];
+        for (i, br) in BEARINGS.iter().enumerate() {
+            let (clon, clat) = globe::move_on_globe(lon, lat, corner_km, *br);
+            out[i] = cam.try_project(clon, clat, self.rect)?;
+        }
+        Some(out)
+    }
+
     pub fn circle_segments(&self, lon: f64, lat: f64, radius_km: f64) -> Vec<Vec<Pos2>> {
         let Some(cam) = self.globe else {
             return Vec::new();

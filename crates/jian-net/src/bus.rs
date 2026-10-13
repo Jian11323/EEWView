@@ -1,6 +1,6 @@
 //! 网络事件总线（tokio mpsc）。
 
-use jian_core::{EewReport, EqRecord, HealthStatus, StationSample, TsunamiInfo, VolcanoNotice};
+use jian_core::{EewReport, EqRecord, HealthStatus, StationSample, TsunamiInfo, TyphoonInfo, VolcanoNotice};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
@@ -20,6 +20,8 @@ pub enum NetEvent {
     Tsunami(TsunamiInfo),
     /// JMA 火山情报（与地震速报分离）
     Volcano(VolcanoNotice),
+    /// 活跃台风快照（整表替换）
+    Typhoons(Vec<TyphoonInfo>),
 }
 
 pub type NetTx = mpsc::UnboundedSender<NetEvent>;

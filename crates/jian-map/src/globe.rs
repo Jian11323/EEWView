@@ -115,6 +115,12 @@ impl GlobeCamera {
         d <= self.max_distance * 1.002
     }
 
+    /// 屏幕像素 → 地表弧长（km）；比例取自视口中心 `one_deg_px`（对齐 GQ `pxToDeg`）。
+    pub fn px_to_km(&self, px: f32) -> f64 {
+        let km_per_deg = EARTH_RADIUS_KM * std::f64::consts::PI / 180.0;
+        (px as f64) / self.one_deg_px.max(1e-6) * km_per_deg
+    }
+
     /// 陆地填色用：放宽地平线，减少美洲/欧亚在球缘整块掉线。
     pub fn is_above_horizon_fill(&self, lon: f64, lat: f64) -> bool {
         let (x, y, z) = lonlat_to_ecef(lon, lat, 0.0);

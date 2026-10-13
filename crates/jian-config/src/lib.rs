@@ -94,6 +94,12 @@ pub struct UiConfig {
     /// 地图绘制火山三角标，并在火山列表显示图标
     #[serde(default = "default_true")]
     pub show_volcanoes: bool,
+    /// 地图绘制台风路径 / 风圈 / 预报
+    #[serde(default = "default_true")]
+    pub show_typhoons: bool,
+    /// 预报机构：全部 / 中国 / 中国台湾 / 日本 / 美国 / 中国香港
+    #[serde(default = "default_typhoon_forecast_agency")]
+    pub typhoon_forecast_agency: String,
 }
 
 
@@ -285,6 +291,30 @@ pub struct SourcesConfig {
     /// 测站网：JMA（kmoni/lmoni/中转）、S-Net、KMA
     #[serde(default)]
     pub stations: StationsConfig,
+    /// 活跃台风路径
+    #[serde(default)]
+    pub typhoon: TyphoonSourceConfig,
+}
+
+/// 台风实时路径（HTTP 轮询）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TyphoonSourceConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_typhoon_url")]
+    pub url: String,
+    #[serde(default = "default_typhoon_poll")]
+    pub poll_secs: u64,
+}
+
+impl Default for TyphoonSourceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            url: default_typhoon_url(),
+            poll_secs: default_typhoon_poll(),
+        }
+    }
 }
 
 
@@ -596,6 +626,15 @@ fn default_pancakes_client() -> String {
 fn default_gq_min_mag() -> f64 {
     3.0
 }
+fn default_typhoon_url() -> String {
+    "https://api.sismotide.top/get/typhoon.php".into()
+}
+fn default_typhoon_poll() -> u64 {
+    15
+}
+fn default_typhoon_forecast_agency() -> String {
+    "中国".into()
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -611,6 +650,8 @@ impl Default for AppConfig {
                 show_wave_rings: true,
                 show_legend: true,
                 show_volcanoes: true,
+                show_typhoons: true,
+                typhoon_forecast_agency: default_typhoon_forecast_agency(),
             },
             performance: PerformanceConfig::default(),
             window: WindowConfig::default(),
@@ -683,6 +724,7 @@ impl Default for AppConfig {
                 },
                 pancakes: PancakesSourceConfig::default(),
                 stations: StationsConfig::default(),
+                typhoon: TyphoonSourceConfig::default(),
             },
             filters: FiltersConfig::default(),
             log: LogConfig::default(),
@@ -863,6 +905,7 @@ impl AppConfig {
                 && (self.sources.wolfx.any_eew() || self.sources.wolfx.any_eqlist()))
             || self.sources.p2pquake.enabled
             || self.sources.pancakes.enabled
+            || self.sources.typhoon.enabled
     }
 
     pub fn sources_runtime_equal(&self, other: &Self) -> bool {
@@ -912,6 +955,9 @@ impl AppConfig {
             && self.sources.pancakes.gq_min_magnitude == other.sources.pancakes.gq_min_magnitude
             && self.sources.pancakes.gq == other.sources.pancakes.gq
             && self.sources.pancakes.jma_volcano == other.sources.pancakes.jma_volcano
+            && self.sources.typhoon.enabled == other.sources.typhoon.enabled
+            && self.sources.typhoon.url == other.sources.typhoon.url
+            && self.sources.typhoon.poll_secs == other.sources.typhoon.poll_secs
     }
 }
 

@@ -15,9 +15,17 @@ pub use camera::{
     cluster_for_fit, fit_events, globe_framed_center, zoom_to_fit_radius_km, CameraFlight,
 };
 pub use detect::{DetectBox, DetectTracker};
+pub use overlay::TyphoonHoverHit;
 pub use projection::{clamp_lat, km_to_pixels, lonlat_to_screen, normalize_lon, ProjectionMode};
 pub use tile_cache::TileCache;
 pub use vector_basemap::{BasemapLoadState, BasemapMode, VectorBasemap, VectorStyle, OCEAN};
+
+/// 地图一帧交互结果。
+#[derive(Debug, Default, Clone)]
+pub struct MapUiResult {
+    pub click: Option<(f64, f64)>,
+    pub typhoon_hover: Option<TyphoonHoverHit>,
+}
 
 use egui::{Color32, Sense, Stroke, Ui};
 use jian_core::{EewReport, EqRecord, StationSample, TsunamiInfo, TyphoonInfo, VolcanoNotice};
@@ -272,7 +280,7 @@ impl MapViewport {
         home: Option<(f64, f64)>,
         tsunami: Option<&TsunamiInfo>,
         detect_boxes: &[DetectBox],
-    ) -> Option<(f64, f64)> {
+    ) -> MapUiResult {
         if self.vector.poll() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
@@ -312,15 +320,17 @@ impl MapViewport {
             }
         }
 
-        // 平面：瓦片作底（暗色 auto=Both）；球体暂不贴瓦片
+        // 平面瓦片（tiles/both）；球体暂不贴瓦片
         if !globe && self.basemap.show_tiles() {
             self.cache
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
 
-        // 矢量只描边、不填陆地：耳切填色在跨日界/简化环上易出灰三角，多次修不好故关掉
+        // 矢量：对齐 GQ — 海洋底色上 Path 填陆地 + 描边（非经纬度耳切）
         if globe || self.basemap.show_vector() {
-            self.vector.paint(ui, &view, false, self.vector_style);
+            let fill_land = globe || self.basemap == BasemapMode::Vector;
+            self.vector
+                .paint(ui, &view, fill_land, self.vector_style);
         }
 
         // JMA 海啸：按沿岸预报区描边闪烁（不对中日外轮廓整圈描边）
@@ -330,6 +340,7 @@ impl MapViewport {
             }
         }
 
+        let mut typhoon_hover = None;
         {
             let icons = Some(&self.markers);
             let selected_station = active.and_then(|e| e.event_id.strip_prefix("station:"));
@@ -349,7 +360,7 @@ impl MapViewport {
             overlay::paint_volcanoes(ui, &view, volcanoes, selected_volcano);
             if !typhoons.is_empty() {
                 let hover = resp.hover_pos();
-                let _ = overlay::paint_typhoons(
+                typhoon_hover = overlay::paint_typhoons(
                     ui,
                     &view,
                     typhoons,
@@ -463,17 +474,20 @@ impl MapViewport {
             }
         }
 
-        let mut picked = None;
+        let mut click = None;
         if resp.clicked() {
             if let Some(pos) = resp.interact_pointer_pos() {
                 let (lon, lat) = view.screen_to_lonlat(pos);
-                picked = Some((
+                click = Some((
                     projection::normalize_lon(lon),
                     projection::clamp_lat(lat),
                 ));
             }
         }
-        picked
+        MapUiResult {
+            click,
+            typhoon_hover,
+        }
     }
 }
 

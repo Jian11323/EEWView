@@ -81,6 +81,7 @@ pub fn spawn_hub_with_assets(
         jma_st = sources.stations.jma_enabled,
         snet = sources.stations.snet_enabled,
         kma = sources.stations.kma_enabled,
+        typhoon = sources.typhoon.enabled,
         "jian-net: spawning source tasks"
     );
     let mut tasks = Vec::new();
@@ -92,10 +93,11 @@ pub fn spawn_hub_with_assets(
     tasks.extend(sources::p2pquake::spawn(tx.clone(), sources.p2pquake.clone()));
     tasks.extend(sources::pancakes::spawn(tx.clone(), sources.pancakes.clone()));
     tasks.extend(sources::stations::spawn(
-        tx,
+        tx.clone(),
         sources.stations.clone(),
         assets_stations,
     ));
+    tasks.extend(sources::typhoon::spawn(tx, sources.typhoon.clone()));
     NetHub { rx, tasks }
 }
 
@@ -126,6 +128,7 @@ pub fn apply_event_filtered(
         NetEvent::Stations { network, list } => snap.merge_stations(network, list),
         NetEvent::Tsunami(t) => snap.upsert_tsunami(t),
         NetEvent::Volcano(v) => snap.upsert_volcano(v),
+        NetEvent::Typhoons(list) => snap.replace_typhoons(list),
     }
 }
 
