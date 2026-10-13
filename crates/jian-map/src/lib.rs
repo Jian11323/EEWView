@@ -334,7 +334,7 @@ impl MapViewport {
         }
 
         // 烈度衰减：优先陆地三角分带（贴区划，类 Hikari 锯齿外缘）；无区划时回退同心环。
-        // `show_intensity_rings`：预警跟设置，速报仅右键预览时为 true。
+        // `show_intensity_rings`：由设置控制；速报另需右键预览标志。
         if show_intensity_rings {
             let ring_ev = active.filter(|e| {
                 !e.is_cancel && !e.event_id.starts_with("station:")

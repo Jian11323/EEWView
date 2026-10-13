@@ -91,7 +91,7 @@ pub struct MainShell {
     pub show_nied_clock: bool,
     pub intensity_scale: String,
     pub settings: SettingsSession,
-    /// 速报右键：为当前选中速报绘制衰减烈度区划填色（与设置项无关）
+    /// 速报右键：为当前选中速报绘制衰减烈度区划填色（仍受 `ui.show_intensity_rings` 约束）
     pub record_intensity_rings: bool,
     intensity_icons: IntensityIcons,
 }
@@ -182,16 +182,13 @@ impl MainShell {
         snap.show_intensity_rings = cfg.ui.show_intensity_rings;
         // 多震：只要仍有未取消的传播中事件就画波圈（不因当前选中项取消而全灭）
         let show_waves = snap.overlay_mode == OverlayMode::Wave && snap.show_wave_rings;
-        // 预警跟设置；速报仅右键预览时画环
+        // 预警跟设置；速报需设置开启且右键预览
         let active_is_record = snap
             .active
             .as_ref()
             .is_some_and(|e| e.event_id.starts_with("record:"));
-        let show_intensity_rings = if active_is_record {
-            self.record_intensity_rings
-        } else {
-            snap.show_intensity_rings
-        };
+        let show_intensity_rings = snap.show_intensity_rings
+            && (!active_is_record || self.record_intensity_rings);
         let scale = self.intensity_scale.clone();
 
         let live_refs =
@@ -233,6 +230,7 @@ impl MainShell {
                     scale.as_str(),
                     &self.intensity_icons,
                     cfg.ui.show_volcanoes,
+                    cfg.ui.show_intensity_rings,
                     [
                         cfg.sources.jian.enabled,
                         cfg.sources.wolfx.enabled,
@@ -1626,6 +1624,7 @@ fn draw_sidebar(
     scale: &str,
     icons: &IntensityIcons,
     show_volcano_icons: bool,
+    allow_record_intensity: bool,
     source_enabled: [bool; 4],
 ) -> Option<SideAction> {
     let mut clicked = None;
@@ -1811,7 +1810,7 @@ fn draw_sidebar(
                                         col,
                                         selected,
                                         egui::Id::new(("rec", i)),
-                                        true,
+                                        allow_record_intensity,
                                     ) {
                                         RowClick::Primary => {
                                             clicked =

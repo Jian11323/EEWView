@@ -1516,7 +1516,7 @@ fn draw_general(
         control_row(
             ui,
             "烈度区划填色",
-            "陆地三角按距离分档填色（贴区划外缘）",
+            "预警填色与速报右键预览；陆地三角按距离分档",
             "\u{25ce}",
             |ui| {
                 toggle(ui, &mut draft.ui.show_intensity_rings);
