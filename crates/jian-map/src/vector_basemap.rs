@@ -8,10 +8,13 @@ use crate::globe::zoom_to_scroll;
 use crate::projection::{self, ViewCtx};
 use crate::topojson;
 use egui::{Color32, Pos2, Rect, Stroke, Ui};
+use jian_core::palette::color_for;
 use jian_core::EewReport;
+use jian_util::haversine_km;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -274,6 +277,12 @@ struct VectorPaintCache {
     shapes: Vec<egui::Shape>,
 }
 
+/// 烈度区划填色缓存（事件+视口不变时不每帧重算）。
+struct IntensityPaintCache {
+    key: u64,
+    shapes: Vec<egui::Shape>,
+}
+
 pub struct VectorBasemap {
     world: LayerLods,
     /// 中日省界 / 都道府县（近距）
@@ -290,6 +299,7 @@ pub struct VectorBasemap {
     rx: Option<Receiver<(u64, LoadPacket)>>,
     loaded_dir: Option<PathBuf>,
     paint_cache: Option<VectorPaintCache>,
+    intensity_cache: Option<IntensityPaintCache>,
 }
 
 impl Default for VectorBasemap {
@@ -319,6 +329,7 @@ impl Default for VectorBasemap {
             rx: None,
             loaded_dir: None,
             paint_cache: None,
+            intensity_cache: None,
         }
     }
 }
@@ -438,6 +449,7 @@ impl VectorBasemap {
             }
             changed = true;
             self.paint_cache = None;
+            self.intensity_cache = None;
             match packet {
                 LoadPacket::World {
                     lods,
@@ -639,19 +651,252 @@ impl VectorBasemap {
         painter.extend(shapes);
     }
 
-    /// 烈度区划填色。
+    /// 市级/区县「一区一色」烈度填色（质心估档 + 缓存）。
     ///
-    /// 区县耳切 + 环裁切曾导致每帧生成海量三角、亮色矢量无响应/崩溃；
-    /// 暂回退同心环（由上层 `paint_intensity_rings` 绘制），保证可交互。
+    /// 不做耳切细分/环裁切（那会卡死主线程）。大区且震中在内时跳过该区，
+    /// 交给下层同心环表现近场衰减。无命中返回 `false`。
     pub fn paint_intensity_regions(
-        &self,
-        _ui: &mut Ui,
-        _view: &ViewCtx,
-        _ev: &EewReport,
-        _selected: bool,
+        &mut self,
+        ui: &mut Ui,
+        view: &ViewCtx,
+        ev: &EewReport,
+        selected: bool,
     ) -> bool {
-        false
+        if ev.is_cancel || ev.event_id.starts_with("station:") {
+            return false;
+        }
+        if !ev.magnitude.is_finite() || ev.magnitude <= 0.0 {
+            return false;
+        }
+        let layers = self.intensity_region_layers();
+        if layers.is_empty() {
+            return false;
+        }
+
+        let cache_key = intensity_cache_key(view, ev, selected, self.gen);
+        if let Some(c) = self.intensity_cache.as_ref() {
+            if c.key == cache_key {
+                if c.shapes.is_empty() {
+                    return false;
+                }
+                ui.painter_at(view.rect).extend(c.shapes.clone());
+                return true;
+            }
+        }
+
+        let rings = jian_core::intensity_rings(ev.intensity_kind, ev.magnitude, ev.depth_km);
+        let Some(&(_, max_r_km)) = rings.last() else {
+            self.intensity_cache = Some(IntensityPaintCache {
+                key: cache_key,
+                shapes: Vec::new(),
+            });
+            return false;
+        };
+        let cull_km = max_r_km.max(25.0) + 80.0;
+        let rect = view.rect;
+        let fill_alpha = if selected { 110_u8 } else { 78_u8 };
+        let globe = view.mode.is_globe();
+        let world_px = if globe {
+            rect.width().max(rect.height())
+        } else {
+            projection::world_size(view.zoom) as f32
+        };
+        let max_edge_px = rect.width().hypot(rect.height()).max(64.0);
+        let (min_lon, min_lat, max_lon, max_lat) = if globe {
+            (-180.0, -85.0, 180.0, 85.0)
+        } else {
+            let full_wrap = rect.width() >= world_px * 0.92;
+            if full_wrap {
+                (-180.0, -85.0, 180.0, 85.0)
+            } else {
+                viewport_bounds(view.center_lon, view.center_lat, view.zoom, rect)
+            }
+        };
+        let lon_shifts: Vec<f64> = if globe {
+            vec![0.0]
+        } else if min_lon < -150.0 || max_lon > 150.0 || view.center_lon.abs() > 150.0 {
+            vec![-360.0, 0.0, 360.0]
+        } else {
+            vec![0.0]
+        };
+
+        let mut meshes: HashMap<u8, egui::epaint::Mesh> = HashMap::new();
+        let mut painted = 0usize;
+        const MAX_REGIONS: usize = 700;
+        // 震中所在且半对角超过此值（km）的大区跳过，避免整块最高档。
+        const SKIP_EPI_HOST_DIAG_KM: f64 = 55.0;
+
+        'regions: for layer in layers {
+            for ring in layer {
+                if painted >= MAX_REGIONS {
+                    break 'regions;
+                }
+                if !ring.may_fill() || ring.tris.is_empty() {
+                    continue;
+                }
+                let diag = bbox_half_diag_km(ring);
+                let (clon, clat) = ring_centroid(ring);
+                let cen_dist = haversine_km(ev.longitude, ev.latitude, clon, clat);
+                if cen_dist > cull_km + diag {
+                    continue;
+                }
+                let epi_inside = point_in_bbox(ev.longitude, ev.latitude, ring)
+                    && point_in_ring(ev.longitude, ev.latitude, &ring.exterior);
+                // 大区含震中：整块填最高档会假，交给同心环
+                if epi_inside && diag > SKIP_EPI_HOST_DIAG_KM {
+                    continue;
+                }
+                let dist = if epi_inside { 0.0 } else { cen_dist };
+                let (level, _) = jian_core::estimate_at_site(
+                    ev.intensity_kind,
+                    ev.magnitude,
+                    ev.depth_km,
+                    dist,
+                );
+                if level < 1 {
+                    continue;
+                }
+                let rgb = color_for(ev.intensity_kind, level);
+                let fill = Color32::from_rgba_unmultiplied(rgb.r, rgb.g, rgb.b, fill_alpha);
+                for &lon_shift in &lon_shifts {
+                    if !ring_visible(
+                        ring,
+                        min_lon - lon_shift,
+                        min_lat,
+                        max_lon - lon_shift,
+                        max_lat,
+                    ) {
+                        continue;
+                    }
+                    if let Some(mesh) =
+                        mesh_fill_intensity_ring(ring, view, lon_shift, fill, max_edge_px)
+                    {
+                        append_mesh(meshes.entry(level).or_default(), mesh);
+                        painted += 1;
+                    }
+                }
+            }
+        }
+
+        let mut shapes: Vec<egui::Shape> = Vec::with_capacity(meshes.len());
+        for (_lv, mesh) in meshes {
+            if !mesh.indices.is_empty() {
+                shapes.push(egui::Shape::mesh(mesh));
+            }
+        }
+        let ok = !shapes.is_empty();
+        if ok {
+            ui.painter_at(rect).extend(shapes.clone());
+        }
+        self.intensity_cache = Some(IntensityPaintCache {
+            key: cache_key,
+            shapes,
+        });
+        ok
     }
+
+    fn intensity_region_layers(&self) -> Vec<&[RingSet]> {
+        let mut out: Vec<&[RingSet]> = Vec::new();
+        if !self.regional.fine.is_empty() {
+            out.push(self.regional.fine.as_slice());
+        }
+        if let Some(gq) = &self.gq {
+            for slice in [
+                gq.us.as_slice(),
+                gq.ak.as_slice(),
+                gq.nz.as_slice(),
+                gq.hw.as_slice(),
+                gq.it.as_slice(),
+            ] {
+                if !slice.is_empty() {
+                    out.push(slice);
+                }
+            }
+            if self.regional.fine.is_empty() {
+                for slice in [gq.cn.as_slice(), gq.jp.as_slice()] {
+                    if !slice.is_empty() {
+                        out.push(slice);
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+fn intensity_cache_key(view: &ViewCtx, ev: &EewReport, selected: bool, gen: u64) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    gen.hash(&mut h);
+    ev.event_id.hash(&mut h);
+    ev.magnitude.to_bits().hash(&mut h);
+    ev.depth_km.to_bits().hash(&mut h);
+    match ev.intensity_kind {
+        jian_core::IntensityKind::JmaShindo => 0_u8,
+        jian_core::IntensityKind::CnIntensity => 1_u8,
+    }
+    .hash(&mut h);
+    selected.hash(&mut h);
+    // 视口量化：轻微平移不重算
+    ((view.center_lon * 20.0).round() as i32).hash(&mut h);
+    ((view.center_lat * 20.0).round() as i32).hash(&mut h);
+    ((view.zoom * 4.0).round() as i32).hash(&mut h);
+    (view.rect.width() as i32 / 32).hash(&mut h);
+    (view.rect.height() as i32 / 32).hash(&mut h);
+    view.mode.is_globe().hash(&mut h);
+    h.finish()
+}
+
+fn ring_centroid(ring: &RingSet) -> (f64, f64) {
+    let n = ring.exterior.len().max(1) as f64;
+    let mut slon = 0.0_f64;
+    let mut slat = 0.0_f64;
+    for p in &ring.exterior {
+        slon += p[0] as f64;
+        slat += p[1] as f64;
+    }
+    (slon / n, slat / n)
+}
+
+fn bbox_half_diag_km(ring: &RingSet) -> f64 {
+    0.5 * haversine_km(
+        ring.min_lon as f64,
+        ring.min_lat as f64,
+        ring.max_lon as f64,
+        ring.max_lat as f64,
+    )
+}
+
+fn point_in_bbox(lon: f64, lat: f64, ring: &RingSet) -> bool {
+    lon >= ring.min_lon as f64
+        && lon <= ring.max_lon as f64
+        && lat >= ring.min_lat as f64
+        && lat <= ring.max_lat as f64
+}
+
+fn point_in_ring(lon: f64, lat: f64, exterior: &[[f32; 2]]) -> bool {
+    if exterior.len() < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = exterior.len() - 1;
+    for i in 0..exterior.len() {
+        let (xi, yi) = (exterior[i][0] as f64, exterior[i][1] as f64);
+        let (xj, yj) = (exterior[j][0] as f64, exterior[j][1] as f64);
+        let intersect = ((yi > lat) != (yj > lat))
+            && (lon < (xj - xi) * (lat - yi) / (yj - yi + 1e-15) + xi);
+        if intersect {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+fn append_mesh(dest: &mut egui::epaint::Mesh, src: egui::epaint::Mesh) {
+    let base = dest.vertices.len() as u32;
+    dest.vertices.extend(src.vertices);
+    dest.indices
+        .extend(src.indices.into_iter().map(|i| i + base));
 }
 
 fn paint_cache_key(
@@ -1047,7 +1292,64 @@ fn project_exterior_path_fill(
 }
 
 /// 球体：外环+孔全部顶点须可投影；邻边过大则整环放弃。
-#[allow(dead_code)] // 烈度区划 Mesh 填色暂停用，保留供恢复
+/// 烈度区划：用经纬度预剖分 `ring.tris` + 屏幕投影顶点组 Mesh。
+fn mesh_fill_intensity_ring(
+    ring: &RingSet,
+    view: &ViewCtx,
+    lon_shift: f64,
+    fill: Color32,
+    max_edge_px: f32,
+) -> Option<egui::epaint::Mesh> {
+    if ring.tris.len() < 3 {
+        return None;
+    }
+    let pts = if view.mode.is_globe() {
+        project_fill_vertices_globe(ring, view, max_edge_px)?
+    } else {
+        project_fill_vertices(ring, view, lon_shift)?
+    };
+    let expected = ring.exterior.len()
+        + ring
+            .holes
+            .iter()
+            .filter(|h| h.len() >= 3)
+            .map(|h| h.len())
+            .sum::<usize>();
+    if pts.len() != expected {
+        return None;
+    }
+    let max_e2 = max_edge_px * max_edge_px;
+    let mut mesh = egui::epaint::Mesh::default();
+    mesh.reserve_vertices(pts.len());
+    mesh.reserve_triangles(ring.tris.len() / 3);
+    for p in &pts {
+        mesh.colored_vertex(*p, fill);
+    }
+    let mut any = false;
+    for tri in ring.tris.chunks_exact(3) {
+        let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
+        if i0 >= pts.len() || i1 >= pts.len() || i2 >= pts.len() {
+            continue;
+        }
+        let a = pts[i0];
+        let b = pts[i1];
+        let c = pts[i2];
+        if (a - b).length_sq() > max_e2
+            || (b - c).length_sq() > max_e2
+            || (c - a).length_sq() > max_e2
+        {
+            continue;
+        }
+        mesh.add_triangle(tri[0], tri[1], tri[2]);
+        any = true;
+    }
+    if any {
+        Some(mesh)
+    } else {
+        None
+    }
+}
+
 fn project_fill_vertices_globe(
     ring: &RingSet,
     view: &ViewCtx,
@@ -1089,7 +1391,6 @@ fn project_fill_vertices_globe(
 }
 
 /// 平面填色：整环连续解缠 + `lon_shift`，避免按点 wrap 在视口边缘撕环丢填色。
-#[allow(dead_code)] // 烈度区划 Mesh 填色暂停用，保留供恢复
 fn project_fill_vertices(
     ring: &RingSet,
     view: &ViewCtx,

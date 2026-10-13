@@ -333,15 +333,15 @@ impl MapViewport {
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
 
-        // 烈度衰减填色：画在矢量轮廓之下。区划三角分带成本过高已停用，走同心环。
+        // 烈度衰减：同心环（近场/海上）+ 轻量区县一区一色（缓存）；测站/叉标仍在其上。
         // `show_intensity_rings`：预警跟设置，速报仅右键预览时为 true。
         if show_intensity_rings {
             let ring_ev = active.filter(|e| {
                 !e.is_cancel && !e.event_id.starts_with("station:")
             });
             if let Some(ev) = ring_ev {
-                let _ = self.vector.paint_intensity_regions(ui, &view, ev, true);
                 overlay::paint_intensity_rings(ui, &view, ev, true);
+                let _ = self.vector.paint_intensity_regions(ui, &view, ev, true);
             }
         }
 
