@@ -366,8 +366,13 @@ pub fn paint_stations(
                 continue;
             }
         }
-        // 烈度网有感：csis_inst 图标（与侧栏一致）
-        if s.intensity_kind == jian_core::IntensityKind::CnIntensity && s.intensity_level >= 1 {
+        // 烈度网有感：csis_inst 图标（与侧栏一致）。
+        // KMA 密网点只画色、不贴数字图标，避免全国「1」糊满半岛。
+        let is_kma = s.id.starts_with("kma:");
+        if !is_kma
+            && s.intensity_kind == jian_core::IntensityKind::CnIntensity
+            && s.intensity_level >= 1
+        {
             let cn_lv = s.intensity_level.clamp(1, 12);
             if let Some(tex) = icons.and_then(|i| i.csis_inst(cn_lv)) {
                 let base = match cn_lv {
@@ -583,6 +588,62 @@ fn stroke_polyline(painter: &egui::Painter, segs: &[Vec<Pos2>], stroke: Stroke) 
             continue;
         }
         painter.add(egui::Shape::line(pts.clone(), stroke));
+    }
+}
+
+/// 衰减估算烈度/震度同心环（描边）。
+///
+/// 半径由 `intensity_rings` 反解，与 `estimate_at_site` 离散档位一致：
+/// 每一圈为「估档 ≥ 该档」的外缘地表距。
+pub fn paint_intensity_rings(
+    ui: &mut Ui,
+    view: &ViewCtx,
+    ev: &EewReport,
+    selected: bool,
+) {
+    if ev.is_cancel
+        || ev.event_id.starts_with("station:")
+        || ev.event_id.starts_with("record:")
+    {
+        return;
+    }
+    if !ev.magnitude.is_finite() || ev.magnitude <= 0.0 {
+        return;
+    }
+    let rings = jian_core::intensity_rings(ev.intensity_kind, ev.magnitude, ev.depth_km);
+    if rings.is_empty() {
+        return;
+    }
+    let rect = view.rect;
+    let painter = ui.painter_at(rect);
+    let Some(epicenter) = view.project(ev.longitude, ev.latitude) else {
+        return;
+    };
+    let max_r = rect.width().max(rect.height()) * 3.0;
+    let base_alpha = if selected { 200_u8 } else { 120_u8 };
+    let stroke_w = if selected { 2.2_f32 } else { 1.6_f32 };
+
+    for &(level, km) in &rings {
+        if km < 0.5 {
+            continue;
+        }
+        let rgb = color_for(ev.intensity_kind, level);
+        let stroke = Stroke::new(
+            stroke_w,
+            Color32::from_rgba_unmultiplied(rgb.r, rgb.g, rgb.b, base_alpha),
+        );
+        if view.mode.is_globe() {
+            stroke_polyline(
+                &painter,
+                &view.circle_segments(ev.longitude, ev.latitude, km),
+                stroke,
+            );
+        } else {
+            let r = projection::km_to_pixels(km, ev.latitude, view.zoom);
+            if r >= 2.0 && r < max_r {
+                painter.circle_stroke(epicenter, r, stroke);
+            }
+        }
     }
 }
 
@@ -903,7 +964,7 @@ pub fn paint_typhoons(
             }
         }
 
-        // 当前中心 + 徽章
+        // 当前中心：仅圆环，状态条文案改由右上 HUD（不贴在地图上）
         let Some(p) = project_near(view, tf.longitude, tf.latitude) else {
             continue;
         };
@@ -914,27 +975,15 @@ pub fn paint_typhoons(
         painter.circle_stroke(p, 9.0, Stroke::new(2.2_f32, Color32::WHITE));
         painter.circle_stroke(p, 6.5, Stroke::new(2.0_f32, Color32::from_rgb(r, g, bl)));
 
-        let time = last
-            .map(|x| format_typhoon_time(&x.time_text))
-            .unwrap_or_default();
         let strong = if tf.strong.is_empty() {
             last.map(|x| x.strong.as_str()).unwrap_or("")
         } else {
             tf.strong.as_str()
         };
-        let badge_hover = paint_typhoon_badge(
-            &painter,
-            p,
-            strong,
-            &tf.name,
-            &time,
-            Color32::from_rgb(r, g, bl),
-        );
 
         if let Some(hp) = hover_pos {
             let d2 = (hp.x - p.x).powi(2) + (hp.y - p.y).powi(2);
-            let on_badge = badge_hover.contains(hp);
-            if d2 <= hit_r2 || on_badge {
+            if d2 <= hit_r2 {
                 let hit = TyphoonHoverHit {
                     anchor: p,
                     id: tf.id.clone(),
@@ -962,9 +1011,8 @@ pub fn paint_typhoons(
                         .unwrap_or(tf.move_speed_kmh),
                     is_center: true,
                 };
-                let score = if on_badge { 0.0 } else { d2 };
-                if best_hit.as_ref().is_none_or(|(bd, _)| score < *bd) {
-                    best_hit = Some((score, hit));
+                if best_hit.as_ref().is_none_or(|(bd, _)| d2 < *bd) {
+                    best_hit = Some((d2, hit));
                 }
             }
         }
@@ -979,124 +1027,12 @@ fn project_near(view: &ViewCtx, lon: f64, lat: f64) -> Option<Pos2> {
     view.project(lon, lat)
 }
 
-fn paint_typhoon_badge(
-    painter: &egui::Painter,
-    center: Pos2,
-    strong: &str,
-    name: &str,
-    time: &str,
-    grade_color: Color32,
-) -> Rect {
-    let font = egui::FontId::proportional(13.0);
-    let type_gal = painter.layout_no_wrap(
-        if strong.is_empty() {
-            "台风".into()
-        } else {
-            strong.to_string()
-        },
-        font.clone(),
-        Color32::WHITE,
-    );
-    let name_txt = if time.is_empty() {
-        name.to_string()
-    } else {
-        format!("{name}  {time}")
-    };
-    let name_gal = painter.layout_no_wrap(name_txt, font, Color32::WHITE);
-    let pad_x = 8.0_f32;
-    let pad_y = 4.0_f32;
-    let h = type_gal.size().y.max(name_gal.size().y) + pad_y * 2.0;
-    let type_w = type_gal.size().x + pad_x * 2.0;
-    let name_w = name_gal.size().x + pad_x * 2.0;
-    let origin = egui::pos2(center.x + 12.0, center.y - h * 0.5);
-    let type_rect = Rect::from_min_size(origin, Vec2::new(type_w, h));
-    let name_rect = Rect::from_min_size(
-        egui::pos2(origin.x + type_w, origin.y),
-        Vec2::new(name_w, h),
-    );
-    let full = type_rect.union(name_rect);
-    painter.rect_filled(type_rect, 3.0, grade_color);
-    painter.rect_stroke(
-        type_rect,
-        3.0,
-        Stroke::new(1.0_f32, Color32::WHITE),
-        egui::StrokeKind::Outside,
-    );
-    painter.rect_filled(
-        name_rect,
-        3.0,
-        Color32::from_rgba_unmultiplied(0x22, 0x44, 0x66, 0xDD),
-    );
-    painter.rect_stroke(
-        name_rect,
-        3.0,
-        Stroke::new(1.0_f32, Color32::WHITE),
-        egui::StrokeKind::Outside,
-    );
-    painter.galley(
-        egui::pos2(
-            type_rect.center().x - type_gal.size().x * 0.5,
-            type_rect.center().y - type_gal.size().y * 0.5,
-        ),
-        type_gal,
-        Color32::WHITE,
-    );
-    painter.galley(
-        egui::pos2(
-            name_rect.min.x + pad_x,
-            name_rect.center().y - name_gal.size().y * 0.5,
-        ),
-        name_gal,
-        Color32::WHITE,
-    );
-    full.expand(2.0)
-}
-
 fn normalize_typhoon_agency(a: &str) -> String {
     match a.trim() {
         "台湾" | "中国台湾" => "中国台湾".into(),
         "香港" | "中国香港" => "中国香港".into(),
         other => other.to_string(),
     }
-}
-
-fn format_typhoon_time(time_str: &str) -> String {
-    // 2026-10-13 14:00:00 → 13日14时
-    if let Some((d, h)) = regex_lite_ymd_hour(time_str) {
-        return format!("{d}日{h}时");
-    }
-    time_str.to_string()
-}
-
-fn regex_lite_ymd_hour(s: &str) -> Option<(u32, u32)> {
-    let bytes = s.as_bytes();
-    let mut i = 0usize;
-    while i + 10 <= bytes.len() {
-        if bytes[i].is_ascii_digit()
-            && bytes[i + 1].is_ascii_digit()
-            && bytes[i + 2].is_ascii_digit()
-            && bytes[i + 3].is_ascii_digit()
-            && (bytes[i + 4] == b'-' || bytes[i + 4] == b'/')
-        {
-            let day: u32 = std::str::from_utf8(&bytes[i + 8..i + 10])
-                .ok()?
-                .parse()
-                .ok()?;
-            let mut j = i + 10;
-            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'T') {
-                j += 1;
-            }
-            if j + 2 <= bytes.len()
-                && bytes[j].is_ascii_digit()
-                && bytes[j + 1].is_ascii_digit()
-            {
-                let hour: u32 = std::str::from_utf8(&bytes[j..j + 2]).ok()?.parse().ok()?;
-                return Some((day, hour));
-            }
-        }
-        i += 1;
-    }
-    None
 }
 
 fn paint_wind_circles(

@@ -1513,6 +1513,16 @@ fn draw_general(
             toggle(ui, &mut draft.ui.show_wave_rings);
         });
         row_divider(ui);
+        control_row(
+            ui,
+            "烈度估算环",
+            "与本机估烈度同一衰减；反解各档外缘半径后描边",
+            "\u{25ce}",
+            |ui| {
+                toggle(ui, &mut draft.ui.show_intensity_rings);
+            },
+        );
+        row_divider(ui);
         control_row(ui, "烈度图例", "地图·下角显示烈度色标", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_legend);
         });

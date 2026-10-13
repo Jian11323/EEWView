@@ -88,6 +88,9 @@ pub struct UiConfig {
     /// 绘制 P/S 走时波圈
     #[serde(default = "default_true")]
     pub show_wave_rings: bool,
+    /// 绘制衰减估算烈度/震度同心环
+    #[serde(default = "default_true")]
+    pub show_intensity_rings: bool,
     /// 地图左下角烈度图例
     #[serde(default = "default_true")]
     pub show_legend: bool,
@@ -648,6 +651,7 @@ impl Default for AppConfig {
                 auto_follow_eew: true,
                 auto_zoom_waves: true,
                 show_wave_rings: true,
+                show_intensity_rings: true,
                 show_legend: true,
                 show_volcanoes: true,
                 show_typhoons: true,

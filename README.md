@@ -14,7 +14,7 @@
 | 速报 | 速报历史（地名 / 时间 / M / 震度色块） |
 | 预警 | 预警列表（报数 / M / 最大震度） |
 | 测站 | NIED Kmoni 有感测站（列表 + 地图色点） |
-| 地图 | 暗色要石矢量 / 亮色地形瓦片 + 震中 + P/S 波圈（JMA2001 走时） |
+| 地图 | 暗色 GQ Special 矢量（藏南修复）/ 亮色地形瓦片 + 震中 + P/S 波圈（JMA2001 走时）+ 衰减估算烈度环 |
 | 图例 / 时钟 | ·下烈度色标；右下本地时间（可加 JST） |
 | 信息头 / 倒计时 | 当前事件；本机经纬有效时 S 波剩余秒叠在右下时钟上方 |
 | 主题 | 设置 → 显示：暗色 / 亮色（主界面色板 + auto 底图同步切换） |
@@ -32,7 +32,7 @@
 | **Wolfx** | JMA / CENC 等预警与列表补充 | `[sources.wolfx]` |
 | **P2PQuake** | 气象厅地震情报等 | `[sources.p2pquake]` |
 
-底图：`basemap = "auto"` 时暗色用 `geodata/kanameishi/` 要石矢量，亮色用自有·洋地形瓦片 `tilemap.sismotide.top/arcwob`（横向循环）。  
+底图：`basemap = "auto"` 时暗色优先 `geodata/globalquake/`（GlobalQuake Special 藏南修复矢量），否则要石；亮色用自有海洋地形瓦片 `tilemap.sismotide.top/arcwob`（横向循环）。  
 国外源地名按融合历史 FE 格网修正（`assets/place/`）；JMA / CWA / HKO / CENC 保留原文。  
 字段约定见 [`docs/数据源.md`](docs/数据源.md)；底图说明见 [`geodata/README.md`](geodata/README.md)。
 
@@ -135,7 +135,7 @@ Windows 安装包默认装到 `C:\Program Files (x86)\eew view`。本地配置 `
 |------|------|
 | `crates/` | 应用、界面、地图、网络、音效、走时等 |
 | `assets/` | 音效、走时、色标、烈度图标、地图标记、品牌、霞鹜文· |
-| `geodata/` | 暗色要石 TopoJSON；可选行政区 GeoJSON 回退 |
+| `geodata/` | 暗色 GQ Special 矢量（优先）/ 要石回退；可选行政区 GeoJSON |
 | `config/default.toml` | 默认配置（密钥勿提交） |
 | `docs/` | 架构与接口说明 |
 | `tools/` | 走时表转换等·· |

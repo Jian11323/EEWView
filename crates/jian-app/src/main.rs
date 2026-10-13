@@ -252,6 +252,7 @@ fn run_app() -> Result<()> {
     let started = Instant::now();
     let has_local = cfg.local.latitude.is_some() && cfg.local.longitude.is_some();
     snap.show_wave_rings = cfg.ui.show_wave_rings;
+    snap.show_intensity_rings = cfg.ui.show_intensity_rings;
     eframe::run_native(
         jian_ui::APP_DISPLAY_NAME,
         options,
@@ -593,6 +594,7 @@ impl eframe::App for JianApp {
 
         self.tick_health_audio();
         self.tick_tsunami_audio();
+        self.tick_typhoon_update();
 
         // 启动：稍等快照汇聚后跳到最新预警（速报不进左上角，也不自动跟焦）
         if self.auto_center_pending {
@@ -874,6 +876,7 @@ impl eframe::App for JianApp {
                                 },
                             ));
                             self.snap.show_wave_rings = self.cfg.ui.show_wave_rings;
+                            self.snap.show_intensity_rings = self.cfg.ui.show_intensity_rings;
                             let mut note = format!("已保存到 {}", path.display());
                             if renderer_changed {
                                 note.push_str("；渲染设备/GPU 接口需重启生效，其余已热重载");
@@ -1030,6 +1033,40 @@ impl JianApp {
         }
         self.last_window_geom = Some(geom);
         self.window_geom_save_at = Some(Instant::now());
+    }
+
+    /// 台风指纹变化：提示音 + 视角跟焦（对齐 eewcn MapTyphoonLogic）。
+    fn tick_typhoon_update(&mut self) {
+        // 启动界面只登记 pending，消失后再播/飞（首包跟焦不丢）
+        if self.splash.active() {
+            return;
+        }
+        let play_hint = self.snap.pending_typhoon_hint;
+        self.snap.pending_typhoon_hint = false;
+        let fly = self.snap.pending_typhoon_fly.take();
+        if play_hint {
+            if let Some(audio) = self.audio.as_mut() {
+                audio.play(AudioCue::UiNotify);
+            }
+        }
+        let Some((lon, lat, radius_km)) = fly else {
+            return;
+        };
+        if !self.cfg.ui.show_typhoons || !self.cfg.sources.typhoon.enabled {
+            return;
+        }
+        // eewcn: zoomLevel<=3 不跟焦；锁定视角（用户拖拽）也不跟
+        if self.shell.map.zoom <= 3.0 || self.shell.map.user_camera_override {
+            return;
+        }
+        let z = zoom_to_fit_radius_km(
+            lat,
+            radius_km.max(1.0),
+            self.shell.map.last_viewport_min_px,
+            0.45,
+        )
+        .min(7.0);
+        self.shell.map.fly_to(lon, lat, Some(z), 1.0);
     }
 
     fn tick_health_audio(&mut self) {

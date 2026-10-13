@@ -17,7 +17,7 @@ pub use tts::{
 };
 pub use estimate::{
     calc_csis, calc_jma_instrumental, estimate_at_site, estimate_epicentral, fill_intensity,
-    hypocentral_km,
+    hypocentral_km, intensity_radius_km, intensity_rings,
 };
 pub use intensity::{
     cn_intensity_level, cn_intensity_text, instrumental_display_text, instrumental_half_step_text,
@@ -379,6 +379,69 @@ pub fn typhoon_forecast_agency_rgb(agency: &str) -> (u8, u8, u8) {
     }
 }
 
+/// 台风列表指纹（对齐 eewcn `_typhoonDataFingerprint`）：id/点数/末点时空与强度。
+pub fn typhoon_data_fingerprint(list: &[TyphoonInfo]) -> String {
+    let mut parts: Vec<String> = list
+        .iter()
+        .map(|tf| {
+            let last = tf.points.last();
+            format!(
+                "{}|{}|{}|{}|{}|{}|{}",
+                tf.id,
+                tf.points.len(),
+                last.map(|p| p.time_text.as_str()).unwrap_or(""),
+                last.map(|p| p.longitude).unwrap_or(tf.longitude),
+                last.map(|p| p.latitude).unwrap_or(tf.latitude),
+                last.map(|p| p.power).unwrap_or(tf.power),
+                last.map(|p| p.strong.as_str()).unwrap_or(tf.strong.as_str()),
+            )
+        })
+        .collect();
+    parts.sort();
+    parts.join(";")
+}
+
+/// 末点最大风圈半径（km）；无风圈时 0。
+pub fn typhoon_max_wind_radius_km(tf: &TyphoonInfo) -> f64 {
+    let Some(last) = tf.points.last() else {
+        return 0.0;
+    };
+    let mut max_r = 0.0_f64;
+    for q in [last.radius7, last.radius10, last.radius12] {
+        if let Some(q) = q {
+            max_r = max_r.max(q.max_km());
+        }
+    }
+    max_r
+}
+
+/// 视角目标：活跃台风中心均值 + 跟焦半径 km（对齐 eewcn `fitViewportToTyphoon`，默认 250）。
+pub fn typhoon_focus_lonlat_radius(list: &[TyphoonInfo]) -> Option<(f64, f64, f64)> {
+    const DEFAULT_FOCUS_RADIUS_KM: f64 = 250.0;
+    let mut sum_lon = 0.0_f64;
+    let mut sum_lat = 0.0_f64;
+    let mut n = 0_usize;
+    let mut max_r = 0.0_f64;
+    for tf in list {
+        if tf.latitude.abs() <= 0.01 && tf.longitude.abs() <= 0.01 {
+            continue;
+        }
+        sum_lon += tf.longitude;
+        sum_lat += tf.latitude;
+        n += 1;
+        max_r = max_r.max(typhoon_max_wind_radius_km(tf));
+    }
+    if n == 0 {
+        return None;
+    }
+    let radius = if max_r > 0.0 {
+        max_r
+    } else {
+        DEFAULT_FOCUS_RADIUS_KM
+    };
+    Some((sum_lon / n as f64, sum_lat / n as f64, radius))
+}
+
 /// JMA 火山情报（降灰预报等；不进地震速报列表）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolcanoNotice {
@@ -485,12 +548,20 @@ pub struct AppSnapshot {
     pub selection: Option<ListSelection>,
     /// 图例 P-S：是否绘制走时波圈
     pub show_wave_rings: bool,
+    /// 是否绘制衰减估算烈度/震度同心环
+    pub show_intensity_rings: bool,
     /// 当前有效的 JMA 海啸情报（取消后为 None）
     pub tsunami: Option<TsunamiInfo>,
     /// JMA 火山情报（与 records 分离）
     pub volcanoes: Vec<VolcanoNotice>,
     /// 活跃台风（路径 / 风圈 / 预报）
     pub typhoons: Vec<TyphoonInfo>,
+    /// 台风列表指纹；用于判定「有更新」再播提示音 / 跟焦（对齐 eewcn）
+    pub typhoon_fingerprint: String,
+    /// 台风指纹变化后待飞跃：(lon, lat, radius_km)；主循环换算 zoom 后 take
+    pub pending_typhoon_fly: Option<(f64, f64, f64)>,
+    /// 台风指纹变化且非首包时播 UI 提示音
+    pub pending_typhoon_hint: bool,
     /// 各测站网最近一帧到达时刻 unix ms（kmoni/snet/kma）
     pub station_updated_ms: std::collections::HashMap<String, i64>,
     /// 新速报写入后待主循环飞跃的 (lon, lat, zoom)；take 后清空
@@ -675,9 +746,13 @@ impl AppSnapshot {
                 index: 0,
             }),
             show_wave_rings: true,
+            show_intensity_rings: true,
             tsunami: None,
             volcanoes: Vec::new(),
             typhoons: Vec::new(),
+            typhoon_fingerprint: String::new(),
+            pending_typhoon_fly: None,
+            pending_typhoon_hint: false,
             station_updated_ms: std::collections::HashMap::new(),
             pending_record_fly: None,
             pending_tts_record: None,
@@ -749,9 +824,13 @@ impl AppSnapshot {
             tab: SidebarTab::Eew,
             selection: None,
             show_wave_rings: true,
+            show_intensity_rings: true,
             tsunami: None,
             volcanoes: Vec::new(),
             typhoons: Vec::new(),
+            typhoon_fingerprint: String::new(),
+            pending_typhoon_fly: None,
+            pending_typhoon_hint: false,
             station_updated_ms: std::collections::HashMap::new(),
             pending_record_fly: None,
             pending_tts_record: None,
@@ -1012,8 +1091,18 @@ impl AppSnapshot {
     }
 
     /// 整表替换活跃台风列表（轮询快照）。
+    /// 指纹变化时置 `pending_typhoon_fly` / `pending_typhoon_hint`（对齐 eewcn）。
     pub fn replace_typhoons(&mut self, list: Vec<TyphoonInfo>) {
+        let fp = typhoon_data_fingerprint(&list);
+        if fp == self.typhoon_fingerprint {
+            self.typhoons = list;
+            return;
+        }
+        let play_hint = !self.typhoon_fingerprint.is_empty();
+        self.typhoon_fingerprint = fp;
         self.typhoons = list;
+        self.pending_typhoon_hint = play_hint;
+        self.pending_typhoon_fly = typhoon_focus_lonlat_radius(&self.typhoons);
     }
 
     /// 插入火山情报；按 name+title+time 去重；新→旧。

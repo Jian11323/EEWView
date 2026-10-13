@@ -100,7 +100,7 @@ impl MapViewport {
         self.cache
             .set_source(tile_base.into(), tile_source.into());
         if let Some(dir) = geodata_dir {
-            // 球体强制矢量；平面按底图模式
+            // 球体 / 矢量底图：加载国界与区划
             if basemap.show_vector() || self.projection_mode.is_globe() {
                 self.vector.load_dir(dir);
             }
@@ -271,6 +271,7 @@ impl MapViewport {
         travel: Option<&TravelEngine>,
         now_ms: i64,
         show_waves: bool,
+        show_intensity_rings: bool,
         stations: &[StationSample],
         records: &[EqRecord],
         volcanoes: &[VolcanoNotice],
@@ -320,17 +321,21 @@ impl MapViewport {
             }
         }
 
-        // 平面瓦片（tiles/both）；球体暂不贴瓦片
+        // 平面瓦片（tiles/both）
         if !globe && self.basemap.show_tiles() {
             self.cache
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
 
-        // 矢量：对齐 GQ — 海洋底色上 Path 填陆地 + 描边（非经纬度耳切）
+        // 暗色矢量 / 球体：只描轮廓，不填陆地（对齐旧版纯黑轮廓图）
         if globe || self.basemap.show_vector() {
-            let fill_land = globe || self.basemap == BasemapMode::Vector;
-            self.vector
-                .paint(ui, &view, fill_land, self.vector_style);
+            self.vector.paint(
+                ui,
+                &view,
+                /* fill_land */ false,
+                self.vector_style,
+                /* skip_world_stroke */ false,
+            );
         }
 
         // JMA 海啸：按沿岸预报区描边闪烁（不对中日外轮廓整圈描边）
@@ -379,6 +384,28 @@ impl MapViewport {
                 !e.event_id.starts_with("station:") && !e.event_id.starts_with("record:")
             });
             let show_cross = !blink_active || overlay::eew_mark_blink_on(now_ms);
+
+            // 烈度估算环：只画当前焦点预警（与侧栏 M/H/`estimate_at_site` 同源），
+            // 避免多源叠圈；叠在叉标/波圈之下，与波圈开关独立。
+            if show_intensity_rings {
+                let ring_ev = active
+                    .filter(|e| {
+                        !e.is_cancel
+                            && !e.event_id.starts_with("station:")
+                            && !e.event_id.starts_with("record:")
+                    })
+                    .or_else(|| {
+                        wave_events.iter().find(|e| {
+                            !e.is_cancel
+                                && !e.event_id.starts_with("station:")
+                                && !e.event_id.starts_with("record:")
+                        })
+                    });
+                if let Some(ev) = ring_ev {
+                    overlay::paint_intensity_rings(ui, &view, ev, true);
+                }
+            }
+
             overlay::paint_eew_markers(ui, &view, eew_markers, active_key, icons, show_cross);
 
             if show_waves {

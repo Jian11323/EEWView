@@ -176,8 +176,10 @@ impl MainShell {
         self.map_elapsed += ctx.input(|i| i.stable_dt) as f64;
         let now_ms = chrono::Utc::now().timestamp_millis();
         snap.show_wave_rings = cfg.ui.show_wave_rings;
+        snap.show_intensity_rings = cfg.ui.show_intensity_rings;
         // 多震：只要仍有未取消的传播中事件就画波圈（不因当前选中项取消而全灭）
         let show_waves = snap.overlay_mode == OverlayMode::Wave && snap.show_wave_rings;
+        let show_intensity_rings = snap.show_intensity_rings;
         let scale = self.intensity_scale.clone();
 
         let live_refs =
@@ -267,6 +269,7 @@ impl MainShell {
                     travel,
                     now_ms,
                     show_waves,
+                    show_intensity_rings,
                     &snap.stations,
                     &snap.records,
                     volcanoes_for_map,
@@ -1007,14 +1010,15 @@ fn draw_typhoon_detail_below_stations(
         format!("移动速度: {mv}"),
     ];
 
-    const CARD_W: f32 = 248.0;
+    // 与右上三测站卡片同宽对齐，并与卡片底边留足间距，避免贴地图
+    const CARD_W: f32 = 240.0; // 76*3 + 6*2
     let pad = 8.0_f32;
     let line_h = 16.0_f32;
     let header_h = 26.0_f32;
     let body_h = pad + line_h * lines.len() as f32 + 4.0;
     let total_h = header_h + 2.0 + body_h;
-    let top_right = ui.max_rect().right_top() + Vec2::new(-12.0, 0.0);
-    let origin = egui::pos2(top_right.x - CARD_W, station_bottom_y + 8.0);
+    let right = ui.max_rect().right() - 12.0;
+    let origin = egui::pos2(right - CARD_W, station_bottom_y + 14.0);
     let rect = egui::Rect::from_min_size(origin, Vec2::new(CARD_W, total_h));
     let (r, g, b) = jian_core::typhoon_color_rgb(&hit.strong, hit.power);
     overlay_child(ui, "typhoon_detail_card", rect, |ui| {
