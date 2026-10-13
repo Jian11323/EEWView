@@ -651,10 +651,10 @@ impl VectorBasemap {
         painter.extend(shapes);
     }
 
-    /// 市级/区县「一区一色」烈度填色（质心估档 + 缓存）。
+    /// 陆地贴边的衰减烈度：区划耳切三角按震中距估档，大边再四分（有预算+缓存）。
     ///
-    /// 不做耳切细分/环裁切（那会卡死主线程）。大区且震中在内时跳过该区，
-    /// 交给下层同心环表现近场衰减。无命中返回 `false`。
+    /// 外缘跟区划走（锯齿陆地，对齐 Hikari 类参考）；区内随距离分档。
+    /// 不做环半径多边形裁切（易卡死）。无命中返回 `false` 由上层画同心环。
     pub fn paint_intensity_regions(
         &mut self,
         ui: &mut Ui,
@@ -694,7 +694,7 @@ impl VectorBasemap {
         };
         let cull_km = max_r_km.max(25.0) + 80.0;
         let rect = view.rect;
-        let fill_alpha = if selected { 110_u8 } else { 78_u8 };
+        let fill_alpha = if selected { 120_u8 } else { 88_u8 };
         let globe = view.mode.is_globe();
         let world_px = if globe {
             rect.width().max(rect.height())
@@ -721,15 +721,12 @@ impl VectorBasemap {
         };
 
         let mut meshes: HashMap<u8, egui::epaint::Mesh> = HashMap::new();
-        let mut painted = 0usize;
-        const MAX_REGIONS: usize = 700;
-        // 震中所在且半对角超过此值（km）的大区跳过，避免整块最高档。
-        const SKIP_EPI_HOST_DIAG_KM: f64 = 55.0;
+        let mut tri_budget = INTENSITY_TRI_BUDGET;
 
-        'regions: for layer in layers {
+        for layer in layers {
             for ring in layer {
-                if painted >= MAX_REGIONS {
-                    break 'regions;
+                if tri_budget == 0 {
+                    break;
                 }
                 if !ring.may_fill() || ring.tris.is_empty() {
                     continue;
@@ -740,24 +737,10 @@ impl VectorBasemap {
                 if cen_dist > cull_km + diag {
                     continue;
                 }
-                let epi_inside = point_in_bbox(ev.longitude, ev.latitude, ring)
-                    && point_in_ring(ev.longitude, ev.latitude, &ring.exterior);
-                // 大区含震中：整块填最高档会假，交给同心环
-                if epi_inside && diag > SKIP_EPI_HOST_DIAG_KM {
+                let verts = ring_lonlat_vertices(ring);
+                if verts.len() < 3 {
                     continue;
                 }
-                let dist = if epi_inside { 0.0 } else { cen_dist };
-                let (level, _) = jian_core::estimate_at_site(
-                    ev.intensity_kind,
-                    ev.magnitude,
-                    ev.depth_km,
-                    dist,
-                );
-                if level < 1 {
-                    continue;
-                }
-                let rgb = color_for(ev.intensity_kind, level);
-                let fill = Color32::from_rgba_unmultiplied(rgb.r, rgb.g, rgb.b, fill_alpha);
                 for &lon_shift in &lon_shifts {
                     if !ring_visible(
                         ring,
@@ -768,11 +751,66 @@ impl VectorBasemap {
                     ) {
                         continue;
                     }
-                    if let Some(mesh) =
-                        mesh_fill_intensity_ring(ring, view, lon_shift, fill, max_edge_px)
+                    // 包围盒档位一致：整环同色（省掉逐三角）
+                    let d_lo = if point_in_bbox(ev.longitude, ev.latitude, ring)
+                        && point_in_ring(ev.longitude, ev.latitude, &ring.exterior)
                     {
-                        append_mesh(meshes.entry(level).or_default(), mesh);
-                        painted += 1;
+                        0.0
+                    } else {
+                        (cen_dist - diag).max(0.0)
+                    };
+                    let d_hi = cen_dist + diag;
+                    let lv_lo = jian_core::estimate_at_site(
+                        ev.intensity_kind,
+                        ev.magnitude,
+                        ev.depth_km,
+                        d_lo,
+                    )
+                    .0;
+                    let lv_hi = jian_core::estimate_at_site(
+                        ev.intensity_kind,
+                        ev.magnitude,
+                        ev.depth_km,
+                        d_hi,
+                    )
+                    .0;
+                    if lv_lo == lv_hi {
+                        if lv_lo < 1 {
+                            continue;
+                        }
+                        let rgb = color_for(ev.intensity_kind, lv_lo);
+                        let fill =
+                            Color32::from_rgba_unmultiplied(rgb.r, rgb.g, rgb.b, fill_alpha);
+                        if let Some(mesh) =
+                            mesh_fill_intensity_ring(ring, view, lon_shift, fill, max_edge_px)
+                        {
+                            let n = mesh.indices.len() / 3;
+                            append_mesh(meshes.entry(lv_lo).or_default(), mesh);
+                            tri_budget = tri_budget.saturating_sub(n);
+                        }
+                        continue;
+                    }
+                    for tri in ring.tris.chunks_exact(3) {
+                        if tri_budget == 0 {
+                            break;
+                        }
+                        let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
+                        if i0 >= verts.len() || i1 >= verts.len() || i2 >= verts.len() {
+                            continue;
+                        }
+                        paint_intensity_tri_land(
+                            &mut meshes,
+                            &mut tri_budget,
+                            view,
+                            lon_shift,
+                            max_edge_px,
+                            fill_alpha,
+                            ev,
+                            verts[i0],
+                            verts[i1],
+                            verts[i2],
+                            0,
+                        );
                     }
                 }
             }
@@ -855,6 +893,125 @@ fn ring_centroid(ring: &RingSet) -> (f64, f64) {
         slat += p[1] as f64;
     }
     (slon / n, slat / n)
+}
+
+fn ring_lonlat_vertices(ring: &RingSet) -> Vec<[f32; 2]> {
+    let mut out = Vec::with_capacity(
+        ring.exterior.len() + ring.holes.iter().map(|h| h.len()).sum::<usize>(),
+    );
+    out.extend_from_slice(&ring.exterior);
+    for hole in &ring.holes {
+        if hole.len() >= 3 {
+            out.extend_from_slice(hole);
+        }
+    }
+    out
+}
+
+/// 单帧陆地烈度三角上限（缓存命中后不再算）。
+const INTENSITY_TRI_BUDGET: usize = 18_000;
+const INTENSITY_TRI_SPLIT_KM: f64 = 42.0;
+const INTENSITY_TRI_MAX_DEPTH: u8 = 4;
+
+/// 陆地三角：边过长且跨档时四分；否则按质心距填一色。
+fn paint_intensity_tri_land(
+    meshes: &mut HashMap<u8, egui::epaint::Mesh>,
+    budget: &mut usize,
+    view: &ViewCtx,
+    lon_shift: f64,
+    max_edge_px: f32,
+    fill_alpha: u8,
+    ev: &EewReport,
+    a: [f32; 2],
+    b: [f32; 2],
+    c: [f32; 2],
+    depth: u8,
+) {
+    if *budget == 0 {
+        return;
+    }
+    let dist = |p: [f32; 2]| haversine_km(ev.longitude, ev.latitude, p[0] as f64, p[1] as f64);
+    let e_ab = haversine_km(a[0] as f64, a[1] as f64, b[0] as f64, b[1] as f64);
+    let e_bc = haversine_km(b[0] as f64, b[1] as f64, c[0] as f64, c[1] as f64);
+    let e_ca = haversine_km(c[0] as f64, c[1] as f64, a[0] as f64, a[1] as f64);
+    let max_e = e_ab.max(e_bc).max(e_ca);
+
+    let da = dist(a);
+    let db = dist(b);
+    let dc = dist(c);
+    let mut d_lo = da.min(db).min(dc);
+    let d_hi = da.max(db).max(dc);
+    if point_in_ring(ev.longitude, ev.latitude, &[a, b, c]) {
+        d_lo = 0.0;
+    }
+    let lv_lo = jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, d_lo).0;
+    let lv_hi = jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, d_hi).0;
+
+    if depth < INTENSITY_TRI_MAX_DEPTH && max_e > INTENSITY_TRI_SPLIT_KM && lv_lo != lv_hi {
+        let m_ab = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+        let m_bc = [(b[0] + c[0]) * 0.5, (b[1] + c[1]) * 0.5];
+        let m_ca = [(c[0] + a[0]) * 0.5, (c[1] + a[1]) * 0.5];
+        let d = depth + 1;
+        paint_intensity_tri_land(
+            meshes, budget, view, lon_shift, max_edge_px, fill_alpha, ev, a, m_ab, m_ca, d,
+        );
+        paint_intensity_tri_land(
+            meshes, budget, view, lon_shift, max_edge_px, fill_alpha, ev, m_ab, b, m_bc, d,
+        );
+        paint_intensity_tri_land(
+            meshes, budget, view, lon_shift, max_edge_px, fill_alpha, ev, m_ca, m_bc, c, d,
+        );
+        paint_intensity_tri_land(
+            meshes, budget, view, lon_shift, max_edge_px, fill_alpha, ev, m_ab, m_bc, m_ca, d,
+        );
+        return;
+    }
+
+    let mid = 0.5 * (d_lo + d_hi);
+    let level =
+        jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, mid).0;
+    if level < 1 {
+        return;
+    }
+    if emit_intensity_screen_tri(
+        meshes, view, lon_shift, max_edge_px, fill_alpha, ev, level, a, b, c,
+    ) {
+        *budget = budget.saturating_sub(1);
+    }
+}
+
+fn emit_intensity_screen_tri(
+    meshes: &mut HashMap<u8, egui::epaint::Mesh>,
+    view: &ViewCtx,
+    lon_shift: f64,
+    max_edge_px: f32,
+    fill_alpha: u8,
+    ev: &EewReport,
+    level: u8,
+    a: [f32; 2],
+    b: [f32; 2],
+    c: [f32; 2],
+) -> bool {
+    let project = |p: [f32; 2]| view.project_fill(p[0] as f64 + lon_shift, p[1] as f64);
+    let (Some(pa), Some(pb), Some(pc)) = (project(a), project(b), project(c)) else {
+        return false;
+    };
+    let max_e2 = max_edge_px * max_edge_px;
+    if (pa - pb).length_sq() > max_e2
+        || (pb - pc).length_sq() > max_e2
+        || (pc - pa).length_sq() > max_e2
+    {
+        return false;
+    }
+    let rgb = color_for(ev.intensity_kind, level);
+    let fill = Color32::from_rgba_unmultiplied(rgb.r, rgb.g, rgb.b, fill_alpha);
+    let mesh = meshes.entry(level).or_default();
+    let base = mesh.vertices.len() as u32;
+    mesh.colored_vertex(pa, fill);
+    mesh.colored_vertex(pb, fill);
+    mesh.colored_vertex(pc, fill);
+    mesh.add_triangle(base, base + 1, base + 2);
+    true
 }
 
 fn bbox_half_diag_km(ring: &RingSet) -> f64 {

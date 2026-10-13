@@ -1516,7 +1516,7 @@ fn draw_general(
         control_row(
             ui,
             "烈度区划填色",
-            "同心环 + 区县一区一色（缓存）；大区近场走环",
+            "陆地三角按距离分档填色（贴区划外缘）",
             "\u{25ce}",
             |ui| {
                 toggle(ui, &mut draft.ui.show_intensity_rings);
