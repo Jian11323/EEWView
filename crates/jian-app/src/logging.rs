@@ -121,8 +121,35 @@ fn prune_old_logs(dir: &Path, keep_days: u64) {
     }
 }
 
+/// Windows：按配置同步控制台。关闭时脱离 cargo/调试器黑框；开启时确保有可写控制台。
+#[cfg(windows)]
+pub fn sync_windows_console(want: bool) {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn FreeConsole() -> i32;
+        fn AllocConsole() -> i32;
+        fn GetConsoleWindow() -> *mut core::ffi::c_void;
+    }
+    unsafe {
+        if want {
+            if GetConsoleWindow().is_null() {
+                AllocConsole();
+            }
+        } else {
+            FreeConsole();
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn sync_windows_console(_want: bool) {}
+
 /// 初始化全局 subscriber；不可写时关闭文件层，切勿让 appender panic。
 pub fn init_logging(resource_root: &Path, cfg: &LogConfig) -> WorkerGuard {
+    // 仅配置明确开启时保留/分配控制台；默认脱离，避免挡住 GUI
+    let want_console = cfg.console;
+    sync_windows_console(want_console);
+
     let log_file = if cfg.enabled {
         pick_writable_log_file(resource_root, cfg)
     } else {
@@ -135,7 +162,6 @@ pub fn init_logging(resource_root: &Path, cfg: &LogConfig) -> WorkerGuard {
     }
 
     let filter = build_filter(cfg);
-    let want_console = cfg.console || cfg!(debug_assertions);
     let file_enabled = cfg.enabled && log_file.is_some();
 
     let (nb_writer, guard) = if let Some(ref file) = log_file {

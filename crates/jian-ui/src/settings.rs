@@ -1885,7 +1885,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
                 });
         });
         row_divider(ui);
-        control_row(ui, "同时输出 stderr", "便携 release 无黑窗；开发构建默认·开", "\u{25ce}", |ui| {
+        control_row(ui, "同时输出 stderr", "开启后分配控制台写 stderr；关闭则无黑窗", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.log.console);
         });
         row_divider(ui);
