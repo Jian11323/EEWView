@@ -8,9 +8,7 @@ use crate::globe::zoom_to_scroll;
 use crate::projection::{self, ViewCtx};
 use crate::topojson;
 use egui::{Color32, Pos2, Rect, Stroke, Ui};
-use jian_core::palette::color_for;
 use jian_core::EewReport;
-use jian_util::haversine_km;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
@@ -64,9 +62,10 @@ impl Default for VectorStyle {
 }
 
 /// 低于此缩放只画中日外轮廓；高于此才叠省界/都道府县（世界层本身不含中日）。
-const ZOOM_REGIONAL: f64 = 4.5;
-const ZOOM_REGIONAL_MED: f64 = 6.5;
-const ZOOM_REGIONAL_FINE: f64 = 8.5;
+/// 区县描边起始缩放；过大时（且 LOD 未简化）会拖死主线程。
+const ZOOM_REGIONAL: f64 = 6.5;
+const ZOOM_REGIONAL_MED: f64 = 8.0;
+const ZOOM_REGIONAL_FINE: f64 = 9.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BasemapMode {
@@ -199,18 +198,29 @@ impl LayerLods {
         }
     }
 
-    fn pick(&self, zoom: f64, z_med: f64, z_fine: f64) -> &Vec<RingSet> {
-        let chosen = if zoom < z_med {
-            &self.coarse
+    fn pick(&self, zoom: f64, z_med: f64, z_fine: f64) -> &[RingSet] {
+        // 区县量大时 coarse/medium 可能为空（跳过简化）；禁止回退到 fine，
+        // 否则远距也会每帧描几千区划，亮色矢量会卡死/崩。
+        if zoom < z_med {
+            if !self.coarse.is_empty() {
+                self.coarse.as_slice()
+            } else {
+                &[]
+            }
         } else if zoom < z_fine {
-            &self.medium
+            if !self.medium.is_empty() {
+                self.medium.as_slice()
+            } else if !self.coarse.is_empty() {
+                self.coarse.as_slice()
+            } else {
+                &[]
+            }
+        } else if !self.fine.is_empty() {
+            self.fine.as_slice()
+        } else if !self.medium.is_empty() {
+            self.medium.as_slice()
         } else {
-            &self.fine
-        };
-        if chosen.is_empty() {
-            &self.fine
-        } else {
-            chosen
+            self.coarse.as_slice()
         }
     }
 }
@@ -629,563 +639,19 @@ impl VectorBasemap {
         painter.extend(shapes);
     }
 
-    /// 市级/区县陆地裁切的衰减填色：颜色边界跟震中距环走，区划只作陆地掩膜。
+    /// 烈度区划填色。
     ///
-    /// 不用耳切斜边当分色边界（否则海岸/大区会长出放射尖刺）。无命中时返回 `false`。
+    /// 区县耳切 + 环裁切曾导致每帧生成海量三角、亮色矢量无响应/崩溃；
+    /// 暂回退同心环（由上层 `paint_intensity_rings` 绘制），保证可交互。
     pub fn paint_intensity_regions(
         &self,
-        ui: &mut Ui,
-        view: &ViewCtx,
-        ev: &EewReport,
-        selected: bool,
+        _ui: &mut Ui,
+        _view: &ViewCtx,
+        _ev: &EewReport,
+        _selected: bool,
     ) -> bool {
-        if ev.is_cancel || ev.event_id.starts_with("station:") {
-            return false;
-        }
-        if !ev.magnitude.is_finite() || ev.magnitude <= 0.0 {
-            return false;
-        }
-        let layers = self.intensity_region_layers();
-        if layers.is_empty() {
-            return false;
-        }
-        let rings = jian_core::intensity_rings(ev.intensity_kind, ev.magnitude, ev.depth_km);
-        let Some(&(_, max_r_km)) = rings.last() else {
-            return false;
-        };
-        let max_r_km = max_r_km.max(25.0);
-        // 粗筛：有感半径 + 区划半对角 + 小余量（勿过大，否则远省被误填）
-        let cull_km = max_r_km + 80.0;
-        // 由近到远的环外半径，用于把三角形按等距切开
-        let band_radii: Vec<f64> = rings.iter().map(|(_, r)| *r).collect();
-
-        let rect = view.rect;
-        let painter = ui.painter_at(rect);
-        let fill_alpha = if selected { 110_u8 } else { 78_u8 };
-        let globe = view.mode.is_globe();
-        let world_px = if globe {
-            rect.width().max(rect.height())
-        } else {
-            projection::world_size(view.zoom) as f32
-        };
-        // 投影撕裂边：超过视口对角线的三角形丢弃（日界/球缘）
-        let max_edge_px = rect.width().hypot(rect.height()).max(64.0);
-        let (min_lon, min_lat, max_lon, max_lat) = if globe {
-            (-180.0, -85.0, 180.0, 85.0)
-        } else {
-            let full_wrap = rect.width() >= world_px * 0.92;
-            if full_wrap {
-                (-180.0, -85.0, 180.0, 85.0)
-            } else {
-                viewport_bounds(view.center_lon, view.center_lat, view.zoom, rect)
-            }
-        };
-        // 烈度填色默认只画本世界；视口靠近日界时才加 ±360° 副本
-        let lon_shifts: Vec<f64> = if globe {
-            vec![0.0]
-        } else if min_lon < -150.0 || max_lon > 150.0 || view.center_lon.abs() > 150.0 {
-            vec![-360.0, 0.0, 360.0]
-        } else {
-            vec![0.0]
-        };
-
-        // 按烈度档位聚合 Mesh，减少 Shape 数量
-        let mut meshes: HashMap<u8, egui::epaint::Mesh> = HashMap::new();
-        let mut painted = 0usize;
-
-        for layer in layers {
-            for ring in layer {
-                if !ring.may_fill() || ring.tris.is_empty() {
-                    continue;
-                }
-                let diag = bbox_half_diag_km(ring);
-                let (clon, clat) = ring_centroid(ring);
-                let cen_dist = haversine_km(ev.longitude, ev.latitude, clon, clat);
-                if cen_dist > cull_km + diag {
-                    continue;
-                }
-
-                let epi_inside = point_in_bbox(ev.longitude, ev.latitude, ring)
-                    && point_in_ring(ev.longitude, ev.latitude, &ring.exterior);
-                let d_min = if epi_inside {
-                    0.0
-                } else {
-                    (cen_dist - diag).max(0.0)
-                };
-                let d_max = cen_dist + diag;
-                let lv_near = jian_core::estimate_at_site(
-                    ev.intensity_kind,
-                    ev.magnitude,
-                    ev.depth_km,
-                    d_min,
-                )
-                .0;
-                let lv_far = jian_core::estimate_at_site(
-                    ev.intensity_kind,
-                    ev.magnitude,
-                    ev.depth_km,
-                    d_max,
-                )
-                .0;
-
-                for &lon_shift in &lon_shifts {
-                    if !ring_visible(
-                        ring,
-                        min_lon - lon_shift,
-                        min_lat,
-                        max_lon - lon_shift,
-                        max_lat,
-                    ) {
-                        continue;
-                    }
-
-                    // 包围盒内档位一致：整环同色（远距小区划快路径）
-                    if lv_near == lv_far {
-                        if lv_near < 1 {
-                            continue;
-                        }
-                        let rgb = color_for(ev.intensity_kind, lv_near);
-                        let fill =
-                            Color32::from_rgba_unmultiplied(rgb.r, rgb.g, rgb.b, fill_alpha);
-                        if let Some(mesh) =
-                            mesh_fill_intensity_ring(ring, view, lon_shift, fill, max_edge_px)
-                        {
-                            append_mesh(meshes.entry(lv_near).or_default(), mesh);
-                            painted += 1;
-                        }
-                        continue;
-                    }
-
-                    // 跨多档：区划三角形作陆地掩膜，按环半径切开再填色
-                    let verts = ring_lonlat_vertices(ring);
-                    if verts.len() < 3 {
-                        continue;
-                    }
-                    for tri in ring.tris.chunks_exact(3) {
-                        let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
-                        if i0 >= verts.len() || i1 >= verts.len() || i2 >= verts.len() {
-                            continue;
-                        }
-                        painted += paint_intensity_tri_banded(
-                            &mut meshes,
-                            view,
-                            lon_shift,
-                            max_edge_px,
-                            fill_alpha,
-                            ev,
-                            &band_radii,
-                            verts[i0],
-                            verts[i1],
-                            verts[i2],
-                            0,
-                        );
-                    }
-                }
-            }
-        }
-
-        if painted == 0 {
-            return false;
-        }
-        let mut shapes: Vec<egui::Shape> = Vec::with_capacity(meshes.len());
-        for (_lv, mesh) in meshes {
-            if !mesh.indices.is_empty() {
-                shapes.push(egui::Shape::mesh(mesh));
-            }
-        }
-        painter.extend(shapes);
-        true
+        false
     }
-
-    /// 烈度填色用区划层：优先平面 regional（中国区县 + 日本都道府县），再叠 GQ 海外区划。
-    fn intensity_region_layers(&self) -> Vec<&[RingSet]> {
-        let mut out: Vec<&[RingSet]> = Vec::new();
-        if !self.regional.fine.is_empty() {
-            out.push(self.regional.fine.as_slice());
-        }
-        if let Some(gq) = &self.gq {
-            // 海外细分；中国/日本已由 regional 承担，避免省级整块盖住区县
-            for slice in [
-                gq.us.as_slice(),
-                gq.ak.as_slice(),
-                gq.nz.as_slice(),
-                gq.hw.as_slice(),
-                gq.it.as_slice(),
-            ] {
-                if !slice.is_empty() {
-                    out.push(slice);
-                }
-            }
-            // regional 尚未就绪时回退 GQ 中日一级
-            if self.regional.fine.is_empty() {
-                for slice in [gq.cn.as_slice(), gq.jp.as_slice()] {
-                    if !slice.is_empty() {
-                        out.push(slice);
-                    }
-                }
-            }
-        }
-        out
-    }
-}
-
-/// 外环顶点算术平均（已限制 lon_span≤180，可直接均经度）。
-fn ring_centroid(ring: &RingSet) -> (f64, f64) {
-    let n = ring.exterior.len().max(1) as f64;
-    let mut slon = 0.0_f64;
-    let mut slat = 0.0_f64;
-    for p in &ring.exterior {
-        slon += p[0] as f64;
-        slat += p[1] as f64;
-    }
-    (slon / n, slat / n)
-}
-
-/// 与 `triangulate_ring` / `project_fill_vertices` 一致的经纬度顶点序。
-fn ring_lonlat_vertices(ring: &RingSet) -> Vec<[f32; 2]> {
-    let mut out = Vec::with_capacity(
-        ring.exterior.len() + ring.holes.iter().map(|h| h.len()).sum::<usize>(),
-    );
-    out.extend_from_slice(&ring.exterior);
-    for hole in &ring.holes {
-        if hole.len() >= 3 {
-            out.extend_from_slice(hole);
-        }
-    }
-    out
-}
-
-/// 大边先几何细分，保证环半径插值准确；再按等震中距切开。
-const INTENSITY_TRI_SPLIT_KM: f64 = 36.0;
-const INTENSITY_TRI_MAX_DEPTH: u8 = 6;
-
-/// 区划三角形按衰减环半径分带填色（颜色边界≈等距圆，避免耳切斜边尖刺）。
-fn paint_intensity_tri_banded(
-    meshes: &mut HashMap<u8, egui::epaint::Mesh>,
-    view: &ViewCtx,
-    lon_shift: f64,
-    max_edge_px: f32,
-    fill_alpha: u8,
-    ev: &EewReport,
-    band_radii: &[f64],
-    a: [f32; 2],
-    b: [f32; 2],
-    c: [f32; 2],
-    depth: u8,
-) -> usize {
-    // 硬顶：浮点/退化时避免无限切环
-    if depth > 14 {
-        let clon = (a[0] as f64 + b[0] as f64 + c[0] as f64) / 3.0;
-        let clat = (a[1] as f64 + b[1] as f64 + c[1] as f64) / 3.0;
-        let dist = haversine_km(ev.longitude, ev.latitude, clon, clat);
-        let level =
-            jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, dist).0;
-        if level < 1 {
-            return 0;
-        }
-        return usize::from(emit_intensity_screen_tri(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, level, a, b, c,
-        ));
-    }
-
-    let dist = |p: [f32; 2]| haversine_km(ev.longitude, ev.latitude, p[0] as f64, p[1] as f64);
-    let e_ab = haversine_km(a[0] as f64, a[1] as f64, b[0] as f64, b[1] as f64);
-    let e_bc = haversine_km(b[0] as f64, b[1] as f64, c[0] as f64, c[1] as f64);
-    let e_ca = haversine_km(c[0] as f64, c[1] as f64, a[0] as f64, a[1] as f64);
-    let max_e = e_ab.max(e_bc).max(e_ca);
-
-    // 边太长时先四分，再切环（弦近似弧才稳）
-    if depth < INTENSITY_TRI_MAX_DEPTH && max_e > INTENSITY_TRI_SPLIT_KM {
-        let m_ab = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
-        let m_bc = [(b[0] + c[0]) * 0.5, (b[1] + c[1]) * 0.5];
-        let m_ca = [(c[0] + a[0]) * 0.5, (c[1] + a[1]) * 0.5];
-        let d = depth + 1;
-        return paint_intensity_tri_banded(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, a, m_ab, m_ca, d,
-        ) + paint_intensity_tri_banded(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, m_ab, b, m_bc, d,
-        ) + paint_intensity_tri_banded(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, m_ca, m_bc, c, d,
-        ) + paint_intensity_tri_banded(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, m_ab, m_bc, m_ca, d,
-        );
-    }
-
-    let da = dist(a);
-    let db = dist(b);
-    let dc = dist(c);
-    let mut d_lo = da.min(db).min(dc);
-    let d_hi = da.max(db).max(dc);
-    if point_in_tri_lonlat(ev.longitude, ev.latitude, a, b, c) {
-        d_lo = 0.0;
-    }
-
-    let lv_lo = jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, d_lo).0;
-    let lv_hi = jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, d_hi).0;
-    if lv_lo < 1 && lv_hi < 1 {
-        return 0;
-    }
-    if lv_lo == lv_hi {
-        if lv_lo < 1 {
-            return 0;
-        }
-        return usize::from(emit_intensity_screen_tri(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, lv_lo, a, b, c,
-        ));
-    }
-
-    // 取落在 (d_lo, d_hi) 内的最近环外半径，把三角切成「环内 / 环外」
-    let Some(&split_r) = band_radii
-        .iter()
-        .find(|&&r| r > d_lo + 1e-6 && r < d_hi - 1e-6)
-    else {
-        let mid = 0.5 * (d_lo + d_hi);
-        let level =
-            jian_core::estimate_at_site(ev.intensity_kind, ev.magnitude, ev.depth_km, mid).0;
-        if level < 1 {
-            return 0;
-        }
-        return usize::from(emit_intensity_screen_tri(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, level, a, b, c,
-        ));
-    };
-
-    let (inside, outside) = clip_tri_by_radius(ev.longitude, ev.latitude, a, b, c, split_r);
-    let mut n = 0usize;
-    for poly in inside {
-        n += paint_intensity_poly_tris(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, &poly, depth,
-        );
-    }
-    for poly in outside {
-        n += paint_intensity_poly_tris(
-            meshes, view, lon_shift, max_edge_px, fill_alpha, ev, band_radii, &poly, depth,
-        );
-    }
-    n
-}
-
-fn paint_intensity_poly_tris(
-    meshes: &mut HashMap<u8, egui::epaint::Mesh>,
-    view: &ViewCtx,
-    lon_shift: f64,
-    max_edge_px: f32,
-    fill_alpha: u8,
-    ev: &EewReport,
-    band_radii: &[f64],
-    poly: &[[f32; 2]],
-    depth: u8,
-) -> usize {
-    if poly.len() < 3 {
-        return 0;
-    }
-    if poly.len() == 3 {
-        return paint_intensity_tri_banded(
-            meshes,
-            view,
-            lon_shift,
-            max_edge_px,
-            fill_alpha,
-            ev,
-            band_radii,
-            poly[0],
-            poly[1],
-            poly[2],
-            depth.saturating_add(1),
-        );
-    }
-    // 扇形三角化（凸：圆裁切三角形得到的块）
-    let mut n = 0usize;
-    for i in 1..poly.len() - 1 {
-        n += paint_intensity_tri_banded(
-            meshes,
-            view,
-            lon_shift,
-            max_edge_px,
-            fill_alpha,
-            ev,
-            band_radii,
-            poly[0],
-            poly[i],
-            poly[i + 1],
-            depth.saturating_add(1),
-        );
-    }
-    n
-}
-
-/// 射线法：震中是否在三角形内（经纬度平面）。
-fn point_in_tri_lonlat(lon: f64, lat: f64, a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> bool {
-    point_in_ring(lon, lat, &[a, b, c])
-}
-
-/// 边上二分求距震中 = R 的点。
-fn edge_point_at_radius(
-    epi_lon: f64,
-    epi_lat: f64,
-    p0: [f32; 2],
-    p1: [f32; 2],
-    r_km: f64,
-) -> Option<[f32; 2]> {
-    let d0 = haversine_km(epi_lon, epi_lat, p0[0] as f64, p0[1] as f64);
-    let d1 = haversine_km(epi_lon, epi_lat, p1[0] as f64, p1[1] as f64);
-    if (d0 - r_km).abs() < 1e-4 {
-        return Some(p0);
-    }
-    if (d1 - r_km).abs() < 1e-4 {
-        return Some(p1);
-    }
-    if (d0 - r_km) * (d1 - r_km) > 0.0 {
-        return None;
-    }
-    let mut lo = 0.0_f64;
-    let mut hi = 1.0_f64;
-    let mut mid_pt = p0;
-    for _ in 0..28 {
-        let t = 0.5 * (lo + hi);
-        mid_pt = [
-            (p0[0] as f64 + (p1[0] as f64 - p0[0] as f64) * t) as f32,
-            (p0[1] as f64 + (p1[1] as f64 - p0[1] as f64) * t) as f32,
-        ];
-        let d = haversine_km(epi_lon, epi_lat, mid_pt[0] as f64, mid_pt[1] as f64);
-        if (d0 < r_km) == (d < r_km) {
-            lo = t;
-        } else {
-            hi = t;
-        }
-    }
-    Some(mid_pt)
-}
-
-/// 用震中距 R 切开三角形 → (环内多边形列表, 环外多边形列表)。
-fn clip_tri_by_radius(
-    epi_lon: f64,
-    epi_lat: f64,
-    a: [f32; 2],
-    b: [f32; 2],
-    c: [f32; 2],
-    r_km: f64,
-) -> (Vec<Vec<[f32; 2]>>, Vec<Vec<[f32; 2]>>) {
-    let pts = [a, b, c];
-    let inside = [
-        haversine_km(epi_lon, epi_lat, a[0] as f64, a[1] as f64) <= r_km,
-        haversine_km(epi_lon, epi_lat, b[0] as f64, b[1] as f64) <= r_km,
-        haversine_km(epi_lon, epi_lat, c[0] as f64, c[1] as f64) <= r_km,
-    ];
-    let n_in = inside.iter().filter(|&&x| x).count();
-    if n_in == 0 {
-        return (vec![], vec![pts.to_vec()]);
-    }
-    if n_in == 3 {
-        return (vec![pts.to_vec()], vec![]);
-    }
-
-    let mut in_poly: Vec<[f32; 2]> = Vec::with_capacity(4);
-    let mut out_poly: Vec<[f32; 2]> = Vec::with_capacity(4);
-    for i in 0..3 {
-        let j = (i + 1) % 3;
-        let pi = pts[i];
-        let pj = pts[j];
-        if inside[i] {
-            in_poly.push(pi);
-        } else {
-            out_poly.push(pi);
-        }
-        if inside[i] != inside[j] {
-            if let Some(hit) = edge_point_at_radius(epi_lon, epi_lat, pi, pj, r_km) {
-                in_poly.push(hit);
-                out_poly.push(hit);
-            }
-        }
-    }
-    let mut insides = Vec::new();
-    let mut outsides = Vec::new();
-    if in_poly.len() >= 3 {
-        insides.push(in_poly);
-    }
-    if out_poly.len() >= 3 {
-        outsides.push(out_poly);
-    }
-    (insides, outsides)
-}
-
-fn emit_intensity_screen_tri(
-    meshes: &mut HashMap<u8, egui::epaint::Mesh>,
-    view: &ViewCtx,
-    lon_shift: f64,
-    max_edge_px: f32,
-    fill_alpha: u8,
-    ev: &EewReport,
-    level: u8,
-    a: [f32; 2],
-    b: [f32; 2],
-    c: [f32; 2],
-) -> bool {
-    let project = |p: [f32; 2]| -> Option<Pos2> {
-        view.project_fill(p[0] as f64 + lon_shift, p[1] as f64)
-    };
-    let (Some(pa), Some(pb), Some(pc)) = (project(a), project(b), project(c)) else {
-        return false;
-    };
-    let max_e2 = max_edge_px * max_edge_px;
-    if (pa - pb).length_sq() > max_e2
-        || (pb - pc).length_sq() > max_e2
-        || (pc - pa).length_sq() > max_e2
-    {
-        return false;
-    }
-    let rgb = color_for(ev.intensity_kind, level);
-    let fill = Color32::from_rgba_unmultiplied(rgb.r, rgb.g, rgb.b, fill_alpha);
-    let mesh = meshes.entry(level).or_default();
-    let base = mesh.vertices.len() as u32;
-    mesh.colored_vertex(pa, fill);
-    mesh.colored_vertex(pb, fill);
-    mesh.colored_vertex(pc, fill);
-    mesh.add_triangle(base, base + 1, base + 2);
-    true
-}
-
-fn append_mesh(dest: &mut egui::epaint::Mesh, src: egui::epaint::Mesh) {
-    let base = dest.vertices.len() as u32;
-    dest.vertices.extend(src.vertices);
-    dest.indices
-        .extend(src.indices.into_iter().map(|i| i + base));
-}
-
-/// 包围盒半对角线近似（km），用于有感范围粗筛。
-fn bbox_half_diag_km(ring: &RingSet) -> f64 {
-    let lon0 = ring.min_lon as f64;
-    let lat0 = ring.min_lat as f64;
-    let lon1 = ring.max_lon as f64;
-    let lat1 = ring.max_lat as f64;
-    0.5 * haversine_km(lon0, lat0, lon1, lat1)
-}
-
-fn point_in_bbox(lon: f64, lat: f64, ring: &RingSet) -> bool {
-    lon >= ring.min_lon as f64
-        && lon <= ring.max_lon as f64
-        && lat >= ring.min_lat as f64
-        && lat <= ring.max_lat as f64
-}
-
-/// 射线法：点是否在外环内（经纬度平面，忽略孔洞）。
-fn point_in_ring(lon: f64, lat: f64, exterior: &[[f32; 2]]) -> bool {
-    if exterior.len() < 3 {
-        return false;
-    }
-    let mut inside = false;
-    let mut j = exterior.len() - 1;
-    for i in 0..exterior.len() {
-        let (xi, yi) = (exterior[i][0] as f64, exterior[i][1] as f64);
-        let (xj, yj) = (exterior[j][0] as f64, exterior[j][1] as f64);
-        let intersect = ((yi > lat) != (yj > lat))
-            && (lon < (xj - xi) * (lat - yi) / (yj - yi + 1e-15) + xi);
-        if intersect {
-            inside = !inside;
-        }
-        j = i;
-    }
-    inside
 }
 
 fn paint_cache_key(
@@ -1580,66 +1046,8 @@ fn project_exterior_path_fill(
     }
 }
 
-/// 烈度区划：用经纬度预剖分 `ring.tris` + 屏幕投影顶点组 Mesh。
-/// 丢弃投影后边长过大的三角形（日界/球缘撕裂），避免扇形伪影。
-fn mesh_fill_intensity_ring(
-    ring: &RingSet,
-    view: &ViewCtx,
-    lon_shift: f64,
-    fill: Color32,
-    max_edge_px: f32,
-) -> Option<egui::epaint::Mesh> {
-    if ring.tris.len() < 3 {
-        return None;
-    }
-    let pts = if view.mode.is_globe() {
-        project_fill_vertices_globe(ring, view, max_edge_px)?
-    } else {
-        project_fill_vertices(ring, view, lon_shift)?
-    };
-    let expected = ring.exterior.len()
-        + ring
-            .holes
-            .iter()
-            .filter(|h| h.len() >= 3)
-            .map(|h| h.len())
-            .sum::<usize>();
-    if pts.len() != expected {
-        return None;
-    }
-    let max_e2 = max_edge_px * max_edge_px;
-    let mut mesh = egui::epaint::Mesh::default();
-    mesh.reserve_vertices(pts.len());
-    mesh.reserve_triangles(ring.tris.len() / 3);
-    for p in &pts {
-        mesh.colored_vertex(*p, fill);
-    }
-    let mut any = false;
-    for tri in ring.tris.chunks_exact(3) {
-        let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
-        if i0 >= pts.len() || i1 >= pts.len() || i2 >= pts.len() {
-            continue;
-        }
-        let a = pts[i0];
-        let b = pts[i1];
-        let c = pts[i2];
-        if (a - b).length_sq() > max_e2
-            || (b - c).length_sq() > max_e2
-            || (c - a).length_sq() > max_e2
-        {
-            continue;
-        }
-        mesh.add_triangle(tri[0], tri[1], tri[2]);
-        any = true;
-    }
-    if any {
-        Some(mesh)
-    } else {
-        None
-    }
-}
-
 /// 球体：外环+孔全部顶点须可投影；邻边过大则整环放弃。
+#[allow(dead_code)] // 烈度区划 Mesh 填色暂停用，保留供恢复
 fn project_fill_vertices_globe(
     ring: &RingSet,
     view: &ViewCtx,
@@ -1681,6 +1089,7 @@ fn project_fill_vertices_globe(
 }
 
 /// 平面填色：整环连续解缠 + `lon_shift`，避免按点 wrap 在视口边缘撕环丢填色。
+#[allow(dead_code)] // 烈度区划 Mesh 填色暂停用，保留供恢复
 fn project_fill_vertices(
     ring: &RingSet,
     view: &ViewCtx,

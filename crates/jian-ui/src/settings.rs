@@ -1516,7 +1516,7 @@ fn draw_general(
         control_row(
             ui,
             "烈度区划填色",
-            "区划作陆地掩膜，按衰减环半径分带填色",
+            "同心环衰减估烈度；与本机估烈度同一公式",
             "\u{25ce}",
             |ui| {
                 toggle(ui, &mut draft.ui.show_intensity_rings);
