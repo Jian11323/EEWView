@@ -2,6 +2,7 @@
 
 mod camera;
 mod detect;
+mod fault_lines;
 mod globe;
 mod marker_icons;
 mod overlay;
@@ -32,6 +33,7 @@ use jian_core::{EewReport, EqRecord, StationSample, TsunamiInfo, TyphoonInfo, Vo
 use jian_travel::TravelEngine;
 use marker_icons::MarkerIcons;
 use projection::ViewCtx;
+use fault_lines::FaultLines;
 use tsunami_coast::TsunamiCoast;
 use tile_cache::TileCache as Cache;
 
@@ -49,6 +51,7 @@ pub struct MapViewport {
     cache: Cache,
     vector: VectorBasemap,
     tsunami_coast: TsunamiCoast,
+    faults: FaultLines,
     markers: MarkerIcons,
     flight: Option<CameraFlight>,
     /// 飞跃刚结束后抑制波圈自动缩放，避免落地瞬间被二次改 zoom「弹一下」
@@ -75,6 +78,7 @@ impl Default for MapViewport {
             ),
             vector: VectorBasemap::default(),
             tsunami_coast: TsunamiCoast::default(),
+            faults: FaultLines::default(),
             markers: MarkerIcons::default(),
             flight: None,
             post_flight_cooldown: 0.0,
@@ -106,6 +110,7 @@ impl MapViewport {
             }
             // 海啸沿岸与底图模式无关，始终尝试加载
             self.tsunami_coast.load_dir(dir);
+            self.faults.load_dir(dir);
         }
     }
 
@@ -281,6 +286,7 @@ impl MapViewport {
         home: Option<(f64, f64)>,
         tsunami: Option<&TsunamiInfo>,
         detect_boxes: &[DetectBox],
+        show_faults: bool,
     ) -> MapUiResult {
         if self.vector.poll() {
             ui.ctx()
@@ -327,6 +333,20 @@ impl MapViewport {
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
 
+        // 烈度区划填色：画在矢量轮廓之下，区界线压在填色上；测站/叉标仍在其上。
+        // `show_intensity_rings`：预警跟设置，速报仅右键预览时为 true。
+        // 与 estimate_at_site 同源；无区划命中时回退同心环。
+        if show_intensity_rings {
+            let ring_ev = active.filter(|e| {
+                !e.is_cancel && !e.event_id.starts_with("station:")
+            });
+            if let Some(ev) = ring_ev {
+                if !self.vector.paint_intensity_regions(ui, &view, ev, true) {
+                    overlay::paint_intensity_rings(ui, &view, ev, true);
+                }
+            }
+        }
+
         // 暗色矢量 / 球体：只描轮廓，不填陆地（对齐旧版纯黑轮廓图）
         if globe || self.basemap.show_vector() {
             self.vector.paint(
@@ -336,6 +356,12 @@ impl MapViewport {
                 self.vector_style,
                 /* skip_world_stroke */ false,
             );
+        }
+
+        // 活动断层：矢量轮廓之上、事件叠加之下；瓦片底图时也绘制
+        if show_faults {
+            let dark = self.ocean_fill.r() < 80;
+            self.faults.paint(ui, &view, dark);
         }
 
         // JMA 海啸：按沿岸预报区描边闪烁（不对中日外轮廓整圈描边）
@@ -384,27 +410,6 @@ impl MapViewport {
                 !e.event_id.starts_with("station:") && !e.event_id.starts_with("record:")
             });
             let show_cross = !blink_active || overlay::eew_mark_blink_on(now_ms);
-
-            // 烈度估算环：只画当前焦点预警（与侧栏 M/H/`estimate_at_site` 同源），
-            // 避免多源叠圈；叠在叉标/波圈之下，与波圈开关独立。
-            if show_intensity_rings {
-                let ring_ev = active
-                    .filter(|e| {
-                        !e.is_cancel
-                            && !e.event_id.starts_with("station:")
-                            && !e.event_id.starts_with("record:")
-                    })
-                    .or_else(|| {
-                        wave_events.iter().find(|e| {
-                            !e.is_cancel
-                                && !e.event_id.starts_with("station:")
-                                && !e.event_id.starts_with("record:")
-                        })
-                    });
-                if let Some(ev) = ring_ev {
-                    overlay::paint_intensity_rings(ui, &view, ev, true);
-                }
-            }
 
             overlay::paint_eew_markers(ui, &view, eew_markers, active_key, icons, show_cross);
 

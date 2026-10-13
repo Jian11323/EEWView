@@ -14,7 +14,7 @@ use egui::{Color32, FontFamily, FontId, Frame, Margin, RichText, Sense, Stroke, 
 use intensity_icons::IntensityIcons;
 use jian_core::palette::color_for;
 use jian_core::{
-    agency_bracket, eew_sidebar_entries, eew_wave_active_spread,
+    agency_bracket, eew_sidebar_entries, eew_wave_active_spread, intensity_rings,
     is_wave_candidate, max_s_spread_km, place_with_agency, prefer_intensity_scale, AppSnapshot,
     EewReport, IntensityKind, ListSelection, OverlayMode, SidebarTab,
 };
@@ -91,6 +91,8 @@ pub struct MainShell {
     pub show_nied_clock: bool,
     pub intensity_scale: String,
     pub settings: SettingsSession,
+    /// 速报右键：为当前选中速报绘制衰减烈度区划填色（与设置项无关）
+    pub record_intensity_rings: bool,
     intensity_icons: IntensityIcons,
 }
 
@@ -107,6 +109,7 @@ impl Default for MainShell {
             show_nied_clock: false,
             intensity_scale: "auto".into(),
             settings: SettingsSession::default(),
+            record_intensity_rings: false,
             intensity_icons: IntensityIcons::default(),
         }
     }
@@ -179,7 +182,16 @@ impl MainShell {
         snap.show_intensity_rings = cfg.ui.show_intensity_rings;
         // 多震：只要仍有未取消的传播中事件就画波圈（不因当前选中项取消而全灭）
         let show_waves = snap.overlay_mode == OverlayMode::Wave && snap.show_wave_rings;
-        let show_intensity_rings = snap.show_intensity_rings;
+        // 预警跟设置；速报仅右键预览时画环
+        let active_is_record = snap
+            .active
+            .as_ref()
+            .is_some_and(|e| e.event_id.starts_with("record:"));
+        let show_intensity_rings = if active_is_record {
+            self.record_intensity_rings
+        } else {
+            snap.show_intensity_rings
+        };
         let scale = self.intensity_scale.clone();
 
         let live_refs =
@@ -279,6 +291,7 @@ impl MainShell {
                     home,
                     snap.tsunami.as_ref(),
                     detect_boxes,
+                    cfg.ui.show_faults,
                 );
                 if cfg.ui.auto_zoom_waves
                     && show_waves
@@ -352,6 +365,11 @@ impl MainShell {
         if let Some(act) = side_action {
             match act {
                 SideAction::List(tab, idx) => {
+                    if tab == SidebarTab::Records {
+                        self.record_intensity_rings = false;
+                    } else if tab == SidebarTab::Eew {
+                        self.record_intensity_rings = false;
+                    }
                     if let Some((lon, lat, zoom)) = snap.select_list_item(tab, idx) {
                         let vp = ctx.screen_rect();
                         let map_w = (vp.width() - sidebar_w).max(120.0);
@@ -420,6 +438,31 @@ impl MainShell {
                         if snap.overlay_mode == OverlayMode::Wave {
                             self.map_elapsed = 0.0;
                         }
+                    }
+                }
+                SideAction::RecordIntensity(idx) => {
+                    self.record_intensity_rings = true;
+                    if let Some((lon, lat, _)) =
+                        snap.select_list_item(SidebarTab::Records, idx)
+                    {
+                        let vp = ctx.screen_rect();
+                        let map_w = (vp.width() - sidebar_w).max(120.0);
+                        let map_h = vp.height().max(120.0);
+                        let r_km = snap
+                            .records
+                            .get(idx)
+                            .map(|r| {
+                                intensity_rings(r.intensity_kind, r.magnitude, r.depth_km)
+                                    .last()
+                                    .map(|(_, km)| *km)
+                                    .unwrap_or(55.0)
+                                    .max(25.0)
+                            })
+                            .unwrap_or(55.0);
+                        let end_z = zoom_to_fit_radius_km(lat, r_km, map_w.min(map_h), 0.55)
+                            .clamp(5.5, 11.5);
+                        self.map.fly_to_centered(lon, lat, Some(end_z), 0.9);
+                        self.map.user_camera_override = true;
                     }
                 }
                 SideAction::Settings => {
@@ -1555,7 +1598,16 @@ fn outlined_label(ui: &mut Ui, text: &str, color: Color32, size: f32, monospace:
 
 enum SideAction {
     List(SidebarTab, usize),
+    /// 速报右键：选中并绘制衰减烈度区划填色
+    RecordIntensity(usize),
     Settings,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RowClick {
+    None,
+    Primary,
+    Secondary,
 }
 
 fn health_dot(p: &ThemePalette, status: jian_core::HealthStatus) -> Color32 {
@@ -1707,7 +1759,9 @@ fn draw_sidebar(
                                     col,
                                     selected,
                                     egui::Id::new(("st", i)),
-                                ) {
+                                    false,
+                                ) == RowClick::Primary
+                                {
                                     clicked = Some(SideAction::List(SidebarTab::Station, i));
                                 }
                             }
@@ -1743,7 +1797,7 @@ fn draw_sidebar(
                                         &r.intensity_text,
                                         scale,
                                     );
-                                    if list_row(
+                                    match list_row(
                                         ui,
                                         p,
                                         icons,
@@ -1757,8 +1811,16 @@ fn draw_sidebar(
                                         col,
                                         selected,
                                         egui::Id::new(("rec", i)),
+                                        true,
                                     ) {
-                                        clicked = Some(SideAction::List(SidebarTab::Records, i));
+                                        RowClick::Primary => {
+                                            clicked =
+                                                Some(SideAction::List(SidebarTab::Records, i));
+                                        }
+                                        RowClick::Secondary => {
+                                            clicked = Some(SideAction::RecordIntensity(i));
+                                        }
+                                        RowClick::None => {}
                                     }
                                 }
                             }
@@ -1800,7 +1862,9 @@ fn draw_sidebar(
                                         col,
                                         selected,
                                         egui::Id::new(("eew", real_i)),
-                                    ) {
+                                        false,
+                                    ) == RowClick::Primary
+                                    {
                                         clicked = Some(SideAction::List(SidebarTab::Eew, real_i));
                                     }
                                 }
@@ -1988,8 +2052,9 @@ fn list_row(
     accent: Color32,
     selected: bool,
     id: egui::Id,
-) -> bool {
-    let mut clicked = false;
+    // 速报行：允许右键触发烈度环预览
+    allow_secondary: bool,
+) -> RowClick {
     let bg = if selected {
         p.row_selected
     } else {
@@ -2025,9 +2090,12 @@ fn list_row(
         })
         .response;
 
-    let full = ui
+    let mut full = ui
         .interact(resp.rect, id, Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if allow_secondary {
+        full = full.on_hover_text("左键选中；右键绘制烈度区划填色");
+    }
     if full.hovered() && !selected {
         ui.painter().rect_stroke(
             resp.rect,
@@ -2036,9 +2104,13 @@ fn list_row(
             egui::StrokeKind::Outside,
         );
     }
-    if full.clicked() {
-        clicked = true;
-    }
+    let click = if full.clicked() {
+        RowClick::Primary
+    } else if allow_secondary && full.secondary_clicked() {
+        RowClick::Secondary
+    } else {
+        RowClick::None
+    };
     ui.add_space(3.0);
-    clicked
+    click
 }

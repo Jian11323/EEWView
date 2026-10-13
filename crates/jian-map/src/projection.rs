@@ -6,7 +6,7 @@ use egui::{Pos2, Rect, Vec2};
 use jian_util::EARTH_RADIUS_KM;
 
 /// 地图投影模式：平面 Web Mercator / 立体球。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ProjectionMode {
     #[default]
     Flat,
@@ -252,6 +252,21 @@ impl ViewCtx {
 
     pub fn horizon_radius(&self) -> Option<f32> {
         self.globe.map(|c| c.horizon_dist as f32)
+    }
+
+    /// 点是否在地平线以上（对齐 GQ `isAboveHorizon`）。
+    pub fn is_above_horizon(&self, lon: f64, lat: f64) -> bool {
+        match self.mode {
+            ProjectionMode::Flat => true,
+            ProjectionMode::Globe => self
+                .globe
+                .is_some_and(|c| c.is_above_horizon(lon, lat)),
+        }
+    }
+
+    /// 视口中心每经度对应的屏幕像素（仅球体）。
+    pub fn one_deg_px(&self) -> Option<f64> {
+        self.globe.map(|c| c.one_deg_px)
     }
 
     /// 屏幕像素 → 地表 km（仅球体；平面返回 `None`）。

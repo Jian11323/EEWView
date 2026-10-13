@@ -1515,8 +1515,8 @@ fn draw_general(
         row_divider(ui);
         control_row(
             ui,
-            "烈度估算环",
-            "与本机估烈度同一衰减；反解各档外缘半径后描边",
+            "烈度区划填色",
+            "按行政区划质心估烈度填色；与本机估烈度同一衰减",
             "\u{25ce}",
             |ui| {
                 toggle(ui, &mut draft.ui.show_intensity_rings);
@@ -1533,6 +1533,10 @@ fn draw_general(
         row_divider(ui);
         control_row(ui, "台风路径", "活跃台风路径、风圈与预报线", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_typhoons);
+        });
+        row_divider(ui);
+        control_row(ui, "活动断层", "全球 GEM 与中国 CAFD 活断层迹线", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.ui.show_faults);
         });
         row_divider(ui);
         control_row(ui, "台风预报源", "地图预报路径所用机构", "\u{25ce}", |ui| {

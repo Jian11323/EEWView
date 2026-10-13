@@ -8,43 +8,45 @@
 
 | 顺序 | 路径 | 说明 |
 |------|------|------|
-| 1 | `medium.global.modified.geo.json` | 精细全球国界（展开 GeoJSON） |
-| 2 | `kanameishi/medium.global.modified.topo.json` | 要石 TopoJSON 同套边界 |
-| 3 | `Globalmap.geo.json` + `world/` | 旧全球轮廓回退 |
+| 1 | `globalquake/countries{MD,HD,UHD}.json` | **GlobalQuake Special** 藏南修复版国界（远/中/近分档） |
+| 2 | `medium.global.modified.geo.json` | 精细全球国界（展开 GeoJSON） |
+| 3 | `kanameishi/medium.global.modified.topo.json` | 要石 TopoJSON 同套边界 |
+| 4 | `Globalmap.geo.json` + `world/` | 旧全球轮廓回退 |
 
-世界层本身不含中国 / 日本外轮廓（由区划层绘制）。藏南由 `cn.province` 西藏面叠盖世界层，不另画凸包；钓鱼岛用内置点状。
+GQ Special 世界层已含调整后的中国国界（含藏南）；另叠内置钓鱼岛点状。
 
-### 区划层
+### 区划层优先级
 
-| 路径 | 内容 |
-|------|------|
-| `kanameishi/cn.province.topo.json` | 中国省级 |
-| `kanameishi/jp.pref.topo.json` | 日本都道府县 |
+| 顺序 | 路径 | 内容 |
+|------|------|------|
+| 1 | `<省市区>/*.json`、根目录如 `台湾省.json` | **中国地市/区县**（烈度填色与近距描边） |
+| 2 | `globalquake/jp-prefectures.geojson` → `日本/` → 要石 | 日本都道府县 |
+| 3 | `globalquake/cn-prefectures.geojson` / 要石省级 | 仅当中国扫盘为空时回退；远距外轮廓溶解仍优先用一级区划 |
 
-要石来源：[Lipomoea/kanameishi](https://github.com/Lipomoea/kanameishi)（AGPL-3.0）。详见 [`kanameishi/README.md`](kanameishi/README.md)。
+近距区划与烈度区划填色使用地市/区县边界（例如内蒙古按盟旗市填色，而非整省一块）。
+
+要石来源：[Lipomoea/kanameishi](https://github.com/Lipomoea/kanameishi)（AGPL-3.0）。详见 [`kanameishi/README.md`](kanameishi/README.md)。  
+GQ Special 说明见 [`globalquake/README.md`](globalquake/README.md)。
 
 ## 亮色：自有海洋地形瓦片
 
 主题 `light` 时使用 XYZ：`{tile_base}/{tile_source}/{z}/{x}/{y}`  
 默认 `https://tilemap.sismotide.top/arcwob/...`（支持横向循环铺贴）。
 
-球体投影模式下不贴瓦片，始终使用矢量底图。
+暗色 / 球体：近黑底 + 国界/区划轮廓线（不填陆地）。数据优先 `globalquake/`（藏南修复）。  
+`globe_dark.png` / `tools/gen_globe_texture.py` 为备用贴图资源，当前运行时不铺贴。
+
+## 活动断层
+
+| 路径 | 内容 |
+|------|------|
+| `faults/global_active_faults.geojson` | 全球 GEM 活动断层（简化） |
+| `faults/china_active_faults.geojson` | 中国及邻区 CAFD / CN-faults（简化） |
+
+平面与球体共用；`ui.show_faults` 开关。详见 [`faults/README.md`](faults/README.md)。
 
 ## 其它回退
 
 | 路径 | 内容 |
 |------|------|
 | `world/cn_boundary_patches.geojson` | 历史补丁（运行时不加载；钓鱼岛已内置） |
-| `*/`、`日本/` | 中国地市 / 日本都道府县（无要石区划时） |
-
-## 含藏南调整的公开矢量（备选）
-
-球体模式不贴瓦片，始终用矢量轮廓。若需更换世界国界数据，可参考：
-
-| 资源 | 说明 |
-|------|------|
-| [jiangzihan/world-geo-json-zh](https://github.com/jiangzihan/world-geo-json-zh) | 基于 Natural Earth 1:50m，已按审图资料调整藏南、阿里、钓鱼岛、十段线；GeoJSON 可直接替换世界层 |
-| [Natural Earth China POV](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/) | 官方 1:10m Countries（China POV）国界视角包 |
-| [GMT CN-border](https://docs.gmt-china.org/latest/dataset-CN/CN-border/) | 国界/省界/十段线（GMT 格式，需自行转 GeoJSON） |
-
-当前仓库仍以要石 `cn.province` 西藏面叠盖世界层表达藏南；公开展示地图请自行确认审图要求。
