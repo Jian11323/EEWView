@@ -206,6 +206,12 @@ impl MainShell {
                     scale.as_str(),
                     &self.intensity_icons,
                     cfg.ui.show_volcanoes,
+                    [
+                        cfg.sources.jian.enabled,
+                        cfg.sources.wolfx.enabled,
+                        cfg.sources.p2pquake.enabled,
+                        cfg.sources.pancakes.enabled,
+                    ],
                 );
             });
 
@@ -282,7 +288,12 @@ impl MainShell {
                             0.34,
                         )
                         .clamp(9.0, 13.8);
-                        self.map.apply_linear_zoom_out(z, 0.10);
+                        self.map.apply_linear_zoom_out(
+                            z,
+                            0.10,
+                            Some(ev.longitude),
+                            Some(ev.latitude),
+                        );
                         ctx.request_repaint_after(std::time::Duration::from_millis(
                             cfg.performance.repaint_interval_ms(),
                         ));
@@ -400,6 +411,10 @@ impl MainShell {
             wolfx: snap.health_wolfx,
             p2p: snap.health_p2p,
             pancakes: snap.health_pancakes,
+            jian_enabled: cfg.sources.jian.enabled,
+            wolfx_enabled: cfg.sources.wolfx.enabled,
+            p2p_enabled: cfg.sources.p2pquake.enabled,
+            pancakes_enabled: cfg.sources.pancakes.enabled,
         };
         self.settings.ui(ctx, cfg, &health)
     }
@@ -568,33 +583,45 @@ fn draw_map_load_banner(ui: &mut Ui, p: &ThemePalette, state: BasemapLoadState, 
 /// 左上预警框与右上实时震度卡共用顶边。
 const OVERLAY_TOP_Y: f32 = 12.0;
 
-/// 左上预警条：GQ 只保留当前焦点一条（镜头切换）；其余数据源仍向下堆叠。
+/// 左上预警条：每个侧栏源槽只留一条（与列表一致）；GQ 优先当前焦点。
 fn header_live_eews<'a>(
     snap: &'a AppSnapshot,
     travel: Option<&TravelEngine>,
 ) -> Vec<&'a EewReport> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let live = live_wave_eews_travel(&snap.eew_list, now_ms, &snap.wave_spread_km, travel);
-    let mut gq = Vec::new();
-    let mut others = Vec::new();
+    let mut best: Vec<&EewReport> = Vec::new();
     for e in live {
-        if jian_core::agency_family(&e.agency.0) == jian_core::AgencyFamily::Gq {
-            gq.push(e);
+        let key = jian_core::eew_sidebar_group_key(&e.agency.0);
+        if let Some(pos) = best
+            .iter()
+            .position(|b| jian_core::eew_sidebar_group_key(&b.agency.0) == key)
+        {
+            let cur = best[pos];
+            let prefer_focus = snap.active.as_ref().is_some_and(|a| {
+                a.agency.0 == e.agency.0 && a.event_id == e.event_id
+            });
+            let cur_focus = snap.active.as_ref().is_some_and(|a| {
+                a.agency.0 == cur.agency.0 && a.event_id == cur.event_id
+            });
+            if prefer_focus
+                || (!cur_focus
+                    && (e.origin_ms > cur.origin_ms
+                        || (e.origin_ms == cur.origin_ms && e.serial >= cur.serial)))
+            {
+                best[pos] = e;
+            }
         } else {
-            others.push(e);
+            best.push(e);
         }
     }
-    let mut out = Vec::new();
-    if !gq.is_empty() {
-        let focused = snap.active.as_ref().and_then(|a| {
-            gq.iter()
-                .copied()
-                .find(|e| e.agency.0 == a.agency.0 && e.event_id == a.event_id)
-        });
-        out.push(focused.unwrap_or(gq[0]));
-    }
-    out.extend(others);
-    out
+    // GQ 槽若有焦点则置顶，其余按发震新→旧
+    best.sort_by(|a, b| {
+        let a_gq = jian_core::agency_family(&a.agency.0) == jian_core::AgencyFamily::Gq;
+        let b_gq = jian_core::agency_family(&b.agency.0) == jian_core::AgencyFamily::Gq;
+        b_gq.cmp(&a_gq).then_with(|| b.origin_ms.cmp(&a.origin_ms))
+    });
+    best
 }
 
 /// 左上角预警条总高度（海啸条避让）。
@@ -1226,6 +1253,7 @@ fn draw_sidebar(
     scale: &str,
     icons: &IntensityIcons,
     show_volcano_icons: bool,
+    source_enabled: [bool; 4],
 ) -> Option<SideAction> {
     let mut clicked = None;
     ui.set_min_width(ui.available_width());
@@ -1258,18 +1286,31 @@ fn draw_sidebar(
             ui.add_space(6.0);
             // 仅色点 + 源名；状态文案放悬停，避免四源挤成一团
             ui.horizontal(|ui| {
-                for (name, st) in [
+                for (i, (name, st)) in [
                     ("Jian", snap.health_jian),
                     ("Wolfx", snap.health_wolfx),
                     ("P2P", snap.health_p2p),
                     ("Pancakes", snap.health_pancakes),
-                ] {
-                    let tip = format!("{name}\u{00b7}{}", st.as_zh());
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let on = source_enabled[i];
+                    let tip = if on {
+                        format!("{name}\u{00b7}{}", st.as_zh())
+                    } else {
+                        format!("{name}\u{00b7}关闭")
+                    };
+                    let dot = if on {
+                        health_dot(p, st)
+                    } else {
+                        p.text_dim
+                    };
                     let resp = ui
                         .horizontal(|ui| {
                             let (r, painter) =
                                 ui.allocate_painter(Vec2::splat(9.0), Sense::hover());
-                            painter.circle_filled(r.rect.center(), 3.8, health_dot(p, st));
+                            painter.circle_filled(r.rect.center(), 3.8, dot);
                             ui.label(RichText::new(name).size(12.5).color(p.text_dim));
                         })
                         .response;

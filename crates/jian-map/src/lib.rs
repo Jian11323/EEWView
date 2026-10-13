@@ -10,7 +10,9 @@ mod topojson;
 mod tsunami_coast;
 mod vector_basemap;
 
-pub use camera::{cluster_for_fit, fit_events, zoom_to_fit_radius_km, CameraFlight};
+pub use camera::{
+    cluster_for_fit, fit_events, globe_framed_center, zoom_to_fit_radius_km, CameraFlight,
+};
 pub use projection::{clamp_lat, km_to_pixels, lonlat_to_screen, normalize_lon, ProjectionMode};
 pub use tile_cache::TileCache;
 pub use vector_basemap::{BasemapLoadState, BasemapMode, VectorBasemap, VectorStyle};
@@ -121,8 +123,14 @@ impl MapViewport {
     }
 
     /// GQ 风格跳转：`smoothTransition` 抛物线飞到目标；近距则瞬时到位。
+    /// 球体远距目标会做太平洋侧构图偏置。
     pub fn fly_to(&mut self, lon: f64, lat: f64, zoom: Option<f64>, duration_s: f64) {
         let end_zoom = zoom.unwrap_or(self.zoom).clamp(ZOOM_MIN, ZOOM_MAX);
+        let (lon, lat) = if self.projection_mode.is_globe() {
+            globe_framed_center(lon, lat, end_zoom)
+        } else {
+            (lon, lat)
+        };
         let dist = haversine_approx_deg(self.center_lon, self.center_lat, lon, lat);
         if dist < 0.05 && (self.zoom - end_zoom).abs() < 0.12 {
             self.center_on(lon, lat, Some(end_zoom));
@@ -169,16 +177,44 @@ impl MapViewport {
     }
 
     /// 预警期跟 S 波：只线性缩小（zoom 减小），不放大、不停顿跳级。
-    pub fn apply_linear_zoom_out(&mut self, target_zoom: f64, rate: f64) {
+    /// 球体远距时按震中做太平洋侧构图偏置，减轻「左俄多、右美缺」。
+    pub fn apply_linear_zoom_out(
+        &mut self,
+        target_zoom: f64,
+        rate: f64,
+        focus_lon: Option<f64>,
+        focus_lat: Option<f64>,
+    ) {
         if self.flight.is_some() || self.user_camera_override || self.post_flight_cooldown > 0.0 {
             return;
         }
         let target = target_zoom.clamp(ZOOM_MIN, ZOOM_MAX);
-        if target >= self.zoom - 0.02 {
+        if target >= self.zoom - 0.02 && focus_lon.is_none() {
             return;
         }
         let k = rate.clamp(0.02, 0.35);
-        self.zoom = (self.zoom + (target - self.zoom) * k).clamp(ZOOM_MIN, ZOOM_MAX);
+        if target < self.zoom - 0.02 {
+            self.zoom = (self.zoom + (target - self.zoom) * k).clamp(ZOOM_MIN, ZOOM_MAX);
+        }
+        if self.projection_mode.is_globe() {
+            if let (Some(flon), Some(flat)) = (focus_lon, focus_lat) {
+                let (tlon, tlat) = globe_framed_center(flon, flat, self.zoom);
+                let dlon = projection::normalize_lon(tlon - self.center_lon);
+                let dlon = if dlon > 180.0 {
+                    dlon - 360.0
+                } else if dlon < -180.0 {
+                    dlon + 360.0
+                } else {
+                    dlon
+                };
+                let dlat = tlat - self.center_lat;
+                if dlon.abs() > 0.05 || dlat.abs() > 0.05 {
+                    let kb = (k * 0.85).clamp(0.02, 0.3);
+                    self.center_lon = projection::normalize_lon(self.center_lon + dlon * kb);
+                    self.center_lat = projection::clamp_lat(self.center_lat + dlat * kb);
+                }
+            }
+        }
     }
 
     pub fn load_state(&self) -> BasemapLoadState {

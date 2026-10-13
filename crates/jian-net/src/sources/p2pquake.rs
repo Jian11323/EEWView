@@ -12,7 +12,7 @@ use crate::bus::{emit_health, NetTx};
 
 pub fn spawn(tx: NetTx, cfg: P2pSourceConfig) -> Vec<JoinHandle<()>> {
     if !cfg.enabled {
-        emit_health(&tx, "p2pquake", HealthStatus::Abnormal);
+        // 关闭源不标「异常」，由 UI 显示「关闭」
         return Vec::new();
     }
 

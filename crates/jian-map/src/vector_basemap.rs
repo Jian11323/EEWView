@@ -785,7 +785,7 @@ fn triangulate_ring(exterior: &[[f32; 2]], holes: &[Vec<[f32; 2]>]) -> Vec<u32> 
     }
 }
 
-/// 球体填色：只提交三顶点均在地平线内的预剖分三角形。
+/// 球体填色：优先用地平线内顶点；至少两顶点可见时用 raw 补第三点，减少美/俄球缘缺块。
 fn append_globe_fill_tris(
     land: &mut egui::epaint::Mesh,
     ring: &RingSet,
@@ -793,16 +793,26 @@ fn append_globe_fill_tris(
     land_fill: Color32,
 ) {
     let n = ring.exterior.len() + ring.holes.iter().map(|h| h.len()).sum::<usize>();
+    let mut lons: Vec<f64> = Vec::with_capacity(n);
+    let mut lats: Vec<f64> = Vec::with_capacity(n);
     let mut screen: Vec<Option<Pos2>> = Vec::with_capacity(n);
     for p in &ring.exterior {
-        screen.push(view.project_fill(p[0] as f64, p[1] as f64));
+        let lon = p[0] as f64;
+        let lat = p[1] as f64;
+        lons.push(lon);
+        lats.push(lat);
+        screen.push(view.project_fill(lon, lat));
     }
     for hole in &ring.holes {
         if hole.len() < 3 {
             continue;
         }
         for p in hole {
-            screen.push(view.project_fill(p[0] as f64, p[1] as f64));
+            let lon = p[0] as f64;
+            let lat = p[1] as f64;
+            lons.push(lon);
+            lats.push(lat);
+            screen.push(view.project_fill(lon, lat));
         }
     }
     if screen.len() < 3 {
@@ -814,13 +824,36 @@ fn append_globe_fill_tris(
         let i0 = tri[0] as usize;
         let i1 = tri[1] as usize;
         let i2 = tri[2] as usize;
-        let (Some(a), Some(b), Some(c)) = (
-            screen.get(i0).copied().flatten(),
-            screen.get(i1).copied().flatten(),
-            screen.get(i2).copied().flatten(),
-        ) else {
+        let mut a = screen.get(i0).copied().flatten();
+        let mut b = screen.get(i1).copied().flatten();
+        let mut c = screen.get(i2).copied().flatten();
+        let visible = a.is_some() as u8 + b.is_some() as u8 + c.is_some() as u8;
+        if visible < 2 {
+            continue;
+        }
+        if a.is_none() {
+            a = view.project_fill_raw(lons[i0], lats[i0]);
+        }
+        if b.is_none() {
+            b = view.project_fill_raw(lons[i1], lats[i1]);
+        }
+        if c.is_none() {
+            c = view.project_fill_raw(lons[i2], lats[i2]);
+        }
+        let (Some(a), Some(b), Some(c)) = (a, b, c) else {
             continue;
         };
+        // 圆形遮罩外的 raw 补点丢弃，避免陆地画进球外四角
+        if let Some(hr) = view.horizon_radius() {
+            let cxy = view.rect.center();
+            let lim2 = (hr * 1.04) * (hr * 1.04);
+            if (a - cxy).length_sq() > lim2
+                || (b - cxy).length_sq() > lim2
+                || (c - cxy).length_sq() > lim2
+            {
+                continue;
+            }
+        }
         let base = land.vertices.len() as u32;
         land.colored_vertex(a, land_fill);
         land.colored_vertex(b, land_fill);

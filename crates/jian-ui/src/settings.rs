@@ -197,6 +197,10 @@ pub struct SourceHealthView {
     pub wolfx: HealthStatus,
     pub p2p: HealthStatus,
     pub pancakes: HealthStatus,
+    pub jian_enabled: bool,
+    pub wolfx_enabled: bool,
+    pub p2p_enabled: bool,
+    pub pancakes_enabled: bool,
 }
 
 pub struct SettingsSession {
@@ -1011,13 +1015,13 @@ fn draw_sources(
     let mut exchange = false;
 
     section(ui, "服务器状态", "\u{25c9}", |ui| {
-        status_row(ui, "Jian Project", health.jian);
+        status_row(ui, "Jian Project", health.jian, health.jian_enabled);
         row_divider(ui);
-        status_row(ui, "Wolfx", health.wolfx);
+        status_row(ui, "Wolfx", health.wolfx, health.wolfx_enabled);
         row_divider(ui);
-        status_row(ui, "P2PQuake", health.p2p);
+        status_row(ui, "P2PQuake", health.p2p, health.p2p_enabled);
         row_divider(ui);
-        status_row(ui, "PancakesAPI", health.pancakes);
+        status_row(ui, "PancakesAPI", health.pancakes, health.pancakes_enabled);
     });
 
     section(ui, "Jian Project", "\u{25ce}", |ui| {
@@ -1263,11 +1267,15 @@ fn set_jian_eew_flag(draft: &mut AppConfig, fam: jian_core::AgencyFamily, on: bo
     }
 }
 
-fn status_row(ui: &mut Ui, name: &str, status: HealthStatus) {
-    let (color, label) = match status {
-        HealthStatus::Normal => (chrome().status_ok, "正常"),
-        HealthStatus::Fluctuating => (chrome().status_warn, "波动"),
-        HealthStatus::Abnormal => (chrome().status_bad, "异常"),
+fn status_row(ui: &mut Ui, name: &str, status: HealthStatus, enabled: bool) {
+    let (color, label) = if !enabled {
+        (chrome().text70, "关闭")
+    } else {
+        match status {
+            HealthStatus::Normal => (chrome().status_ok, "正常"),
+            HealthStatus::Fluctuating => (chrome().status_warn, "波动"),
+            HealthStatus::Abnormal => (chrome().status_bad, "异常"),
+        }
     };
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());

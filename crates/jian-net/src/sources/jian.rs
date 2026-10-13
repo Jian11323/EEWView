@@ -40,10 +40,8 @@ fn resolve_access_token(cfg: &JianSourceConfig) -> Option<String> {
 
 pub fn spawn(tx: NetTx, cfg: JianSourceConfig) -> Vec<JoinHandle<()>> {
     let mut tasks = Vec::new();
-    let mut any = false;
 
     if cfg.enabled {
-        any = true;
         let token = resolve_access_token(&cfg);
         let Some(token) = token else {
             warn!("jian: 无 at_/rt_（请在设置中用 lk_ 换票），跳过 /all");
@@ -89,13 +87,10 @@ pub fn spawn(tx: NetTx, cfg: JianSourceConfig) -> Vec<JoinHandle<()>> {
     }
 
     if cfg.station_enabled {
-        any = true;
         tasks.extend(spawn_kmoni_if(&tx, &cfg));
     }
 
-    if !any {
-        emit_health(&tx, "jian", HealthStatus::Abnormal);
-    }
+    // 整源关闭时不标「异常」，由 UI 显示「关闭」
     tasks
 }
 

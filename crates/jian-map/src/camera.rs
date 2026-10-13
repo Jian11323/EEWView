@@ -130,6 +130,28 @@ fn lerp_lon(a: f64, b: f64, t: f64) -> f64 {
     normalize_lon(a + d * t)
 }
 
+/// 球体构图：西太平洋震中略向东偏，减少左侧欧亚/俄罗斯占比、留出美洲侧。
+/// `zoom` 越大越近；跟焦常用 9–13，故在 zoom < 11 即开始偏置。
+pub fn globe_framed_center(lon: f64, lat: f64, zoom: f64) -> (f64, f64) {
+    let lon = normalize_lon(lon);
+    let lat = clamp_lat(lat);
+    if zoom >= 11.0 {
+        return (lon, lat);
+    }
+    let t = ((11.0 - zoom) / 8.0).clamp(0.0, 1.0);
+    // 东亚—西太平洋：震中偏左，镜头中心东移
+    if (95.0..170.0).contains(&lon) && (-10.0..60.0).contains(&lat) {
+        let bias = 12.0 + 20.0 * t; // 约 12°–32°
+        return (normalize_lon(lon + bias), lat);
+    }
+    // 东太平洋 / 北美西岸：略西偏，避免右侧陆地贴边被裁
+    if (-170.0..-50.0).contains(&lon) && (-10.0..70.0).contains(&lat) {
+        let bias = 8.0 + 14.0 * t;
+        return (normalize_lon(lon - bias), lat);
+    }
+    (lon, lat)
+}
+
 /// 使 `radius_km` 波圈大约落在视口短边的 `fill` 比例内，反推 zoom。
 pub fn zoom_to_fit_radius_km(lat: f64, radius_km: f64, viewport_min_px: f32, fill: f32) -> f64 {
     let target_px = (viewport_min_px * fill.clamp(0.25, 0.95)).max(32.0);

@@ -18,7 +18,7 @@ const EQLIST_POLL_SECS: u64 = 45;
 
 pub fn spawn(tx: NetTx, cfg: WolfxSourceConfig) -> Vec<JoinHandle<()>> {
     if !cfg.enabled {
-        emit_health(&tx, "wolfx", HealthStatus::Abnormal);
+        // 关闭源不标「异常」，由 UI 显示「关闭」
         return Vec::new();
     }
 

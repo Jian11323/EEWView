@@ -1077,13 +1077,11 @@ pub fn eew_sidebar_entries(list: &[EewReport]) -> Vec<(usize, &EewReport)> {
         .collect()
 }
 
-/// 侧栏分组键：同族镜像合并；CEA 国网与各省 cea-pr 分开。
+/// 侧栏分组键：同族镜像合并；国网 CEA（`[CN]`）与省级 cea-pr 分槽。
+/// 各省 cea-pr（宁夏/甘肃/云南…）共用一个 `cea-pr` 槽，避免同震多省残留。
 pub fn eew_sidebar_group_key(agency: &str) -> String {
-    if let Some(prov) = cea_pr_province(agency) {
-        if prov.is_empty() {
-            return "cea-pr".into();
-        }
-        return format!("cea-pr:{prov}");
+    if cea_pr_province(agency).is_some() {
+        return "cea-pr".into();
     }
     agency_family(agency).as_filter_key().to_string()
 }
@@ -1372,6 +1370,58 @@ mod eew_dedup_tests {
         let agencies: Vec<_> = side.iter().map(|(_, e)| e.agency.0.as_str()).collect();
         assert!(agencies.iter().any(|a| *a == "cea"));
         assert!(agencies.iter().any(|a| *a == "cea-pr:云南"));
+    }
+
+    #[test]
+    fn sidebar_merges_all_cea_pr_provinces_to_one_slot() {
+        let mut snap = AppSnapshot::offline_sample();
+        snap.eew_list.clear();
+        let mut nx = sample("cea-pr:宁夏", "nx-1", 1);
+        nx.place = "宁夏隆德县".into();
+        nx.latitude = 35.6;
+        nx.longitude = 106.1;
+        nx.origin_ms = 1_728_650_000_000;
+        let mut gs = sample("cea-pr:甘肃", "gs-1", 2);
+        gs.place = "宁夏固原市原州区".into();
+        gs.latitude = 36.0;
+        gs.longitude = 106.2;
+        gs.origin_ms = 1_728_650_000_000;
+        let mut cn = sample("cea", "cn-1", 2);
+        cn.place = "宁夏固原市原州区".into();
+        cn.latitude = 36.0;
+        cn.longitude = 106.2;
+        cn.origin_ms = 1_728_650_000_000;
+        snap.upsert_eew(nx);
+        snap.upsert_eew(gs);
+        snap.upsert_eew(cn);
+        let side = eew_sidebar_entries(&snap.eew_list);
+        assert_eq!(side.len(), 2);
+        let keys: Vec<_> = side
+            .iter()
+            .map(|(_, e)| eew_sidebar_group_key(&e.agency.0))
+            .collect();
+        assert!(keys.iter().any(|k| k == "cea"));
+        assert!(keys.iter().any(|k| k == "cea-pr"));
+        // 省级槽保留更新报（甘肃 #2）
+        let pr = side
+            .iter()
+            .find(|(_, e)| eew_sidebar_group_key(&e.agency.0) == "cea-pr")
+            .unwrap()
+            .1;
+        assert_eq!(pr.agency.0, "cea-pr:甘肃");
+        assert_eq!(pr.serial, 2);
+    }
+
+    #[test]
+    fn wolfx_cenc_eew_merges_into_cn_slot_prefer_jian() {
+        let mut snap = AppSnapshot::offline_sample();
+        snap.eew_list.clear();
+        snap.upsert_eew(sample("wolfx-cea", "cn-evt", 3));
+        snap.upsert_eew(sample("cea", "cn-evt", 3));
+        assert_eq!(snap.eew_list.len(), 1);
+        assert_eq!(snap.eew_list[0].agency.0, "cea");
+        assert_eq!(eew_sidebar_group_key("wolfx-cea"), "cea");
+        assert_eq!(agency_bracket("wolfx-cea"), "CN");
     }
 
     #[test]

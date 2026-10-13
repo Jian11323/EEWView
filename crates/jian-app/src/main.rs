@@ -321,9 +321,17 @@ fn build_native_options(
     }
 }
 
-/// 目标帧率 → 重绘间隔（毫秒）。设置窗打开时强制高刷。
-fn idle_repaint_ms(perf: &jian_config::PerformanceConfig) -> u64 {
-    perf.repaint_interval_ms()
+/// 目标帧率 → 重绘间隔（毫秒）。
+/// `busy`：交互/飞跃/设置/波圈/倒计时等需要跟手刷新；空闲则大幅降频，避免老 CPU 空载仍 60fps。
+fn idle_repaint_ms(perf: &jian_config::PerformanceConfig, busy: bool) -> u64 {
+    if busy {
+        return perf.repaint_interval_ms();
+    }
+    match perf.profile.to_ascii_lowercase().as_str() {
+        "extreme" => perf.repaint_interval_ms(),
+        "eco" => 250,  // ~4 fps
+        _ => 120,      // ~8 fps（normal）
+    }
 }
 
 fn clear_countdown(snap: &mut AppSnapshot) {
@@ -368,6 +376,11 @@ fn refresh_countdown(
         return;
     }
     let surface = jian_util::haversine_km(ev.longitude, ev.latitude, lon, lat);
+    // 超过 2000km：不再显示本地倒计时（与走时表远距回退边界一致）
+    if surface > 2000.0 {
+        clear_countdown(snap);
+        return;
+    }
     // 本机已在该震级 S 波最大传播范围之外：波到不了，不显示倒计时
     let max_reach = max_s_spread_for(ev.magnitude, &snap.wave_spread_km);
     if surface > max_reach * 1.05 {
@@ -915,9 +928,20 @@ impl eframe::App for JianApp {
                 || i.pointer.button_released(egui::PointerButton::Primary)
                 || i.smooth_scroll_delta.length_sq() > 0.0
         });
-        let fps_ms = idle_repaint_ms(&self.cfg.performance);
-        if pointer_busy || self.shell.map.is_flying() || self.shell.settings.open || self.splash.active() {
-            // 交互/设置打开时至少按目标帧率刷新
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let waves_busy = self.snap.show_wave_rings
+            && self.snap.eew_list.iter().any(|e| {
+                eew_wave_live(e, now_ms, &self.snap.wave_spread_km, self.travel.as_ref())
+            });
+        let busy = pointer_busy
+            || self.shell.map.is_flying()
+            || self.shell.settings.open
+            || self.splash.active()
+            || waves_busy
+            || self.snap.countdown_s.is_some();
+        let fps_ms = idle_repaint_ms(&self.cfg.performance, busy);
+        if pointer_busy || self.shell.map.is_flying() || self.shell.settings.open || self.splash.active()
+        {
             ctx.request_repaint_after(std::time::Duration::from_millis(fps_ms.min(16)));
         } else {
             ctx.request_repaint_after(std::time::Duration::from_millis(fps_ms));

@@ -215,6 +215,14 @@ impl ViewCtx {
         }
     }
 
+    /// 陆地填色兜底：略出地平线也投影（配合圆形遮罩）。
+    pub fn project_fill_raw(&self, lon: f64, lat: f64) -> Option<Pos2> {
+        match self.mode {
+            ProjectionMode::Flat => self.project(lon, lat),
+            ProjectionMode::Globe => self.globe.map(|c| c.project_fill_raw(lon, lat, self.rect)),
+        }
+    }
+
     pub fn pan_by_delta(&self, dx_px: f32, dy_px: f32) -> (f64, f64) {
         match self.mode {
             ProjectionMode::Flat => {

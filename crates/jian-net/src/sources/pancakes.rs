@@ -1,18 +1,17 @@
 //! PancakesAPI（api.aloys23.link）：仅 GQ + JMA-Atom（jma_volcano）；通道 `/ws/all`。
 
 use jian_config::PancakesSourceConfig;
-use jian_core::HealthStatus;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use crate::adapter::ingest_pancakes_event;
-use crate::bus::{emit_health, NetTx};
+use crate::bus::NetTx;
 use crate::sources::ws::{run_ws_loop, WsLoopOpts};
 
 pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
     if !cfg.enabled {
-        emit_health(&tx, "pancakes", HealthStatus::Abnormal);
+        // 关闭源不标「异常」，由 UI 显示「关闭」
         return Vec::new();
     }
 

@@ -115,11 +115,17 @@ impl GlobeCamera {
         d <= self.max_distance * 1.002
     }
 
-    /// 陆地填色用：略放宽地平线，减少边缘灰底整块掉线。
+    /// 陆地填色用：放宽地平线，减少美洲/欧亚在球缘整块掉线。
     pub fn is_above_horizon_fill(&self, lon: f64, lat: f64) -> bool {
         let (x, y, z) = lonlat_to_ecef(lon, lat, 0.0);
         let d = dist3(self.camera_x, self.camera_y, self.camera_z, x, y, z);
-        d <= self.max_distance * 1.06
+        d <= self.max_distance * 1.14
+    }
+
+    /// 填色兜底投影：即使略低于地平线也投到屏幕（由圆形遮罩裁切）。
+    pub fn project_fill_raw(&self, lon: f64, lat: f64, rect: Rect) -> Pos2 {
+        let (sx, sy) = self.project_lonlat_raw(lon, lat);
+        Pos2::new(rect.left() + sx as f32, rect.top() + sy as f32)
     }
 
     /// 投影到屏幕；背面返回 `None`。

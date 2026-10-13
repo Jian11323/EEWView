@@ -101,12 +101,13 @@ kma_jian_ws = "wss://api.sismotide.top/kma-station"
 enabled = true
 eew_enabled = true
 eqlist_enabled = true
+# 默认仅 JMA + CENC（国网，展示为 [CN]）预警；省局/CWA 默认关
 jma_eew = true
-sc_eew = true
-fj_eew = true
-cq_eew = true
+sc_eew = false
+fj_eew = false
+cq_eew = false
 cenc_eew = true
-cwa_eew = true
+cwa_eew = false
 cenc_eqlist = true
 jma_eqlist = true
 

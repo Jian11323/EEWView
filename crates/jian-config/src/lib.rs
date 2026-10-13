@@ -417,15 +417,17 @@ pub struct WolfxSourceConfig {
     pub eqlist_enabled: bool,
     #[serde(default = "default_true")]
     pub jma_eew: bool,
-    #[serde(default = "default_true")]
+    /// 四川 EEW（cea-pr）；默认关，避免与 Jian 省级源重复
+    #[serde(default = "default_false")]
     pub sc_eew: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub fj_eew: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub cq_eew: bool,
+    /// Wolfx CENC 国网预警（入库为 wolfx-cea，展示 [CN]）
     #[serde(default = "default_true")]
     pub cenc_eew: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub cwa_eew: bool,
     #[serde(default = "default_true")]
     pub cenc_eqlist: bool,
@@ -549,6 +551,9 @@ pub struct P2pSourceConfig {
 fn default_true() -> bool {
     true
 }
+fn default_false() -> bool {
+    false
+}
 fn default_jian_ws() -> String {
     "wss://api.sismotide.top/all".into()
 }
@@ -660,11 +665,11 @@ impl Default for AppConfig {
                     eew_enabled: true,
                     eqlist_enabled: true,
                     jma_eew: true,
-                    sc_eew: true,
-                    fj_eew: true,
-                    cq_eew: true,
+                    sc_eew: false,
+                    fj_eew: false,
+                    cq_eew: false,
                     cenc_eew: true,
-                    cwa_eew: true,
+                    cwa_eew: false,
                     cenc_eqlist: true,
                     jma_eqlist: true,
                     ws_urls: default_wolfx_ws(),
