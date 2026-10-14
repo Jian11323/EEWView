@@ -468,23 +468,32 @@ async fn fetch_yahoo_realtime(
 }
 
 /// Yahoo intensity：每字符一站；`char as u32 - 100` → 0..=20 档 → 計測 -3…7（0.5 步）。
-/// `< 0`（`none` / `-1`）跳过。
+/// `< 0`（`none` / `-1`）仍保留站点（計測 -4，供检知邻接表稳定）。
 fn decode_yahoo_intensity(intensity: &str, sites: &[YahooSite]) -> Vec<StationSample> {
     let n = intensity.chars().count().min(sites.len());
     let mut out = Vec::with_capacity(n);
     for (i, (ch, site)) in intensity.chars().zip(sites.iter()).take(n).enumerate() {
         let band = (ch as u32).wrapping_sub(100) as i32;
-        if !(0..=20).contains(&band) {
-            continue;
-        }
-        let instrumental = -3.0 + f64::from(band) * 0.5;
-        let (level, _) = jma_from_instrumental(instrumental);
+        let instrumental = if (0..=20).contains(&band) {
+            -3.0 + f64::from(band) * 0.5
+        } else {
+            -4.0
+        };
+        let (level, _) = if instrumental >= -3.0 {
+            jma_from_instrumental(instrumental)
+        } else {
+            (0, "—")
+        };
         out.push(StationSample {
             id: format!("Y{i:04}"),
             name: format!("Y{i:04}"),
             latitude: site.lat,
             longitude: site.lon,
-            intensity_text: instrumental_display_text(instrumental),
+            intensity_text: if instrumental >= -3.0 {
+                instrumental_display_text(instrumental)
+            } else {
+                "—".into()
+            },
             intensity_kind: IntensityKind::JmaShindo,
             intensity_level: level,
             instrumental,

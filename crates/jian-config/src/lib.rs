@@ -407,7 +407,7 @@ pub struct StationsConfig {
     #[serde(default)]
     pub snet_enabled: bool,
     /// `jian` | `original`
-    #[serde(default = "default_jma_station_source")]
+    #[serde(default = "default_snet_station_source")]
     pub snet_source: String,
     #[serde(default = "default_snet_jian_ws")]
     pub snet_jian_ws: String,
@@ -425,7 +425,7 @@ impl Default for StationsConfig {
             jma_source: default_jma_station_source(),
             jma_jian_ws: default_jian_station_ws(),
             snet_enabled: false,
-            snet_source: default_jma_station_source(),
+            snet_source: default_snet_station_source(),
             snet_jian_ws: default_snet_jian_ws(),
             kma_enabled: true,
             kma_jian_ws: default_kma_station_ws(),
@@ -630,6 +630,9 @@ fn default_jian_station_ws() -> String {
     "wss://api.sismotide.top/kmoni".into()
 }
 fn default_jma_station_source() -> String {
+    "yahoo".into()
+}
+fn default_snet_station_source() -> String {
     "jian".into()
 }
 fn default_snet_jian_ws() -> String {
