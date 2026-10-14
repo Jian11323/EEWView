@@ -1,4 +1,4 @@
-//! 从 assets/brand/logo.svg 生成窗口/exe 用 PNG 与多尺寸 ICO。
+//! 从 icon/brand/logo.svg 生成窗口/exe 用 PNG 与多尺寸 ICO。
 use image::codecs::ico::{IcoEncoder, IcoFrame};
 use std::fs;
 use std::path::PathBuf;
@@ -39,7 +39,7 @@ fn rasterize(svg: &[u8], max_px: u32) -> (u32, u32, Vec<u8>) {
 
 fn main() {
     let root = repo_root();
-    let brand = root.join("assets/brand");
+    let brand = root.join("icon/brand");
     let svg = fs::read(brand.join("logo.svg")).expect("read logo.svg");
 
     let (w, h, rgba) = rasterize(&svg, 256);

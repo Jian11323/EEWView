@@ -78,8 +78,8 @@ def ensure_nsis() -> Path:
 def ensure_portable(*, force: bool) -> Path:
     dist = ROOT / "dist" / "EEWView"
     exe = dist / "eewview.exe"
-    splash = dist / "assets" / "brand" / "splash_bg.png"
-    need = force or (not exe.is_file()) or (not splash.is_file()) or (not (dist / "assets").is_dir())
+    splash = dist / "icon" / "brand" / "splash_bg.png"
+    need = force or (not exe.is_file()) or (not splash.is_file()) or (not (dist / "media").is_dir() and (dist / "icon").is_dir())
     if not need:
         return dist
     log("组装便携目录 → run pack_windows.py")
@@ -119,8 +119,8 @@ def main() -> int:
     shutil.copytree(dist, stage_dist)
 
     # NSIS MUI 欢迎页侧栏需要 BMP；由启动图生成
-    splash_png = stage_dist / "assets" / "brand" / "splash_bg.png"
-    splash_bmp = stage_dist / "assets" / "brand" / "splash_installer.bmp"
+    splash_png = stage_dist / "icon" / "brand" / "splash_bg.png"
+    splash_bmp = stage_dist / "icon" / "brand" / "splash_installer.bmp"
     if splash_png.is_file():
         try:
             from PIL import Image  # type: ignore

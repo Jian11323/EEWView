@@ -116,8 +116,8 @@ fn write_ak135_stub(out: &Path) -> Result<()> {
 
 fn main() -> Result<()> {
     let root = workspace_root();
-    let raw = root.join("assets/travel/raw/tjma2001/tjma2001");
-    let out_dir = root.join("assets/travel");
+    let raw = root.join("media/travel/raw/tjma2001/tjma2001");
+    let out_dir = root.join("media/travel");
     fs::create_dir_all(&out_dir)?;
 
     println!("parsing {} ...", raw.display());

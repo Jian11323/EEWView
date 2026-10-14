@@ -1,4 +1,4 @@
-//! 烈度/震度图标：`assets/intensity/` 下各标度 SVG（观测 / 仪器）。
+//! 烈度/震度图标：`icon/intensity/` 下各标度 SVG（观测 / 仪器）。
 //!
 //! JMA：level 0–9 → 0,1,2,3,4,5弱,5强,6弱,6强,7。
 //! CN / MMI：1–12；LPGM：1–4。
@@ -11,7 +11,7 @@ macro_rules! svg {
     ($rel:expr) => {
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/intensity/",
+            "/../../icon/intensity/",
             $rel
         ))
     };

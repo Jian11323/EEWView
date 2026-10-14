@@ -4,6 +4,7 @@
 
 use futures_util::{SinkExt, StreamExt};
 use jian_core::HealthStatus;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::{interval, sleep, MissedTickBehavior};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -11,9 +12,14 @@ use tracing::{info, warn};
 
 use crate::bus::{emit_health, NetTx};
 
+/// 每次连接前解析 URL（例如用 rt_ 换新 at_ 再拼 key=）。
+pub type ResolveUrl = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
+
 pub struct WsLoopOpts {
     pub source: &'static str,
     pub url: String,
+    /// 若设置，每次 `connect` 前调用（可阻塞换票）；成功则覆盖 `url`
+    pub resolve_url: Option<ResolveUrl>,
     /// 连接成功后立刻发送的文本（鉴权 / query / list）
     pub on_open_texts: Vec<String>,
     /// 连接存活期间周期性重发（如 Jian cenclist）；空则不发
@@ -33,6 +39,23 @@ impl WsLoopOpts {
     }
 }
 
+/// 日志用：去掉 `key=` 查询参数中的令牌。
+pub fn redact_url(url: &str) -> String {
+    let Some(start) = url.find("key=") else {
+        return url.to_string();
+    };
+    let val_start = start + 4;
+    let val_end = url[val_start..]
+        .find(['&', '#', '?'])
+        .map(|i| val_start + i)
+        .unwrap_or(url.len());
+    let mut out = String::with_capacity(url.len());
+    out.push_str(&url[..val_start]);
+    out.push_str("***");
+    out.push_str(&url[val_end..]);
+    out
+}
+
 /// 收到文本帧时调用
 pub async fn run_ws_loop<F>(tx: NetTx, opts: WsLoopOpts, mut on_text: F)
 where
@@ -41,9 +64,39 @@ where
     let mut backoff = 1u64;
     loop {
         emit_health(&tx, opts.source, HealthStatus::Fluctuating);
-        info!(source = opts.source, url = %opts.url, "connecting");
 
-        match connect_async(&opts.url).await {
+        let url = if let Some(ref resolve) = opts.resolve_url {
+            let resolve = Arc::clone(resolve);
+            match tokio::task::spawn_blocking(move || resolve()).await {
+                Ok(Ok(u)) => u,
+                Ok(Err(e)) => {
+                    warn!(source = opts.source, error = %e, "resolve url failed");
+                    emit_health(&tx, opts.source, HealthStatus::Abnormal);
+                    backoff = backoff.max(15);
+                    let jitter_ms = (backoff.saturating_mul(137) % 800) as u64;
+                    sleep(Duration::from_secs(backoff) + Duration::from_millis(jitter_ms)).await;
+                    backoff = (backoff * 2).min(opts.backoff_max_secs.max(60));
+                    continue;
+                }
+                Err(e) => {
+                    warn!(source = opts.source, "resolve url join: {e}");
+                    emit_health(&tx, opts.source, HealthStatus::Abnormal);
+                    sleep(Duration::from_secs(backoff.max(5))).await;
+                    backoff = (backoff * 2).min(opts.backoff_max_secs.max(60));
+                    continue;
+                }
+            }
+        } else {
+            opts.url.clone()
+        };
+
+        info!(
+            source = opts.source,
+            url = %redact_url(&url),
+            "connecting"
+        );
+
+        match connect_async(&url).await {
             Ok((ws, _)) => {
                 emit_health(&tx, opts.source, HealthStatus::Normal);
                 backoff = 1;
@@ -54,6 +107,7 @@ where
                     }
                 }
                 let mut rate_limited = false;
+                let mut auth_failed = false;
                 let use_periodic =
                     opts.periodic_secs > 0 && !opts.periodic_texts.is_empty();
                 let mut tick = if use_periodic {
@@ -76,7 +130,8 @@ where
                 let opened_at = Instant::now();
                 let mut got_first = false;
                 loop {
-                    let watchdog = sleep_until_deadline(last_msg, if got_first { stale } else { first_grace });
+                    let watchdog =
+                        sleep_until_deadline(last_msg, if got_first { stale } else { first_grace });
                     tokio::select! {
                         msg = read.next() => {
                             match msg {
@@ -91,6 +146,17 @@ where
                                         );
                                         emit_health(&tx, opts.source, HealthStatus::Abnormal);
                                         rate_limited = true;
+                                        break;
+                                    }
+                                    if is_auth_error(text) {
+                                        let msg = error_message(text).unwrap_or("auth error");
+                                        warn!(
+                                            source = opts.source,
+                                            message = %msg,
+                                            "鉴权失败，将换票后重连（避免无钥狂连触发 IP 封禁）"
+                                        );
+                                        emit_health(&tx, opts.source, HealthStatus::Abnormal);
+                                        auth_failed = true;
                                         break;
                                     }
                                     if is_error_frame(text) {
@@ -152,6 +218,10 @@ where
                 if rate_limited {
                     backoff = backoff.max(45);
                 }
+                if auth_failed {
+                    // 官方：累计约 10 次无鉴权掐断会临时封 IP；鉴权失败后拉长退避并换票
+                    backoff = backoff.max(20);
+                }
                 emit_health(&tx, opts.source, HealthStatus::Fluctuating);
             }
             Err(e) => {
@@ -188,6 +258,24 @@ fn is_conn_limit_error(text: &str) -> bool {
         || text.contains("max_connections")
 }
 
+fn is_auth_error(text: &str) -> bool {
+    if !is_error_frame(text) {
+        return false;
+    }
+    text.contains("expired_access_token")
+        || text.contains("invalid_api_key")
+        || text.contains("missing_api_key")
+        || text.contains("invalid_token_format")
+        || text.contains("invalid_refresh_token")
+        || text.contains("expired_refresh_token")
+        || text.contains("\"code\":4001")
+        || text.contains("\"code\":4002")
+        || text.contains("\"code\":4003")
+        || text.contains("\"code\":4004")
+        || text.contains("\"code\":4201")
+        || text.contains("\"code\":4202")
+}
+
 fn error_message(text: &str) -> Option<&str> {
     let key = "\"message\"";
     let i = text.find(key)?;
@@ -196,4 +284,25 @@ fn error_message(text: &str) -> Option<&str> {
     let rest = &rest[start..];
     let end = rest.find('"')?;
     Some(&rest[..end])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_url;
+
+    #[test]
+    fn redact_key_query() {
+        assert_eq!(
+            redact_url("wss://api.example/all?key=at_secret"),
+            "wss://api.example/all?key=***"
+        );
+        assert_eq!(
+            redact_url("wss://api.example/all?foo=1&key=at_secret&bar=2"),
+            "wss://api.example/all?foo=1&key=***&bar=2"
+        );
+        assert_eq!(
+            redact_url("wss://api.example/kmoni"),
+            "wss://api.example/kmoni"
+        );
+    }
 }

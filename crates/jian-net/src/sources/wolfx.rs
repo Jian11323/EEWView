@@ -46,6 +46,7 @@ pub fn spawn(tx: NetTx, cfg: WolfxSourceConfig) -> Vec<JoinHandle<()>> {
                     WsLoopOpts {
                         source: "wolfx",
                         url,
+                        resolve_url: None,
                         on_open_texts: on_open,
                         periodic_texts: vec!["ping".into()],
                         periodic_secs: 30,

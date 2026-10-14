@@ -1,4 +1,4 @@
-//! 解析 `assets/sound/catalog.json`。
+//! 解析 `media/sound/catalog.json`。
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -41,5 +41,31 @@ impl SoundCatalog {
     pub fn event_rel_path(&self, pack: &str, event: &str) -> Option<PathBuf> {
         let p = self.packs.get(pack)?;
         p.events.get(event).map(PathBuf::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn catalog_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../media/sound/catalog.json")
+    }
+
+    fn sound_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../media/sound")
+    }
+
+    #[test]
+    fn loads_workspace_catalog() {
+        let cat = SoundCatalog::load(catalog_path()).expect("catalog");
+        assert!(cat.version >= 2);
+        assert_eq!(cat.pack_for_route("default_eew"), Some("srev"));
+        assert_eq!(cat.pack_for_route("ui"), Some("ui"));
+        let issue = cat.event_rel_path("eew", "issue").expect("eew/issue");
+        assert!(sound_root().join(issue).is_file());
+        let notify = cat.event_rel_path("ui", "notify").expect("ui/notify");
+        assert!(sound_root().join(notify).is_file());
     }
 }

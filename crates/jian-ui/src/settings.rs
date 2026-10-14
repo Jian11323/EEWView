@@ -7,6 +7,7 @@ use egui::{
 use jian_config::AppConfig;
 use jian_core::HealthStatus;
 use jian_net::{exchange_login_key, format_expire_date};
+use std::sync::mpsc;
 
 mod filters_ui;
 
@@ -211,6 +212,8 @@ pub struct SettingsSession {
     save_note: Option<String>,
     login_key: String,
     auth_busy: bool,
+    /// 后台换票结果（避免阻塞 UI 帧）
+    auth_rx: Option<mpsc::Receiver<Result<(String, f64, String), String>>>,
     /// 主地图单击选点目标
     pub map_pick: Option<MapPickKind>,
     /// 下一帧用主地图中心写入默认视口
@@ -233,6 +236,7 @@ impl Default for SettingsSession {
             save_note: None,
             login_key: String::new(),
             auth_busy: false,
+            auth_rx: None,
             map_pick: None,
             capture_view: false,
             opened_at: None,
@@ -250,6 +254,7 @@ impl SettingsSession {
         self.save_note = None;
         self.login_key.clear();
         self.auth_busy = false;
+        self.auth_rx = None;
         self.map_pick = None;
         self.capture_view = false;
         self.opened_at = Some(std::time::Instant::now());
@@ -408,32 +413,55 @@ impl SettingsSession {
         }
 
 
-        if do_exchange {
-            self.auth_busy = true;
+        if do_exchange && !self.auth_busy {
             let key = self.login_key.clone();
-            match exchange_login_key(&key) {
-                Ok(ok) => {
-                    if let Some(draft) = self.draft.as_mut() {
-                        draft.sources.jian.refresh_token = Some(ok.token);
-                        draft.sources.jian.refresh_expire_at = ok.expire_at;
-                    }
-                    let expire = format_expire_date(ok.expire_at)
-                        .map(|d| format!("，约至 {d}"))
-                        .unwrap_or_default();
-                    self.save_note = Some(format!("{}{}", ok.message, expire));
-                    self.login_key.clear();
-                    if let Some(draft) = self.draft.clone() {
-                        action = Some(SettingsAction::Saved {
-                            cfg: draft,
-                            close: false,
-                        });
-                    }
+            let (tx, rx) = mpsc::channel();
+            self.auth_busy = true;
+            self.auth_rx = Some(rx);
+            self.save_note = Some("正在换票…".into());
+            std::thread::spawn(move || {
+                let _ = tx.send(
+                    exchange_login_key(&key)
+                        .map(|ok| (ok.token, ok.expire_at, ok.message)),
+                );
+            });
+        }
+
+        let auth_poll = self.auth_rx.as_ref().map(|rx| rx.try_recv());
+        match auth_poll {
+            Some(Ok(Ok((token, expire_at, message)))) => {
+                self.auth_rx = None;
+                self.auth_busy = false;
+                if let Some(draft) = self.draft.as_mut() {
+                    draft.sources.jian.refresh_token = Some(token);
+                    draft.sources.jian.refresh_expire_at = expire_at;
                 }
-                Err(e) => {
-                    self.save_note = Some(format!("鉴权失败：{e}"));
+                let expire = format_expire_date(expire_at)
+                    .map(|d| format!("，约至 {d}"))
+                    .unwrap_or_default();
+                self.save_note = Some(format!("{message}{expire}"));
+                self.login_key.clear();
+                if let Some(draft) = self.draft.clone() {
+                    action = Some(SettingsAction::Saved {
+                        cfg: draft,
+                        close: false,
+                    });
                 }
             }
-            self.auth_busy = false;
+            Some(Ok(Err(e))) => {
+                self.auth_rx = None;
+                self.auth_busy = false;
+                self.save_note = Some(format!("鉴权失败：{e}"));
+            }
+            Some(Err(mpsc::TryRecvError::Empty)) => {
+                ctx.request_repaint();
+            }
+            Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                self.auth_rx = None;
+                self.auth_busy = false;
+                self.save_note = Some("鉴权失败：换票线程中断".into());
+            }
+            None => {}
         }
 
         if restore {
@@ -1233,7 +1261,7 @@ fn draw_sources(
         });
         if draft.sources.stations.snet_enabled {
             row_divider(ui);
-            control_row(ui, "S-Net 源", "原版需 assets/stations/pixels.csv", "\u{25ce}", |ui| {
+            control_row(ui, "S-Net 源", "原版需 media/stations/pixels.csv", "\u{25ce}", |ui| {
                 egui::ComboBox::from_id_salt("set_snet_station_src")
                     .selected_text(snet_station_src_label(&draft.sources.stations.snet_source))
                     .width(200.0)

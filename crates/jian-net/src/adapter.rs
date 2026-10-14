@@ -774,7 +774,11 @@ fn parse_jian_eew(agency: &str, data: &Value) -> Option<EewReport> {
         None if is_cancel => 0.0,
         None => return None,
     };
-    let depth_km = field_f64(data, &["depth", "Depth"]).unwrap_or(0.0);
+    let depth_km = match field_f64(data, &["depth", "Depth"]) {
+        Some(v) => v,
+        None if is_cancel => 0.0,
+        None => return None,
+    };
     let latitude = match field_f64(data, &["latitude", "Latitude"]) {
         Some(v) => v,
         None if is_cancel => 0.0,
@@ -955,7 +959,11 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
         None if hypo_unknown => 0.0,
         _ => return None,
     };
-    let depth_km = field_f64(data, &["depth", "Depth"]).unwrap_or(0.0);
+    let depth_km = match field_f64(data, &["depth", "Depth"]) {
+        Some(v) => v,
+        None if hypo_unknown => 0.0,
+        None => return None,
+    };
     let origin_ms = data
         .get("originTime")
         .or_else(|| data.get("shockTime"))
@@ -1096,7 +1104,9 @@ fn emit_wolfx_eew(tx: &NetTx, v: &Value, agency: &str) {
     let Some(magnitude) = field_f64(v, &["Magnitude", "magnitude", "Magunitude"]) else {
         return;
     };
-    let depth_km = field_f64(v, &["Depth", "depth"]).unwrap_or(10.0);
+    let Some(depth_km) = field_f64(v, &["Depth", "depth"]) else {
+        return;
+    };
     let Some(latitude) = field_f64(v, &["Latitude", "latitude"]) else {
         return;
     };
@@ -1212,7 +1222,9 @@ fn ingest_wolfx_cenc_eqlist_value(tx: &NetTx, v: &Value) {
         let Some(longitude) = field_f64(item, &["longitude", "Longitude"]) else {
             continue;
         };
-        let depth_km = field_f64(item, &["depth", "Depth"]).unwrap_or(10.0);
+        let Some(depth_km) = field_f64(item, &["depth", "Depth"]) else {
+            continue;
+        };
         let origin_ms = item
             .get("time")
             .or_else(|| item.get("Time"))
@@ -1275,7 +1287,9 @@ fn ingest_wolfx_jma_eqlist_value(tx: &NetTx, v: &Value) {
         let Some(longitude) = field_f64(item, &["longitude", "Longitude"]) else {
             continue;
         };
-        let depth_km = field_f64(item, &["depth", "Depth"]).unwrap_or(10.0);
+        let Some(depth_km) = field_f64(item, &["depth", "Depth"]) else {
+            continue;
+        };
         let origin_ms = item
             .get("time")
             .or_else(|| item.get("Time"))
@@ -1347,14 +1361,18 @@ pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
             continue;
         };
         let place = hypo.get("name").and_then(|x| x.as_str()).unwrap_or("—");
-        let latitude = field_f64(hypo, &["latitude", "Latitude"]).unwrap_or(0.0);
-        let longitude = field_f64(hypo, &["longitude", "Longitude"]).unwrap_or(0.0);
-        let magnitude = field_f64(hypo, &["magnitude", "Magnitude"]).unwrap_or(0.0);
-        let depth_km = field_f64(hypo, &["depth", "Depth"]).unwrap_or(10.0);
-        // 无坐标且无震级：跳过（避免空壳进列表）
-        if magnitude <= 0.0 && latitude.abs() < 0.01 && longitude.abs() < 0.01 {
+        let Some(latitude) = field_f64(hypo, &["latitude", "Latitude"]) else {
             continue;
-        }
+        };
+        let Some(longitude) = field_f64(hypo, &["longitude", "Longitude"]) else {
+            continue;
+        };
+        let Some(magnitude) = field_f64(hypo, &["magnitude", "Magnitude"]) else {
+            continue;
+        };
+        let Some(depth_km) = field_f64(hypo, &["depth", "Depth"]) else {
+            continue;
+        };
         let max_scale = eq.get("maxScale").and_then(|x| x.as_i64());
         let (intensity_text, level) = if let Some(scale) = max_scale {
             let t = jian_core::jma_shindo_text(jma_shindo_level(&scale.to_string()));
@@ -1643,13 +1661,21 @@ fn ingest_pancakes_gq(tx: &NetTx, action: &str, payload: &Value, min_mag: f64) {
         }));
         return;
     }
-    let magnitude = field_f64(payload, &["magnitude"]).unwrap_or(0.0);
+    let Some(magnitude) = field_f64(payload, &["magnitude"]) else {
+        return;
+    };
     if min_mag > 0.0 && magnitude + 1e-9 < min_mag {
         return;
     }
-    let latitude = field_f64(payload, &["latitude"]).unwrap_or(0.0);
-    let longitude = field_f64(payload, &["longitude"]).unwrap_or(0.0);
-    let depth_km = field_f64(payload, &["depth", "depthKm"]).unwrap_or(10.0);
+    let Some(latitude) = field_f64(payload, &["latitude"]) else {
+        return;
+    };
+    let Some(longitude) = field_f64(payload, &["longitude"]) else {
+        return;
+    };
+    let Some(depth_km) = field_f64(payload, &["depth", "depthKm"]) else {
+        return;
+    };
     let place = payload
         .get("region")
         .or_else(|| payload.get("place"))
@@ -1841,6 +1867,24 @@ mod tests {
         assert!(rec.origin_ms > 0, "CENC time must parse to origin_ms");
         // 2026-10-10 12:14:01 CST
         assert_eq!(rec.origin_ms, 1_791_605_641_000);
+    }
+
+    #[test]
+    fn wolfx_cenc_skips_when_depth_missing() {
+        let body = r#"{
+            "No1": {
+                "type": "reviewed",
+                "time": "2026-10-10 12:14:01",
+                "placeName": "巴拿马",
+                "magnitude": "6.0",
+                "latitude": "7.50",
+                "longitude": "-80.60",
+                "intensity": "8"
+            }
+        }"#;
+        let (tx, mut rx) = channel();
+        ingest_wolfx_eqlist(&tx, body);
+        assert!(rx.try_recv().is_err(), "missing depth must not invent 10km");
     }
 
     #[test]

@@ -15,7 +15,7 @@ usage = f"""EEW View 便携测试包
 ================
 
 版本：Beta {ver}
-双击 eewview.exe 即可运行（勿拆散 assets / geodata / config 相对位置）。
+双击 eewview.exe 即可运行（勿拆散 media / icon / geodata / config 相对位置）。
 启动时会显示启动界面，底图就绪后进入主界面。
 
 【首次使用】

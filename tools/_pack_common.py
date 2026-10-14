@@ -21,12 +21,12 @@ def workspace_version(root: Path) -> str:
 
 
 def assert_brand_assets(root: Path) -> None:
-    brand = root / "assets" / "brand"
+    brand = root / "icon" / "brand"
     missing = [n for n in REQUIRED_BRAND if not (brand / n).is_file()]
     if missing:
         raise SystemExit(
             "缺少品牌资源，无法打包: "
-            + ", ".join(f"assets/brand/{n}" for n in missing)
+            + ", ".join(f"icon/brand/{n}" for n in missing)
         )
 
 

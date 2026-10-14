@@ -5,22 +5,22 @@ use std::collections::HashMap;
 
 const CROSS_SVG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/markers/cross.svg"
+    "/../../icon/markers/cross.svg"
 ));
 const RED_SVG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/markers/red.svg"
+    "/../../icon/markers/red.svg"
 ));
 const GREEN_SVG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/markers/green.svg"
+    "/../../icon/markers/green.svg"
 ));
 
 macro_rules! shindo_inst {
     ($name:expr) => {
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/intensity/shindo_inst/",
+            "/../../icon/intensity/shindo_inst/",
             $name
         ))
     };
@@ -30,7 +30,7 @@ macro_rules! csis_inst {
     ($name:expr) => {
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/intensity/csis_inst/",
+            "/../../icon/intensity/csis_inst/",
             $name
         ))
     };

@@ -28,7 +28,8 @@ use tokio::runtime::Runtime;
 use tracing_appender::non_blocking::WorkerGuard;
 
 fn looks_like_resource_root(dir: &Path) -> bool {
-    dir.join("assets").is_dir()
+    dir.join("media").is_dir()
+        && dir.join("icon").is_dir()
         && (dir.join("geodata").is_dir() || dir.join("config").is_dir())
 }
 
@@ -56,8 +57,8 @@ fn resource_root() -> PathBuf {
     dir
 }
 
-fn assets_root() -> PathBuf {
-    resource_root().join("assets")
+fn media_root() -> PathBuf {
+    resource_root().join("media")
 }
 
 fn resolve_geodata_dir(configured: &str) -> PathBuf {
@@ -73,7 +74,7 @@ fn resolve_geodata_dir(configured: &str) -> PathBuf {
 fn install_cjk_fonts(ctx: &egui::Context) {
     const LXGW_WENKAI: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../assets/lxgw-wenkai-v1.522/LXGWWenKai-Regular.ttf"
+        "/../../media/fonts/lxgw-wenkai-v1.522/LXGWWenKai-Regular.ttf"
     ));
 
     let mut fonts = egui::FontDefinitions::default();
@@ -105,7 +106,7 @@ fn main() {
 
 fn run_app() -> Result<()> {
     let root = resource_root();
-    let assets = assets_root();
+    let media = media_root();
     let cfg = AppConfig::load_merged(root.join("config/default.toml"));
     let log_guard = logging::init_logging(&root, &cfg.log);
     tracing::info!(
@@ -124,12 +125,25 @@ fn run_app() -> Result<()> {
         jian = cfg.sources.jian.enabled,
         wolfx = cfg.sources.wolfx.enabled,
         p2p = cfg.sources.p2pquake.enabled,
-        jian_token = cfg.sources.jian.access_token.is_some(),
+        jian_at = cfg
+            .sources
+            .jian
+            .access_token
+            .as_ref()
+            .map(|s| s.trim().starts_with("at_"))
+            .unwrap_or(false),
+        jian_rt = cfg
+            .sources
+            .jian
+            .refresh_token
+            .as_ref()
+            .map(|s| s.trim().starts_with("rt_"))
+            .unwrap_or(false),
         "config ready"
     );
 
     let travel = match TravelEngine::load_named(
-        assets.join("travel"),
+        media.join("travel"),
         &cfg.travel.primary,
         &cfg.travel.fallback,
         cfg.travel.linear_last_resort,
@@ -149,11 +163,11 @@ fn run_app() -> Result<()> {
         }
     };
 
-    load_place_fix(assets.join("place"));
+    load_place_fix(media.join("place"));
 
     let audio = match AudioEngine::from_catalog(
-        assets.join("sound/catalog.json"),
-        assets.join("sound"),
+        media.join("sound/catalog.json"),
+        media.join("sound"),
         &cfg.audio.event_pack,
         &cfg.audio.countdown_pack,
         cfg.audio.master_volume,
@@ -179,7 +193,7 @@ fn run_app() -> Result<()> {
     let rt = Runtime::new()?;
     let net_rx = if live {
         let _enter = rt.enter();
-        let stations_dir = assets.join("stations");
+        let stations_dir = media.join("stations");
         Some(spawn_hub_with_assets(
             &cfg.sources,
             stations_dir.is_dir().then_some(stations_dir),
@@ -271,7 +285,7 @@ fn run_app() -> Result<()> {
                 local_lon: cfg.local.longitude,
                 has_local,
                 geodata_dir,
-                assets_dir: assets,
+                media_dir: media,
                 cfg,
                 rt,
                 net_rx,
@@ -450,7 +464,7 @@ struct JianApp {
     local_lon: Option<f64>,
     has_local: bool,
     geodata_dir: PathBuf,
-    assets_dir: PathBuf,
+    media_dir: PathBuf,
     cfg: AppConfig,
     rt: Runtime,
     net_rx: Option<NetHub>,
@@ -1183,7 +1197,7 @@ impl JianApp {
 
         if !travel_same {
             match TravelEngine::load_named(
-                self.assets_dir.join("travel"),
+                self.media_dir.join("travel"),
                 &self.cfg.travel.primary,
                 &self.cfg.travel.fallback,
                 self.cfg.travel.linear_last_resort,
@@ -1207,7 +1221,7 @@ impl JianApp {
             drop(self.net_rx.take());
             if self.cfg.any_source_enabled() {
                 let _enter = self.rt.enter();
-                let stations_dir = self.assets_dir.join("stations");
+                let stations_dir = self.media_dir.join("stations");
                 self.net_rx = Some(spawn_hub_with_assets(
                     &self.cfg.sources,
                     stations_dir.is_dir().then_some(stations_dir),

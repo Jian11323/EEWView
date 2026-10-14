@@ -43,6 +43,7 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
                         WsLoopOpts {
                             source: "kmoni",
                             url,
+                            resolve_url: None,
                             on_open_texts: Vec::new(),
                             periodic_texts: Vec::new(),
                             periodic_secs: 0,
@@ -84,6 +85,7 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
                 WsLoopOpts {
                     source: "kma-station",
                     url,
+                    resolve_url: None,
                     on_open_texts: Vec::new(),
                     periodic_texts: Vec::new(),
                     periodic_secs: 0,
@@ -108,6 +110,7 @@ fn spawn_snet_jian(tx: NetTx, url: String) -> JoinHandle<()> {
             WsLoopOpts {
                 source: "s-net",
                 url,
+                resolve_url: None,
                 on_open_texts: Vec::new(),
                 periodic_texts: Vec::new(),
                 periodic_secs: 0,
@@ -142,7 +145,7 @@ fn spawn_snet_original(
         .map(|d| d.join("pixels.csv"))
         .filter(|p| p.is_file());
     let Some(path) = path else {
-        warn!("stations: 缺少 assets/stations/pixels.csv，S-Net 原版回退 Jian 中转");
+        warn!("stations: 缺少 media/stations/pixels.csv，S-Net 原版回退 Jian 中转");
         return spawn_snet_jian(tx, fallback_jian_ws);
     };
     let points = match load_snet_pixels(&path) {
@@ -370,7 +373,7 @@ fn spawn_nied_image(
             .map(|d| d.join("nied_point.csv"))
             .filter(|p| p.is_file());
         let Some(path) = points_path else {
-            warn!("stations: 缺少 assets/stations/nied_point.csv，原版 NIED 无法启动");
+            warn!("stations: 缺少 media/stations/nied_point.csv，原版 NIED 无法启动");
             emit_health(&tx, "kmoni", jian_core::HealthStatus::Abnormal);
             return;
         };

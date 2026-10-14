@@ -33,7 +33,7 @@
 | **P2PQuake** | 气象厅地震情报等 | `[sources.p2pquake]` |
 
 底图：`basemap = "auto"` 时暗色优先 `geodata/globalquake/`（GlobalQuake Special 藏南修复矢量），否则要石；亮色用自有海洋地形瓦片 `tilemap.sismotide.top/arcwob`（横向循环）。  
-国外源地名按融合历史 FE 格网修正（`assets/place/`）；JMA / CWA / HKO / CENC 保留原文。  
+国外源地名按融合历史 FE 格网修正（`media/place/`）；JMA / CWA / HKO / CENC 保留原文。  
 字段约定见 [`docs/数据源.md`](docs/数据源.md)；底图说明见 [`geodata/README.md`](geodata/README.md)。
 
 ---
@@ -42,11 +42,11 @@
 
 | 用途 | 素材 | 说明 |
 |------|------|------|
-| 预警事件 | [SREV](assets/sound/ATTRIBUTION.md) | CC BY-SA 2.0，须署名 |
+| 预警事件 | [SREV](media/sound/ATTRIBUTION.md) | CC BY-SA 2.0，须署名 |
 | 本地 S 波倒计时 | 地牛 Wake Up! | 非自由许可；发行前须授权或替换；默认不随仓库分发 |
 | 测站 / UI | 原创合成 | CC0 |
 
-·由表：`assets/sound/catalog.json`；说明见 [`docs/音效·由.md`](docs/音效·由.md)。
+·由表：`media/sound/catalog.json`；说明见 [`docs/音效·由.md`](docs/音效·由.md)。
 
 ---
 
@@ -54,10 +54,10 @@
 
 | 项 | 说明 |
 |----|------|
-| 近·走时 | 气象厅 **JMA2001**（[`ATTRIBUTION`](assets/travel/ATTRIBUTION.md)） |
+| 近·走时 | 气象厅 **JMA2001**（[`ATTRIBUTION`](media/travel/ATTRIBUTION.md)） |
 | 远·走时 | IASPEI **ak135**（回退表） |
 | 震度色 | 气象厅配色指针表２－２ |
-| 烈度色 | 按 GB/T 38226 制图规范摘录（见 `assets/palette/`） |
+| 烈度色 | 按 GB/T 38226 制图规范摘录（见 `media/palette/`） |
 
 ---
 
@@ -134,7 +134,8 @@ Windows 安装包默认装到 `C:\Program Files (x86)\eew view`。本地配置 `
 | ·径 | 说明 |
 |------|------|
 | `crates/` | 应用、界面、地图、网络、音效、走时等 |
-| `assets/` | 音效、走时、色标、烈度图标、地图标记、品牌、霞鹜文· |
+| `media/` | 音效、走时、色标、地名格网、测站、字体 |
+| `icon/` | 烈度/震度 SVG、地图标记、品牌图标 |
 | `geodata/` | 暗色 GQ Special 矢量（优先）/ 要石回退；可选行政区 GeoJSON |
 | `config/default.toml` | 默认配置（密钥勿提交） |
 | `docs/` | 架构与接口说明 |
@@ -150,7 +151,7 @@ Windows 安装包默认装到 `C:\Program Files (x86)\eew view`。本地配置 `
 
 第三方素材不随代码许可证覆盖：
 
-- [`assets/sound/ATTRIBUTION.md`](assets/sound/ATTRIBUTION.md)
-- [`assets/travel/ATTRIBUTION.md`](assets/travel/ATTRIBUTION.md)
-- [`assets/ATTRIBUTION.md`](assets/ATTRIBUTION.md)
-- [`assets/place/ATTRIBUTION.md`](assets/place/ATTRIBUTION.md)
+- [`media/sound/ATTRIBUTION.md`](media/sound/ATTRIBUTION.md)
+- [`media/travel/ATTRIBUTION.md`](media/travel/ATTRIBUTION.md)
+- [`media/ATTRIBUTION.md`](media/ATTRIBUTION.md)
+- [`media/place/ATTRIBUTION.md`](media/place/ATTRIBUTION.md)

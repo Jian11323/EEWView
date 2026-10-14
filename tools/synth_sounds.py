@@ -8,7 +8,7 @@ import struct
 import wave
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1] / "assets" / "sound"
+ROOT = Path(__file__).resolve().parents[1] / "media" / "sound"
 RATE = 22050
 
 SPECS = {

@@ -33,9 +33,9 @@ Icon=eew-view
 Terminal=false
 Categories=Science;Network;
 EOF
-    if [ -f $out/share/eew-view/assets/brand/app.png ]; then
+    if [ -f $out/share/eew-view/icon/brand/app.png ]; then
       mkdir -p $out/share/icons/hicolor/256x256/apps
-      cp $out/share/eew-view/assets/brand/app.png \
+      cp $out/share/eew-view/icon/brand/app.png \
         $out/share/icons/hicolor/256x256/apps/eew-view.png
     fi
   '';

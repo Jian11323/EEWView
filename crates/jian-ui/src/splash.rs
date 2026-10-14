@@ -10,7 +10,7 @@ use std::time::Instant;
 
 const MIN_SECS: f64 = 5.0;
 const FADE_SECS: f64 = 0.55;
-const SPLASH_BG_PNG: &[u8] = include_bytes!("../../../assets/brand/splash_bg.png");
+const SPLASH_BG_PNG: &[u8] = include_bytes!("../../../icon/brand/splash_bg.png");
 
 enum SplashPhase {
     Hold,

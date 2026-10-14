@@ -44,15 +44,15 @@
 
           postInstall = ''
             mkdir -p $out/share/eew-view
-            cp -r assets config geodata $out/share/eew-view/
-            rm -rf $out/share/eew-view/assets/travel/raw || true
+            cp -r media icon config geodata $out/share/eew-view/
+            rm -rf $out/share/eew-view/media/travel/raw || true
             rm -f $out/share/eew-view/config/local.toml || true
-            rm -f $out/share/eew-view/assets/lxgw-wenkai-v1.522/LXGWWenKai-Light.ttf || true
-            rm -f $out/share/eew-view/assets/lxgw-wenkai-v1.522/LXGWWenKai-Medium.ttf || true
-            rm -f $out/share/eew-view/assets/lxgw-wenkai-v1.522/LXGWWenKaiMono-*.ttf || true
+            rm -f $out/share/eew-view/media/fonts/lxgw-wenkai-v1.522/LXGWWenKai-Light.ttf || true
+            rm -f $out/share/eew-view/media/fonts/lxgw-wenkai-v1.522/LXGWWenKai-Medium.ttf || true
+            rm -f $out/share/eew-view/media/fonts/lxgw-wenkai-v1.522/LXGWWenKaiMono-*.ttf || true
 
-            if [ -f assets/brand/app.png ]; then
-              install -Dm644 assets/brand/app.png \
+            if [ -f icon/brand/app.png ]; then
+              install -Dm644 icon/brand/app.png \
                 $out/share/icons/hicolor/256x256/apps/eew-view.png
             fi
 

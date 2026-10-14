@@ -193,7 +193,7 @@ SOURCES_INNER = rf'''
         }});
         if draft.sources.stations.snet_enabled {{
             row_divider(ui);
-            control_row(ui, "S-Net 源", "原版需 assets/stations/pixels.csv", "\u{{25ce}}", |ui| {{
+            control_row(ui, "S-Net 源", "原版需 media/stations/pixels.csv", "\u{{25ce}}", |ui| {{
                 egui::ComboBox::from_id_salt("set_snet_station_src")
                     .selected_text(snet_station_src_label(&draft.sources.stations.snet_source))
                     .width(200.0)
@@ -341,7 +341,7 @@ SOURCES_INNER = '''
         });
         if draft.sources.stations.snet_enabled {
             row_divider(ui);
-            control_row(ui, "S-Net 源", "原版需 assets/stations/pixels.csv", "\\u{25ce}", |ui| {
+            control_row(ui, "S-Net 源", "原版需 media/stations/pixels.csv", "\\u{25ce}", |ui| {
                 egui::ComboBox::from_id_salt("set_snet_station_src")
                     .selected_text(snet_station_src_label(&draft.sources.stations.snet_source))
                     .width(200.0)

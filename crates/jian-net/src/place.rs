@@ -38,7 +38,7 @@ fn geo() -> &'static RwLock<FeGeo> {
     FE.get_or_init(|| RwLock::new(FeGeo::default()))
 }
 
-/// 从 `assets/place/`（或任意含 `fe_fix.txt` 的目录）加载格网。可重复调用。
+/// 从 `media/place/`（或任意含 `fe_fix.txt` 的目录）加载格网。可重复调用。
 pub fn load_from_dir(dir: impl AsRef<Path>) {
     let dir = dir.as_ref();
     let mut loaded = FeGeo::default();
@@ -257,7 +257,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn fixture_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/place")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../media/place")
     }
 
     #[test]

@@ -2,7 +2,7 @@ fn main() {
     #[cfg(windows)]
     {
         let mut res = winres::WindowsResource::new();
-        res.set_icon("../../assets/brand/app.ico");
+        res.set_icon("../../icon/brand/app.ico");
         res.set("ProductName", "EEW View");
         res.set("FileDescription", "EEW View");
         res.set("LegalCopyright", "Apache-2.0");
@@ -10,5 +10,5 @@ fn main() {
             println!("cargo:warning=winres failed: {e}");
         }
     }
-    println!("cargo:rerun-if-changed=../../assets/brand/app.ico");
+    println!("cargo:rerun-if-changed=../../icon/brand/app.ico");
 }

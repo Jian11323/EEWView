@@ -54,7 +54,7 @@ def write_usage(out: Path, ver: str) -> None:
 
 版本：Beta {ver}
 解压后：chmod +x eewview && ./eewview
-（勿拆散 assets / geodata / config）
+（勿拆散 media / icon / geodata / config）
 启动时会显示启动界面，底图就绪后进入主界面。
 
 【依赖】Debian/Ubuntu 示例：
@@ -168,8 +168,9 @@ def main() -> int:
     if local.is_file():
         local.unlink()
 
-    copy_tree(ROOT / "assets", out / "assets")
-    raw = out / "assets" / "travel" / "raw"
+    copy_tree(ROOT / "media", out / "media")
+    copy_tree(ROOT / "icon", out / "icon")
+    raw = out / "media" / "travel" / "raw"
     if raw.is_dir():
         shutil.rmtree(raw)
 

@@ -1,7 +1,7 @@
 //! 官方震度/烈度色。
 //!
 //! 震度計測色带与中国烈度色对齐 EEWCN（`getNiedStationColor` / `getIntColors`）。
-//! 离散 JMA 震度阶级色仍参考气象厅配色指针；中国烈度见 assets/palette/cn_intensity.toml。
+//! 离散 JMA 震度阶级色仍参考气象厅配色指针；中国烈度见 media/palette/cn_intensity.toml。
 
 use crate::IntensityKind;
 

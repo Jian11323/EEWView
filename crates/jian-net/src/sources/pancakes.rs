@@ -44,6 +44,7 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
                 WsLoopOpts {
                     source: "pancakes",
                     url,
+                    resolve_url: None,
                     on_open_texts: Vec::new(),
                     periodic_texts: Vec::new(),
                     periodic_secs: 0,

@@ -67,7 +67,7 @@ pub fn spawn_hub(sources: &SourcesConfig) -> NetHub {
     spawn_hub_with_assets(sources, None)
 }
 
-/// `assets_stations` 指向含 `nied_point.csv` / `pixels.csv` 的目录（原版 kmoni/lmoni / S-Net）。
+/// `assets_stations` 指向 `media/stations/`（含 `nied_point.csv` / `pixels.csv`；原版 kmoni/lmoni / S-Net）。
 pub fn spawn_hub_with_assets(
     sources: &SourcesConfig,
     assets_stations: Option<std::path::PathBuf>,
