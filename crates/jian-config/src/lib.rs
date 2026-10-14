@@ -398,7 +398,7 @@ pub struct StationsConfig {
     /// 日本 JMA/NIED 测站总开关
     #[serde(default = "default_true")]
     pub jma_enabled: bool,
-    /// `jian` | `kmoni` | `lmoni`
+    /// `jian` | `kmoni` | `lmoni` | `yahoo`
     #[serde(default = "default_jma_station_source")]
     pub jma_source: String,
     #[serde(default = "default_jian_station_ws")]

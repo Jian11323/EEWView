@@ -624,22 +624,24 @@ impl eframe::App for JianApp {
         self.tick_tsunami_audio();
         self.tick_typhoon_update();
 
-        // 启动：稍等快照汇聚后跳到最新预警（速报不进左上角，也不自动跟焦）
+        // 启动：稍等快照汇聚后优先跟有效预警；没有则跟最新速报。
+        // 注意：eew_list 里常有已过期历史项，不能仅用「列表非空」卡住 pending，
+        // 否则相机一直停在默认东亚视角，侧栏速报已选中也不会飞过去。
         if self.auto_center_pending {
-            let has_data = !self.snap.eew_list.is_empty();
-            if has_data && self.started.elapsed().as_secs_f64() >= 1.2 {
+            let elapsed = self.started.elapsed().as_secs_f64();
+            if elapsed >= 1.2 {
                 if let Some((lon, lat, _zoom)) = self.snap.focus_latest_event() {
                     let z = if let Some(ev) = &self.snap.active {
                         let now = chrono::Utc::now().timestamp_millis();
-                        let elapsed = if ev.origin_ms > 0 {
+                        let wave_elapsed = if ev.origin_ms > 0 {
                             ((now - ev.origin_ms) as f64 / 1000.0).max(0.0)
                         } else {
                             0.0
                         };
                         let s_km = if let Some(eng) = self.travel.as_ref() {
-                            eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, elapsed)
+                            eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, wave_elapsed)
                         } else {
-                            elapsed * 5.0
+                            wave_elapsed * 5.0
                         };
                         let r = s_km
                             .min(max_s_wave_spread_km(ev.magnitude))
@@ -659,14 +661,12 @@ impl eframe::App for JianApp {
                     if let Some(ev) = &self.snap.active {
                         self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
                     }
-                }
-            } else if self.started.elapsed().as_secs_f64() >= 4.0 {
-                // 超时无预警：改跟最新速报
-                if self.snap.eew_list.is_empty() {
-                    if let Some((lon, lat, zoom, key)) = self.snap.focus_latest_record() {
-                        self.shell.map.fly_to(lon, lat, Some(zoom), 1.0);
-                        self.last_record_follow_key = Some(key);
-                    }
+                } else if let Some((lon, lat, zoom, key)) = self.snap.focus_latest_record() {
+                    self.shell.map.fly_to(lon, lat, Some(zoom), 1.0);
+                    self.last_record_follow_key = Some(key);
+                    self.auto_center_pending = false;
+                } else if elapsed >= 4.0 {
+                    // 仍无坐标数据：放弃启动跟焦，交给后续实时跟焦
                     self.auto_center_pending = false;
                 }
             }

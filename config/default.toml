@@ -94,7 +94,7 @@ station_enabled = true
 
 [sources.stations]
 jma_enabled = true
-# jian = Jian 中转 /kmoni；kmoni / lmoni = NIED 原版图像采样
+# jian = Jian 中转 /kmoni；kmoni / lmoni = NIED 原版图像采样；yahoo = Yahoo リアルタイム震度 JSON
 jma_source = "jian"
 jma_jian_ws = "wss://api.sismotide.top/kmoni"
 snet_enabled = false

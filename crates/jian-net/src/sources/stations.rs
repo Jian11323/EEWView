@@ -1,4 +1,7 @@
-//! 测站源：Jian 中转（kmoni / s-net / kma-station）+ NIED 原版 kmoni/lmoni + MSIL 原版 S-Net。
+//! 测站源：Jian 中转（kmoni / s-net / kma-station）+ NIED kmoni/lmoni + Yahoo リアルタイム震度 + MSIL S-Net。
+//!
+//! Jian 测站三条 WS **无需鉴权**，连接后即可收帧；与 `/all`（需 key）相互独立。
+//! S-Net 中转约每秒一帧（含 `time`/`timestamp` 对时字段 + `int[]`），僵死看门狗按秒级而非分钟级。
 
 use jian_config::StationsConfig;
 use jian_core::{instrumental_display_text, jma_from_instrumental, IntensityKind, StationSample};
@@ -11,7 +14,11 @@ use crate::adapter::{
 use crate::bus::{emit_health, NetEvent, NetTx};
 use crate::sources::ws::{run_ws_loop, WsLoopOpts};
 
-pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::PathBuf>) -> Vec<JoinHandle<()>> {
+pub fn spawn(
+    tx: NetTx,
+    cfg: StationsConfig,
+    assets_stations: Option<std::path::PathBuf>,
+) -> Vec<JoinHandle<()>> {
     let mut tasks = Vec::new();
 
     if cfg.jma_enabled {
@@ -32,9 +39,13 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
                     assets_stations.clone(),
                 ));
             }
+            "yahoo" => {
+                info!("stations: spawn Yahoo realtime kyoshin JSON");
+                tasks.push(spawn_yahoo(tx.clone()));
+            }
             _ => {
                 let url = cfg.jma_jian_ws.clone();
-                info!(%url, "stations: spawn Jian /kmoni");
+                info!(%url, "stations: spawn Jian /kmoni (no auth)");
                 let tx_k = tx.clone();
                 tasks.push(tokio::spawn(async move {
                     let mut state = KmoniState::default();
@@ -48,7 +59,7 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
                             periodic_texts: Vec::new(),
                             periodic_secs: 0,
                             backoff_max_secs: 60,
-                            // EEWCN: ~1s 帧，僵死约 15s 重连
+                            // ~1s 帧
                             stale_secs: 15,
                         },
                         move |tx, text| ingest_kmoni_frame(&mut state, tx, text),
@@ -76,7 +87,7 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
 
     if cfg.kma_enabled {
         let url = cfg.kma_jian_ws.clone();
-        info!(%url, "stations: spawn Jian /kma-station");
+        info!(%url, "stations: spawn Jian /kma-station (no auth)");
         let tx_k = tx.clone();
         tasks.push(tokio::spawn(async move {
             let mut state = KmoniState::default();
@@ -102,7 +113,7 @@ pub fn spawn(tx: NetTx, cfg: StationsConfig, assets_stations: Option<std::path::
 }
 
 fn spawn_snet_jian(tx: NetTx, url: String) -> JoinHandle<()> {
-    info!(%url, "stations: spawn Jian /s-net");
+    info!(%url, "stations: spawn Jian /s-net (no auth; ~1Hz 对时/强度帧)");
     tokio::spawn(async move {
         let mut state = KmoniState::default();
         run_ws_loop(
@@ -115,15 +126,14 @@ fn spawn_snet_jian(tx: NetTx, url: String) -> JoinHandle<()> {
                 periodic_texts: Vec::new(),
                 periodic_secs: 0,
                 backoff_max_secs: 60,
-                // S-Net ~1min/帧
-                stale_secs: 120,
+                // 中转约每秒推送（time/timestamp 对时 + int[]）；勿按「分钟一帧」放宽到 120
+                stale_secs: 15,
             },
             move |tx, text| ingest_snet_frame(&mut state, tx, text),
         )
         .await;
     })
 }
-
 
 #[derive(Clone)]
 struct SnetPoint {
@@ -333,6 +343,154 @@ fn color_to_position_snet(r: u8, g: u8, b: u8) -> Option<f64> {
     } else {
         Some(p)
     }
+}
+
+/// Yahoo! 天気・災害「リアルタイム震度」：sitelist + 每秒 RealTimeData JSON。
+/// 仍并入 `kmoni` 网槽（与 kmoni/lmoni/jian 互斥四选一）。
+fn spawn_yahoo(tx: NetTx) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .user_agent("EEWView/1.3 (station; Yahoo kyoshin)")
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
+        let sites = match fetch_yahoo_sitelist(&client).await {
+            Some(s) if !s.is_empty() => s,
+            _ => {
+                warn!("stations: Yahoo sitelist 加载失败");
+                emit_health(&tx, "kmoni", jian_core::HealthStatus::Abnormal);
+                return;
+            }
+        };
+        info!(n = sites.len(), "stations: Yahoo sitelist loaded");
+        emit_health(&tx, "kmoni", jian_core::HealthStatus::Normal);
+
+        let mut last_key = String::new();
+        loop {
+            match fetch_yahoo_realtime(&client, &sites).await {
+                Some((key, list)) => {
+                    if key != last_key {
+                        let _ = tx.send(NetEvent::Stations {
+                            network: "kmoni",
+                            list,
+                        });
+                        last_key = key;
+                    }
+                    emit_health(&tx, "kmoni", jian_core::HealthStatus::Normal);
+                }
+                None => {
+                    emit_health(&tx, "kmoni", jian_core::HealthStatus::Fluctuating);
+                }
+            }
+            // 节流：官方页约 1s；勿更密
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        }
+    })
+}
+
+#[derive(Clone, Copy)]
+struct YahooSite {
+    lat: f64,
+    lon: f64,
+}
+
+async fn fetch_yahoo_sitelist(client: &reqwest::Client) -> Option<Vec<YahooSite>> {
+    const URLS: &[&str] = &[
+        "https://weather-kyoshin.west.edge.storage-yahoo.jp/SiteList/sitelist.json",
+        "https://weather-kyoshin.east.edge.storage-yahoo.jp/SiteList/sitelist.json",
+    ];
+    for url in URLS {
+        let Ok(resp) = client.get(*url).send().await else {
+            continue;
+        };
+        if !resp.status().is_success() {
+            continue;
+        }
+        let Ok(v) = resp.json::<serde_json::Value>().await else {
+            continue;
+        };
+        let items = v.get("items")?.as_array()?;
+        let mut out = Vec::with_capacity(items.len());
+        for it in items {
+            let arr = it.as_array()?;
+            if arr.len() < 2 {
+                continue;
+            }
+            // sitelist 项为 [lat, lon]
+            let lat = arr[0].as_f64().or_else(|| arr[0].as_str()?.parse().ok())?;
+            let lon = arr[1].as_f64().or_else(|| arr[1].as_str()?.parse().ok())?;
+            out.push(YahooSite { lat, lon });
+        }
+        if !out.is_empty() {
+            return Some(out);
+        }
+    }
+    None
+}
+
+async fn fetch_yahoo_realtime(
+    client: &reqwest::Client,
+    sites: &[YahooSite],
+) -> Option<(String, Vec<StationSample>)> {
+    // JST；略回退避免未落盘
+    let jst = chrono::FixedOffset::east_opt(9 * 3600)?;
+    let base = chrono::Utc::now().with_timezone(&jst) - chrono::Duration::seconds(2);
+    const HOSTS: &[&str] = &[
+        "https://weather-kyoshin.west.edge.storage-yahoo.jp",
+        "https://weather-kyoshin.east.edge.storage-yahoo.jp",
+    ];
+    for back in 0..8 {
+        let t = base - chrono::Duration::seconds(back);
+        let day = t.format("%Y%m%d").to_string();
+        let key = t.format("%Y%m%d%H%M%S").to_string();
+        for host in HOSTS {
+            let url = format!("{host}/RealTimeData/{day}/{key}.json");
+            let Ok(resp) = client.get(&url).send().await else {
+                continue;
+            };
+            if resp.status().as_u16() == 404 {
+                continue;
+            }
+            if !resp.status().is_success() {
+                continue;
+            }
+            let Ok(v) = resp.json::<serde_json::Value>().await else {
+                continue;
+            };
+            let rtd = v.get("realTimeData").unwrap_or(&v);
+            let intensity = rtd.get("intensity")?.as_str()?;
+            let list = decode_yahoo_intensity(intensity, sites);
+            return Some((key, list));
+        }
+    }
+    None
+}
+
+/// Yahoo intensity：每字符一站；`char as u32 - 100` → 0..=20 档 → 計測 -3…7（0.5 步）。
+/// `< 0`（`none` / `-1`）跳过。
+fn decode_yahoo_intensity(intensity: &str, sites: &[YahooSite]) -> Vec<StationSample> {
+    let n = intensity.chars().count().min(sites.len());
+    let mut out = Vec::with_capacity(n);
+    for (i, (ch, site)) in intensity.chars().zip(sites.iter()).take(n).enumerate() {
+        let band = (ch as u32).wrapping_sub(100) as i32;
+        if !(0..=20).contains(&band) {
+            continue;
+        }
+        let instrumental = -3.0 + f64::from(band) * 0.5;
+        let (level, _) = jma_from_instrumental(instrumental);
+        out.push(StationSample {
+            id: format!("Y{i:04}"),
+            name: format!("Y{i:04}"),
+            latitude: site.lat,
+            longitude: site.lon,
+            intensity_text: instrumental_display_text(instrumental),
+            intensity_kind: IntensityKind::JmaShindo,
+            intensity_level: level,
+            instrumental,
+        });
+    }
+    out
 }
 
 #[derive(Clone, Copy)]
