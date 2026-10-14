@@ -107,6 +107,17 @@ struct Geom {
 }
 
 impl FaultLines {
+    /// 关闭断层时释放几何，避免常驻占用。
+    pub fn clear(&mut self) {
+        self.global = Arc::new(FaultLods::default());
+        self.china = Arc::new(FaultLods::default());
+        self.loaded = false;
+        self.paint_cache = None;
+        self.rebuild_gen = self.rebuild_gen.wrapping_add(1);
+        self.rebuild_pending = false;
+        self.rebuild_rx = None;
+    }
+
     pub fn load_dir(&mut self, dir: &Path) {
         if self.loaded {
             return;

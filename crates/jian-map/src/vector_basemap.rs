@@ -1,7 +1,7 @@
 //! 行政区矢量底图（暗色矢量 / 亮色浅填）。
 //!
-//! 优先 `geodata/globalquake/`（GlobalQuake Special 藏南修复国界 + 中日一级区划）；
-//! 否则要石 `kanameishi/`；再回退 Globalmap + 省市区划。
+//! 优先 `geodata/globalquake/`：`countriesMD` + 中日省级区划。
+//! 平面 / 球体按投影分别加载，互不常驻；否则要石 / `world/` 回退。
 //! 加载在后台线程分两阶段（世界 → 区划），主线程 `poll` 合并。
 
 use crate::globe::zoom_to_scroll;
@@ -62,11 +62,11 @@ impl Default for VectorStyle {
     }
 }
 
-/// 低于此缩放只画中日外轮廓；高于此才叠省界/都道府县（世界层本身不含中日）。
+/// 近距叠中国地市/区县 + 日本都道府县（世界远景 MD 已含中日国界；中景用 GQ 一级区划补）。
 /// 区县描边起始缩放；过大时（且 LOD 未简化）会拖死主线程。
-const ZOOM_REGIONAL: f64 = 6.5;
-const ZOOM_REGIONAL_MED: f64 = 8.0;
-const ZOOM_REGIONAL_FINE: f64 = 9.0;
+const ZOOM_REGIONAL: f64 = 5.8;
+const ZOOM_REGIONAL_MED: f64 = 7.2;
+const ZOOM_REGIONAL_FINE: f64 = 8.5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BasemapMode {
@@ -164,6 +164,14 @@ struct LayerLods {
     fine: Vec<RingSet>,
 }
 
+fn empty_lods() -> LayerLods {
+    LayerLods {
+        coarse: Vec::new(),
+        medium: Vec::new(),
+        fine: Vec::new(),
+    }
+}
+
 impl LayerLods {
     fn from_fine(fine: Vec<RingSet>, coarse_tol: f64, medium_tol: f64) -> Self {
         let medium: Vec<RingSet> = fine
@@ -178,24 +186,6 @@ impl LayerLods {
             coarse,
             medium,
             fine,
-        }
-    }
-
-    /// 环数超过 `share_above` 时跳过简化，`pick` 回退到 fine（避免上千区县双重简化过久）。
-    fn from_fine_or_shared(
-        fine: Vec<RingSet>,
-        coarse_tol: f64,
-        medium_tol: f64,
-        share_above: usize,
-    ) -> Self {
-        if fine.len() > share_above {
-            Self {
-                coarse: Vec::new(),
-                medium: Vec::new(),
-                fine,
-            }
-        } else {
-            Self::from_fine(fine, coarse_tol, medium_tol)
         }
     }
 
@@ -248,15 +238,8 @@ enum LoadPacket {
 #[derive(Clone, Default)]
 struct GqLayers {
     md: Vec<RingSet>,
-    hd_filtered: Vec<RingSet>,
-    uhd_filtered: Vec<RingSet>,
     cn: Vec<RingSet>,
     jp: Vec<RingSet>,
-    us: Vec<RingSet>,
-    ak: Vec<RingSet>,
-    nz: Vec<RingSet>,
-    hw: Vec<RingSet>,
-    it: Vec<RingSet>,
 }
 
 /// 矢量底图加载阶段（供 HUD 文案）
@@ -270,8 +253,18 @@ pub enum BasemapLoadState {
 }
 
 /// 视口不变时复用已镶嵌 Mesh（Arc），命中只增引用计数，避免每帧深拷 Path。
+/// 同缩放平移时用 `mesh_lon/lat` 做像素平移；飞跃中用轻量 mesh 做 zoom 缩放。
 struct VectorPaintCache {
     key: u64,
+    /// 与 zoom/rect/style 相关、不含中心点的键，用于判定可平移
+    base_key: u64,
+    /// 不含 zoom/center/quality：飞跃整段可变换复用
+    interact_key: u64,
+    build_zoom: f64,
+    mesh_lon: f64,
+    mesh_lat: f64,
+    /// 飞跃专用：仅世界远景 MD，顶点数少，按帧缩放才不卡
+    fly_lite: bool,
     mesh: Arc<egui::epaint::Mesh>,
 }
 
@@ -290,6 +283,8 @@ pub struct VectorBasemap {
     gen: u64,
     rx: Option<Receiver<(u64, LoadPacket)>>,
     loaded_dir: Option<PathBuf>,
+    /// 当前内存几何面向球体还是平面；切换投影时整包重载
+    loaded_for_globe: Option<bool>,
     paint_cache: Option<VectorPaintCache>,
 }
 
@@ -319,6 +314,7 @@ impl Default for VectorBasemap {
             gen: 0,
             rx: None,
             loaded_dir: None,
+            loaded_for_globe: None,
             paint_cache: None,
         }
     }
@@ -337,9 +333,9 @@ impl VectorBasemap {
         &self.status
     }
 
-    /// 后台分两阶段加载：先全球轮廓（可立即绘制），再中日区划。
-    /// 同一目录且已就绪时跳过；目录变更或失败后可再次调用。
-    pub fn load_dir(&mut self, dir: impl AsRef<Path>) {
+    /// 后台分两阶段加载：先全球轮廓，再中日省级区划。
+    /// `for_globe`：球体/平面各自只常驻一套几何；切换投影时整包重载。
+    pub fn load_dir(&mut self, dir: impl AsRef<Path>, for_globe: bool) {
         let dir = dir.as_ref().to_path_buf();
         if !dir.is_dir() {
             warn!(path = %dir.display(), "geodata 目录不存在，矢量底图未加载");
@@ -348,12 +344,14 @@ impl VectorBasemap {
             return;
         }
         if self.loaded_dir.as_ref() == Some(&dir)
+            && self.loaded_for_globe == Some(for_globe)
             && self.state == BasemapLoadState::Ready
             && self.world_ready
         {
             return;
         }
         if self.loaded_dir.as_ref() == Some(&dir)
+            && self.loaded_for_globe == Some(for_globe)
             && matches!(
                 self.state,
                 BasemapLoadState::LoadingWorld | BasemapLoadState::LoadingRegional
@@ -362,17 +360,21 @@ impl VectorBasemap {
             return;
         }
 
+        if self.loaded_for_globe != Some(for_globe) || self.loaded_dir.as_ref() != Some(&dir)
+        {
+            self.clear_geometry();
+        }
+
         self.gen = self.gen.wrapping_add(1);
         let gen = self.gen;
         self.loaded_dir = Some(dir.clone());
-        // 保留已加载层，避免重载时闪成纯海洋黑底；新包到达后再替换
-        if self.world_ready || self.regional_ready {
-            self.state = BasemapLoadState::LoadingRegional;
-            self.status = "正在更新底图…".into();
+        self.loaded_for_globe = Some(for_globe);
+        self.state = BasemapLoadState::LoadingWorld;
+        self.status = if for_globe {
+            "正在加载球体底图…".into()
         } else {
-            self.state = BasemapLoadState::LoadingWorld;
-            self.status = "正在加载世界底图…".into();
-        }
+            "正在加载平面底图…".into()
+        };
 
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
@@ -380,7 +382,8 @@ impl VectorBasemap {
         let _ = thread::Builder::new()
             .name("eewview-geodata".into())
             .spawn(move || {
-                let (world_lods, world_n, w_files, w_skip, gq) = load_world_lods(&dir);
+                let (world_lods, world_n, w_files, w_skip, gq) =
+                    load_world_lods(&dir, for_globe);
                 if tx
                     .send((
                         gen,
@@ -397,11 +400,8 @@ impl VectorBasemap {
                     return;
                 }
 
-                // 平面区划：中国地市/区县扫盘 + 日本都道府县（精细烈度填色）
                 let (mut regional_fine, r_files, r_skip) = load_regional_rings(&dir);
-                // 藏南：GQ Special 国界已含；区划叠在世界层之上。不另画凸包。
                 let diaoyu = builtin_diaoyu_patches();
-                // 远距外轮廓仍用 GQ/要石一级区划溶解（比三千区县溶解更快更稳）
                 let mut dissolve_src = load_coarse_admin_for_dissolve(&dir);
                 if dissolve_src.is_empty() {
                     dissolve_src = regional_fine.clone();
@@ -411,8 +411,15 @@ impl VectorBasemap {
                 regional_fine.extend(diaoyu);
                 let regional_n = regional_fine.len();
                 let national_lods = LayerLods::from_fine(national_fine, 0.25, 0.08);
-                // 区县数量大：跳过 Visvalingam 全量简化，三档共用 fine（后台加载更快）
-                let regional_lods = LayerLods::from_fine_or_shared(regional_fine, 0.08, 0.02, 800);
+                let regional_lods = LayerLods::from_fine(regional_fine, 0.08, 0.02);
+
+                // 球体：区划已在 GqLayers，平面 LayerLods 留空
+                let (regional_lods, national_lods, regional_n) = if for_globe {
+                    (empty_lods(), empty_lods(), 0usize)
+                } else {
+                    (regional_lods, national_lods, regional_n)
+                };
+
                 let _ = tx.send((
                     gen,
                     LoadPacket::Regional {
@@ -424,6 +431,16 @@ impl VectorBasemap {
                     },
                 ));
             });
+    }
+
+    fn clear_geometry(&mut self) {
+        self.world = empty_lods();
+        self.regional = empty_lods();
+        self.national = empty_lods();
+        self.gq = None;
+        self.world_ready = false;
+        self.regional_ready = false;
+        self.paint_cache = None;
     }
 
     /// 主线程每帧拉取后台结果；有更新时返回 true。
@@ -449,7 +466,9 @@ impl VectorBasemap {
                 } => {
                     self.world = lods;
                     self.gq = gq;
-                    self.world_ready = !self.world.fine.is_empty()
+                    self.world_ready = !self.world.coarse.is_empty()
+                        || !self.world.medium.is_empty()
+                        || !self.world.fine.is_empty()
                         || self.gq.as_ref().is_some_and(|g| !g.md.is_empty());
                     self.state = BasemapLoadState::LoadingRegional;
                     self.status = if self.world_ready {
@@ -512,6 +531,7 @@ impl VectorBasemap {
         style: VectorStyle,
         skip_world_stroke: bool,
         quality: PaintQuality,
+        interacting: bool,
     ) {
         if !self.world_ready && !self.regional_ready {
             return;
@@ -521,26 +541,81 @@ impl VectorBasemap {
         let zoom = view.zoom;
         let painter = ui.painter_at(rect);
         let ppp = ui.ctx().pixels_per_point();
+        let q = if interacting {
+            PaintQuality::Eco
+        } else {
+            quality
+        };
         let cache_key =
-            paint_cache_key(view, fill_land, style, self.gen, skip_world_stroke, quality, ppp);
+            paint_cache_key(view, fill_land, style, self.gen, skip_world_stroke, q, ppp);
+        let base_key =
+            paint_base_key(view, fill_land, style, self.gen, skip_world_stroke, q, ppp);
+        let interact_key =
+            paint_interact_key(view, fill_land, style, self.gen, skip_world_stroke, ppp);
+
         if let Some(c) = self.paint_cache.as_ref() {
-            if c.key == cache_key {
+            if c.key == cache_key && !c.fly_lite {
                 painter.add(egui::Shape::Mesh(c.mesh.clone()));
                 return;
             }
         }
+
+        // 飞跃/拖拽：只用轻量 MD mesh 做缩放+平移。两端 |dz/dt| 大，全量 mesh 按帧缩放必卡；
+        // 中间 zoom 几乎不变所以以前「只平移」显得流畅。
+        if interacting && !view.mode.is_globe() {
+            let lite_ok = self.paint_cache.as_ref().is_some_and(|c| {
+                c.fly_lite && c.interact_key == interact_key
+            });
+            if lite_ok {
+                if let Some(c) = self.paint_cache.as_mut() {
+                    if apply_flat_mesh_view_delta(c, view) {
+                        c.key = cache_key;
+                        c.base_key = base_key;
+                        painter.add(egui::Shape::Mesh(c.mesh.clone()));
+                        return;
+                    }
+                }
+            }
+            // 无轻量缓存：下面强制只镶嵌 world.coarse，并标 fly_lite
+        } else if self.paint_cache.as_ref().is_some_and(|c| c.fly_lite) {
+            // 落地后丢掉飞跃轻量图，走完整重建
+            self.paint_cache = None;
+        }
+
+        // 平面同缩放：平移复用 mesh（非飞跃轻量）
+        let can_shift = self.paint_cache.as_ref().is_some_and(|c| {
+            !view.mode.is_globe()
+                && !c.fly_lite
+                && c.base_key == base_key
+                && (c.build_zoom - view.zoom).abs() < 1e-9
+        });
+        if can_shift {
+            if let Some(c) = self.paint_cache.as_mut() {
+                if let Some((dx, dy)) = vector_flat_pan_delta(c.mesh_lon, c.mesh_lat, view) {
+                    if dx.abs() > 0.05 || dy.abs() > 0.05 {
+                        Arc::make_mut(&mut c.mesh).translate(egui::Vec2::new(dx, dy));
+                        c.mesh_lon = view.center_lon;
+                        c.mesh_lat = view.center_lat;
+                    }
+                    c.key = cache_key;
+                    painter.add(egui::Shape::Mesh(c.mesh.clone()));
+                    return;
+                }
+            }
+        }
+
         let mut shapes = Vec::with_capacity(512);
-        let seg_bias = match quality {
+        let seg_bias = match q {
             PaintQuality::Eco => 1.6_f32,
             PaintQuality::Normal => 1.0,
             PaintQuality::Extreme => 0.85,
         };
-        let (z_world_med, z_world_fine) = match quality {
+        let (z_world_med, z_world_fine) = match q {
             PaintQuality::Eco => (3.2_f64, 5.2_f64),
             PaintQuality::Normal => (4.0, 6.0),
             PaintQuality::Extreme => (4.0, 6.0),
         };
-        let regional_zoom = match quality {
+        let regional_zoom = match q {
             PaintQuality::Eco => ZOOM_REGIONAL + 0.6,
             _ => ZOOM_REGIONAL,
         };
@@ -552,6 +627,12 @@ impl VectorBasemap {
             painter.add(egui::Shape::Mesh(mesh.clone()));
             self.paint_cache = Some(VectorPaintCache {
                 key: cache_key,
+                base_key,
+                interact_key,
+                build_zoom: view.zoom,
+                mesh_lon: view.center_lon,
+                mesh_lat: view.center_lat,
+                fly_lite: false,
                 mesh,
             });
             return;
@@ -565,15 +646,30 @@ impl VectorBasemap {
             viewport_bounds(view.center_lon, view.center_lat, zoom, rect)
         };
         let max_jump_px = world_px * (80.0 / 360.0);
-        let half_copies = ((rect.width() * 0.5 / world_px.max(1.0)).ceil() as i32 + 1)
-            .clamp(1, 6);
+        // 飞跃轻量：只画一份世界，避免 ±360 副本把 mesh 撑大
+        let half_copies = if interacting {
+            0
+        } else {
+            ((rect.width() * 0.5 / world_px.max(1.0)).ceil() as i32 + 1).clamp(1, 6)
+        };
 
         for k in -half_copies..=half_copies {
             let lon_shift = f64::from(k) * 360.0;
 
-            if !self.world.fine.is_empty() {
-                let rings = self.world.pick(zoom, z_world_med, z_world_fine);
-                let min_seg = if zoom < z_world_med {
+            // flat MD may live only in coarse
+            if !self.world.coarse.is_empty()
+                || !self.world.medium.is_empty()
+                || !self.world.fine.is_empty()
+            {
+                // 交互/飞跃只用远景 MD（含中日、顶点少），避免 HD+区划每帧重镶嵌卡顿
+                let rings = if interacting && !self.world.coarse.is_empty() {
+                    self.world.coarse.as_slice()
+                } else {
+                    self.world.pick(zoom, z_world_med, z_world_fine)
+                };
+                let min_seg = if interacting {
+                    4.0_f32 * seg_bias // 飞跃再抽稀折线，减小镶嵌顶点
+                } else if zoom < z_world_med {
                     2.2_f32 * seg_bias
                 } else {
                     1.4_f32 * seg_bias
@@ -597,68 +693,87 @@ impl VectorBasemap {
                 );
             }
 
-            if !self.national.fine.is_empty() {
-                let rings = self.national.pick(zoom, 3.0, 4.0);
-                let stroke = Stroke::new(0.95_f32, style.world_border);
-                paint_rings(
-                    &mut shapes,
-                    rings,
-                    view,
-                    min_lon + lon_shift,
-                    min_lat,
-                    max_lon + lon_shift,
-                    max_lat,
-                    2.2 * seg_bias,
-                    max_jump_px,
-                    stroke,
-                    fill_land,
-                    false,
-                    style.land_fill,
-                    lon_shift,
-                );
-            }
-            if zoom >= regional_zoom && !self.regional.fine.is_empty() {
-                let rings = self
-                    .regional
-                    .pick(zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
-                let min_seg = if zoom < ZOOM_REGIONAL_MED {
-                    2.0_f32 * seg_bias
-                } else if zoom < ZOOM_REGIONAL_FINE {
-                    1.4_f32 * seg_bias
-                } else {
-                    1.0_f32 * seg_bias
-                };
-                let stroke = Stroke::new(
-                    if zoom < ZOOM_REGIONAL_MED {
-                        0.7_f32
+            // 不画 national 溶解粗外轮廓（易与国界叠成双层）。对齐 GQ：
+            // 中景 HD/UHD 已去中日 → 补一级区划；近景再叠地市/都道府县。交互中跳过区划以免飞跃卡顿。
+            if !interacting {
+                let stroke_admin = Stroke::new(0.85_f32, style.admin_border);
+                if zoom >= regional_zoom && !self.regional.fine.is_empty() {
+                    let rings = self
+                        .regional
+                        .pick(zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
+                    let min_seg = if zoom < ZOOM_REGIONAL_MED {
+                        2.0_f32 * seg_bias
+                    } else if zoom < ZOOM_REGIONAL_FINE {
+                        1.4_f32 * seg_bias
                     } else {
-                        0.95_f32
-                    },
-                    style.admin_border,
-                );
-                paint_rings(
-                    &mut shapes,
-                    rings,
-                    view,
-                    min_lon + lon_shift,
-                    min_lat,
-                    max_lon + lon_shift,
-                    max_lat,
-                    min_seg,
-                    max_jump_px,
-                    stroke,
-                    fill_land,
-                    quality != PaintQuality::Eco && zoom >= ZOOM_REGIONAL_FINE,
-                    style.land_fill,
-                    lon_shift,
-                );
+                        1.0_f32 * seg_bias
+                    };
+                    let stroke = Stroke::new(
+                        if zoom < ZOOM_REGIONAL_MED {
+                            0.7_f32
+                        } else {
+                            0.95_f32
+                        },
+                        style.admin_border,
+                    );
+                    paint_rings(
+                        &mut shapes,
+                        rings,
+                        view,
+                        min_lon + lon_shift,
+                        min_lat,
+                        max_lon + lon_shift,
+                        max_lat,
+                        min_seg,
+                        max_jump_px,
+                        stroke,
+                        fill_land,
+                        q != PaintQuality::Eco && zoom >= ZOOM_REGIONAL_FINE,
+                        style.land_fill,
+                        lon_shift,
+                    );
+                } else if zoom >= z_world_med {
+                    if let Some(gq) = self.gq.as_ref() {
+                        for rings in [gq.cn.as_slice(), gq.jp.as_slice()] {
+                            if rings.is_empty() {
+                                continue;
+                            }
+                            paint_rings(
+                                &mut shapes,
+                                rings,
+                                view,
+                                min_lon + lon_shift,
+                                min_lat,
+                                max_lon + lon_shift,
+                                max_lat,
+                                1.6_f32 * seg_bias,
+                                max_jump_px,
+                                stroke_admin,
+                                fill_land,
+                                false,
+                                style.land_fill,
+                                lon_shift,
+                            );
+                        }
+                    }
+                }
             }
         }
 
-        let mesh = bake_shapes_mesh(ppp, shapes);
+        let mesh = if interacting {
+            bake_shapes_mesh_lite(ppp, shapes)
+        } else {
+            bake_shapes_mesh(ppp, shapes)
+        };
         painter.add(egui::Shape::Mesh(mesh.clone()));
         self.paint_cache = Some(VectorPaintCache {
             key: cache_key,
+            base_key,
+            interact_key,
+            build_zoom: view.zoom,
+            mesh_lon: view.center_lon,
+            mesh_lat: view.center_lat,
+            fly_lite: interacting,
             mesh,
         });
     }
@@ -694,10 +809,137 @@ fn paint_cache_key(
     h.finish()
 }
 
+/// 不含相机中心：同缩放平移可复用 mesh。
+fn paint_base_key(
+    view: &ViewCtx,
+    fill_land: bool,
+    style: VectorStyle,
+    gen: u64,
+    skip_world_stroke: bool,
+    quality: PaintQuality,
+    ppp: f32,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    gen.hash(&mut h);
+    view.zoom.to_bits().hash(&mut h);
+    (view.rect.width() as i32).hash(&mut h);
+    (view.rect.height() as i32).hash(&mut h);
+    (view.rect.min.x as i32).hash(&mut h);
+    (view.rect.min.y as i32).hash(&mut h);
+    fill_land.hash(&mut h);
+    skip_world_stroke.hash(&mut h);
+    style.land_fill.to_array().hash(&mut h);
+    style.world_border.to_array().hash(&mut h);
+    style.admin_border.to_array().hash(&mut h);
+    std::mem::discriminant(&view.mode).hash(&mut h);
+    quality.hash(&mut h);
+    ((ppp * 100.0).round() as i32).hash(&mut h);
+    h.finish()
+}
+
+/// 飞跃复用键：忽略 zoom/center/quality，仅窗口与样式变化时失效。
+fn paint_interact_key(
+    view: &ViewCtx,
+    fill_land: bool,
+    style: VectorStyle,
+    gen: u64,
+    skip_world_stroke: bool,
+    ppp: f32,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    gen.hash(&mut h);
+    (view.rect.width() as i32).hash(&mut h);
+    (view.rect.height() as i32).hash(&mut h);
+    (view.rect.min.x as i32).hash(&mut h);
+    (view.rect.min.y as i32).hash(&mut h);
+    fill_land.hash(&mut h);
+    skip_world_stroke.hash(&mut h);
+    style.land_fill.to_array().hash(&mut h);
+    style.world_border.to_array().hash(&mut h);
+    style.admin_border.to_array().hash(&mut h);
+    std::mem::discriminant(&view.mode).hash(&mut h);
+    ((ppp * 100.0).round() as i32).hash(&mut h);
+    h.finish()
+}
+
+fn vector_flat_pan_delta(build_lon: f64, build_lat: f64, view: &ViewCtx) -> Option<(f32, f32)> {
+    let build_lon = projection::wrap_lon_near(build_lon, view.center_lon);
+    let (x0, y0) = projection::lonlat_to_world(build_lon, build_lat, view.zoom);
+    let (x1, y1) =
+        projection::lonlat_to_world(view.center_lon, view.center_lat, view.zoom);
+    let dx = (x0 - x1) as f32;
+    let dy = (y0 - y1) as f32;
+    let max = (projection::world_size(view.zoom) as f32) * 0.45;
+    if !dx.is_finite() || !dy.is_finite() || dx.abs() > max || dy.abs() > max {
+        return None;
+    }
+    Some((dx, dy))
+}
+
+/// 将已镶嵌平面 mesh 从 `(mesh_lon/lat, build_zoom)` 变到当前视口：缩放+平移合并为一次顶点遍历。
+fn apply_flat_mesh_view_delta(c: &mut VectorPaintCache, view: &ViewCtx) -> bool {
+    let dz = view.zoom - c.build_zoom;
+    let s = if dz.abs() > 1e-9 {
+        let s = 2f32.powf(dz as f32);
+        if !s.is_finite() || s < 1e-4 || s > 1e4 {
+            return false;
+        }
+        s
+    } else {
+        1.0
+    };
+    let (dx, dy) = match vector_flat_pan_delta(c.mesh_lon, c.mesh_lat, view) {
+        Some(d) => d,
+        None => (0.0, 0.0), // 跨日界：本帧只缩放，静止后重建
+    };
+    let need_s = (s - 1.0).abs() > 1e-6;
+    let need_t = dx.abs() > 0.05 || dy.abs() > 0.05;
+    if !need_s && !need_t {
+        return true;
+    }
+    let origin = view.rect.center();
+    let mesh = Arc::make_mut(&mut c.mesh);
+    if need_s && need_t {
+        let t = egui::vec2(dx, dy);
+        for v in &mut mesh.vertices {
+            v.pos = origin + (v.pos - origin) * s + t;
+        }
+    } else if need_s {
+        for v in &mut mesh.vertices {
+            v.pos = origin + (v.pos - origin) * s;
+        }
+    } else {
+        mesh.translate(egui::Vec2::new(dx, dy));
+    }
+    if need_s {
+        c.build_zoom = view.zoom;
+    }
+    if need_t {
+        c.mesh_lon = view.center_lon;
+        c.mesh_lat = view.center_lat;
+    }
+    true
+}
+
 /// 将 Path 等 Shape 预镶嵌为 Arc\<Mesh\>，缓存命中时 O(1) 克隆。
 fn bake_shapes_mesh(ppp: f32, shapes: Vec<egui::Shape>) -> Arc<egui::epaint::Mesh> {
+    bake_shapes_mesh_opts(ppp, shapes, true)
+}
+
+/// 飞跃轻量镶嵌：关 feathering，顶点更少，按帧缩放更稳。
+fn bake_shapes_mesh_lite(ppp: f32, shapes: Vec<egui::Shape>) -> Arc<egui::epaint::Mesh> {
+    bake_shapes_mesh_opts(ppp, shapes, false)
+}
+
+fn bake_shapes_mesh_opts(
+    ppp: f32,
+    shapes: Vec<egui::Shape>,
+    feathering: bool,
+) -> Arc<egui::epaint::Mesh> {
     let opts = egui::epaint::TessellationOptions {
-        feathering: true,
+        feathering,
         ..Default::default()
     };
     let mut tess = egui::epaint::Tessellator::new(ppp, opts, [1024, 1024], Vec::new());
@@ -725,33 +967,10 @@ fn paint_globe_gq_style(
     let scroll = zoom_to_scroll(view.zoom);
 
     if let Some(gq) = basemap.gq.as_ref() {
-        if scroll >= 0.5 {
-            paint_rings_globe(shapes, &gq.md, view, min_lon, min_lat, max_lon, max_lat, stroke_w);
-        } else if scroll >= 0.25 {
-            paint_rings_globe(
-                shapes,
-                &gq.hd_filtered,
-                view,
-                min_lon,
-                min_lat,
-                max_lon,
-                max_lat,
-                stroke_w,
-            );
-        } else {
-            paint_rings_globe(
-                shapes,
-                &gq.uhd_filtered,
-                view,
-                min_lon,
-                min_lat,
-                max_lon,
-                max_lat,
-                stroke_w,
-            );
-        }
+        // 球体仅 MD 世界轮廓 + 中日省级
+        paint_rings_globe(shapes, &gq.md, view, min_lon, min_lat, max_lon, max_lat, stroke_w);
         if scroll < 0.5 {
-            for rings in [&gq.cn, &gq.jp, &gq.us, &gq.ak, &gq.nz, &gq.hw] {
+            for rings in [&gq.cn, &gq.jp] {
                 if rings.is_empty() {
                     continue;
                 }
@@ -766,18 +985,6 @@ fn paint_globe_gq_style(
                     stroke_admin,
                 );
             }
-        }
-        if scroll < 0.20 && !gq.it.is_empty() {
-            paint_rings_globe(
-                shapes,
-                &gq.it,
-                view,
-                min_lon,
-                min_lat,
-                max_lon,
-                max_lat,
-                stroke_admin,
-            );
         }
         return;
     }
@@ -1185,16 +1392,14 @@ fn try_load_rings(path: &Path, files: &mut usize, skipped: &mut usize, label: &s
     }
 }
 
-/// 加载 GlobalQuake Special 全部分层（国界 + 中日美新区划）。
-fn try_load_gq_layers(dir: &Path) -> Option<(LayerLods, usize, usize, usize, GqLayers)> {
+/// Globe: MD + CN/JP provincial into GqLayers; planar LODs empty.
+fn try_load_gq_globe(dir: &Path) -> Option<(LayerLods, usize, usize, usize, GqLayers)> {
     let gq_dir = globalquake_dir(dir);
     if !gq_dir.is_dir() {
         return None;
     }
     let mut files = 0usize;
     let mut skipped = 0usize;
-    let exclude_world = ["United States", "New Zealand", "Japan", "China"];
-    let exclude_us = ["Alaska", "Hawaii"];
 
     let md = try_load_rings(
         &gq_dir.join("countriesMD.json"),
@@ -1202,84 +1407,104 @@ fn try_load_gq_layers(dir: &Path) -> Option<(LayerLods, usize, usize, usize, GqL
         &mut skipped,
         "gq countriesMD",
     )?;
-    let hd_filtered = load_file_excluding(&gq_dir.join("countriesHD.json"), &exclude_world)
-        .map(|r| {
-            files += 1;
-            info!(rings = r.len(), "loaded gq countriesHD filtered");
-            r
-        })
-        .unwrap_or_else(|e| {
-            skipped += 1;
-            warn!(error = %e, "gq HD filtered failed");
-            Vec::new()
-        });
-    let uhd_filtered = load_file_excluding(&gq_dir.join("countriesUHD.json"), &exclude_world)
-        .map(|r| {
-            files += 1;
-            info!(rings = r.len(), "loaded gq countriesUHD filtered");
-            r
-        })
-        .unwrap_or_else(|e| {
-            skipped += 1;
-            warn!(error = %e, "gq UHD filtered failed");
-            Vec::new()
-        });
 
-    let mut load_reg = |name: &str, excl: &[&str]| -> Vec<RingSet> {
+    let mut load_reg = |name: &str| -> Vec<RingSet> {
         let p = gq_dir.join(name);
         if !p.is_file() {
             return Vec::new();
         }
         files += 1;
-        match load_file_excluding(&p, excl) {
+        match load_file(&p) {
             Ok(r) => {
-                info!(path = %p.display(), rings = r.len(), "loaded gq regional");
+                info!(path = %p.display(), rings = r.len(), "loaded gq provincial");
                 r
             }
             Err(e) => {
                 skipped += 1;
-                warn!(path = %p.display(), error = %e, "gq regional failed");
+                warn!(path = %p.display(), error = %e, "gq provincial failed");
                 Vec::new()
             }
         }
     };
 
-    let layers = GqLayers {
-        md: md.clone(),
-        hd_filtered,
-        uhd_filtered,
-        cn: load_reg("cn-prefectures.geojson", &[]),
-        jp: load_reg("jp-prefectures.geojson", &[]),
-        us: load_reg("us-albers.geojson", &exclude_us),
-        ak: load_reg("AK-02-alaska-counties.geojson", &[]),
-        nz: load_reg("new-zealand-districts.geojson", &[]),
-        hw: load_reg("hawaii-countries.geojson", &[]),
-        it: load_reg("italy_provinces.geojson", &[]),
-    };
-
-    let mut lods = LayerLods::from_fine(md, 0.35, 0.12);
-    // 平面模式 coarse/medium/fine 仍可用 MD + 简化
+    let cn = load_reg("cn-prefectures.geojson");
+    let jp = load_reg("jp-prefectures.geojson");
+    let mut md_with_diaoyu = md;
     let diaoyu = builtin_diaoyu_patches();
     if !diaoyu.is_empty() {
         files += 1;
-        lods.fine.extend(diaoyu.iter().cloned());
-        lods.medium.extend(diaoyu.iter().cloned());
-        lods.coarse.extend(diaoyu);
+        md_with_diaoyu.extend(diaoyu);
     }
-    let rings = lods.fine.len();
-    Some((lods, rings, files, skipped, layers))
+    let rings = md_with_diaoyu.len();
+    let layers = GqLayers {
+        md: md_with_diaoyu,
+        cn,
+        jp,
+    };
+    Some((empty_lods(), rings, files, skipped, layers))
 }
 
-/// 全球层 LOD：优先 GlobalQuake Special 全图层 → 回退。
-fn load_world_lods(dir: &Path) -> (LayerLods, usize, usize, usize, Option<GqLayers>) {
-    if let Some((lods, rings, files, skipped, gq)) = try_load_gq_layers(dir) {
-        return (lods, rings, files, skipped, Some(gq));
+/// Flat: MD world outline only (no GqLayers / HD / UHD).
+fn try_load_gq_flat(dir: &Path) -> Option<(LayerLods, usize, usize, usize)> {
+    let gq_dir = globalquake_dir(dir);
+    if !gq_dir.is_dir() {
+        return None;
+    }
+    let mut files = 0usize;
+    let mut skipped = 0usize;
+    let mut md = try_load_rings(
+        &gq_dir.join("countriesMD.json"),
+        &mut files,
+        &mut skipped,
+        "gq countriesMD",
+    )?;
+    let diaoyu = builtin_diaoyu_patches();
+    if !diaoyu.is_empty() {
+        files += 1;
+        md.extend(diaoyu);
+    }
+    let rings = md.len();
+    let lods = LayerLods {
+        coarse: md,
+        medium: Vec::new(),
+        fine: Vec::new(),
+    };
+    Some((lods, rings, files, skipped))
+}
+
+/// World layer: split by projection so flat/globe do not keep both resident.
+fn load_world_lods(
+    dir: &Path,
+    for_globe: bool,
+) -> (LayerLods, usize, usize, usize, Option<GqLayers>) {
+    if for_globe {
+        if let Some((lods, rings, files, skipped, gq)) = try_load_gq_globe(dir) {
+            return (lods, rings, files, skipped, Some(gq));
+        }
+        let (world_fine, files, skipped) = load_world_rings_fallback(dir);
+        let rings = world_fine.len();
+        let lods = LayerLods {
+            coarse: world_fine,
+            medium: Vec::new(),
+            fine: Vec::new(),
+        };
+        return (lods, rings, files, skipped, None);
+    }
+
+    if let Some((lods, rings, files, skipped)) = try_load_gq_flat(dir) {
+        return (lods, rings, files, skipped, None);
     }
     let (world_fine, files, skipped) = load_world_rings_fallback(dir);
     let rings = world_fine.len();
-    let lods = LayerLods::from_fine(world_fine, 0.35, 0.12);
+    let lods = LayerLods {
+        coarse: world_fine,
+        medium: Vec::new(),
+        fine: Vec::new(),
+    };
     (lods, rings, files, skipped, None)
 }
+
+
 
 /// 非 GQ 回退：根目录精细 GeoJSON → 要石 Topo → Globalmap + `world/`。
 fn load_world_rings_fallback(dir: &Path) -> (Vec<RingSet>, usize, usize) {
@@ -1415,67 +1640,56 @@ fn append_cn_boundary_patches(
     world_fine.extend(diaoyu);
 }
 
-/// 区划层：中国 `geodata/省/*.json` 地市·区县扫盘 + 日本都道府县；
-/// 不再优先 GQ 中国一级（整省一块，烈度填色过粗）。
+/// 区划层：仅中日省级（GQ → 要石回退）。
 fn load_regional_rings(dir: &Path) -> (Vec<RingSet>, usize, usize) {
     let mut regional_fine = Vec::new();
     let mut files = 0usize;
     let mut skipped = 0usize;
 
-    let cn = load_cn_city_district_rings(dir, &mut files, &mut skipped);
-    let cn_n = cn.len();
-    regional_fine.extend(cn);
-
-    let jp = load_jp_pref_rings(dir, &mut files, &mut skipped);
-    let jp_n = jp.len();
-    regional_fine.extend(jp);
-
-    // 中国扫盘为空时回退 GQ / 要石省级，避免无填色
-    if cn_n == 0 {
-        let gq_cn = globalquake_dir(dir).join("cn-prefectures.geojson");
-        if let Some(rings) = try_load_rings(
-            &gq_cn,
-            &mut files,
-            &mut skipped,
-            "fallback GlobalQuake cn-prefectures",
+    let gq_cn = globalquake_dir(dir).join("cn-prefectures.geojson");
+    if let Some(rings) = try_load_rings(
+        &gq_cn,
+        &mut files,
+        &mut skipped,
+        "GlobalQuake cn-prefectures",
+    ) {
+        regional_fine.extend(rings);
+    } else {
+        let kdir = kanameishi_dir(dir);
+        if let Some(path) = first_existing(
+            &kdir,
+            &[
+                "cn.province.topo.json",
+                "cn_province.geo.json",
+                "cn_province.geojson",
+            ],
         ) {
-            regional_fine.extend(rings);
-        } else {
-            let kdir = kanameishi_dir(dir);
-            if let Some(path) = first_existing(
-                &kdir,
-                &[
-                    "cn.province.topo.json",
-                    "cn_province.geo.json",
-                    "cn_province.geojson",
-                ],
-            ) {
-                files += 1;
-                match load_any_map(&path) {
-                    Ok(rings) => {
-                        info!(
-                            path = %path.display(),
-                            rings = rings.len(),
-                            "fallback kanameishi cn province"
-                        );
-                        regional_fine.extend(rings);
-                    }
-                    Err(e) => {
-                        skipped += 1;
-                        warn!(path = %path.display(), error = %e, "要石中国省界加载失败");
-                    }
+            files += 1;
+            match load_any_map(&path) {
+                Ok(rings) => {
+                    info!(
+                        path = %path.display(),
+                        rings = rings.len(),
+                        "kanameishi cn province"
+                    );
+                    regional_fine.extend(rings);
+                }
+                Err(e) => {
+                    skipped += 1;
+                    warn!(path = %path.display(), error = %e, "要石中国省界加载失败");
                 }
             }
         }
     }
 
+    let jp = load_jp_pref_rings(dir, &mut files, &mut skipped);
+    regional_fine.extend(jp);
+
     info!(
-        cn_rings = cn_n,
-        jp_rings = jp_n,
         total = regional_fine.len(),
         files,
         skipped,
-        "regional admin rings loaded (city/district preferred)"
+        "regional admin rings loaded (provincial only)"
     );
     (regional_fine, files, skipped)
 }
@@ -1513,39 +1727,6 @@ fn load_coarse_admin_for_dissolve(dir: &Path) -> Vec<RingSet> {
                 out.extend(rings);
             }
         }
-    }
-    out
-}
-
-/// 扫描 `geodata/<省市区>/*.json`（及根目录台湾等），得到地市/区县环。
-fn load_cn_city_district_rings(
-    dir: &Path,
-    files: &mut usize,
-    skipped: &mut usize,
-) -> Vec<RingSet> {
-    let mut out = Vec::new();
-    let globalmap = find_globalmap(dir);
-    for entry in walk_geojson_skip_world(dir) {
-        if globalmap.as_ref().is_some_and(|g| g == &entry) {
-            continue;
-        }
-        if is_cn_boundary_patch(&entry) {
-            continue;
-        }
-        if path_under_named_dir(&entry, &["kanameishi", "globalquake", "world", "日本"]) {
-            continue;
-        }
-        *files += 1;
-        match load_file(&entry) {
-            Ok(rings) => out.extend(rings),
-            Err(e) => {
-                *skipped += 1;
-                warn!(path = %entry.display(), error = %e, "跳过中国区划 GeoJSON");
-            }
-        }
-    }
-    if !out.is_empty() {
-        info!(rings = out.len(), "loaded cn city/district basemap");
     }
     out
 }
@@ -1600,14 +1781,7 @@ fn load_jp_pref_rings(dir: &Path, files: &mut usize, skipped: &mut usize) -> Vec
     out
 }
 
-fn path_under_named_dir(path: &Path, names: &[&str]) -> bool {
-    path.components().any(|c| {
-        let Some(n) = c.as_os_str().to_str() else {
-            return false;
-        };
-        names.iter().any(|want| n.eq_ignore_ascii_case(want))
-    })
-}
+
 
 
 /// 从省界/都道府县溶解出国家外轮廓：只保留出现一次的边（内部省界成对抵消）。
@@ -1798,9 +1972,6 @@ fn walk_geojson(dir: &Path) -> Vec<std::path::PathBuf> {
     walk_geojson_inner(dir, false)
 }
 
-fn walk_geojson_skip_world(dir: &Path) -> Vec<std::path::PathBuf> {
-    walk_geojson_inner(dir, true)
-}
 
 fn walk_geojson_inner(dir: &Path, skip_world: bool) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();

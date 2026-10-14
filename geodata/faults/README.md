@@ -11,7 +11,7 @@
 | `china_active_faults_lod0.geojson` | 中国长断层（远距） |
 | `china_active_faults_lod1.geojson` | 中国中等断层（中距） |
 
-平面图与球体图共用；设置项 `ui.show_faults`。缺 lod 文件时运行时从 fine 按对角线长度现场分档。
+平面图与球体图共用；设置项 `ui.show_faults` 默认关闭，开启后才加载。缺 lod 文件时运行时从 fine 按对角线长度现场分档。
 
 ## 来源与许可
 

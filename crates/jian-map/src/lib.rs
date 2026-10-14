@@ -121,18 +121,24 @@ impl MapViewport {
         tile_base: impl Into<String>,
         tile_source: impl Into<String>,
         geodata_dir: Option<&std::path::Path>,
+        show_faults: bool,
     ) {
         self.basemap = basemap;
         self.cache
             .set_source(tile_base.into(), tile_source.into());
         if let Some(dir) = geodata_dir {
-            // 球体 / 矢量底图：加载国界与区划
             if basemap.show_vector() || self.projection_mode.is_globe() {
-                self.vector.load_dir(dir);
+                self.vector
+                    .load_dir(dir, self.projection_mode.is_globe());
             }
-            // 海啸沿岸与底图模式无关，始终尝试加载
             self.tsunami_coast.load_dir(dir);
-            self.faults.load_dir(dir);
+            if show_faults {
+                self.faults.load_dir(dir);
+            } else {
+                self.faults.clear();
+            }
+        } else if !show_faults {
+            self.faults.clear();
         }
     }
 
@@ -197,7 +203,8 @@ impl MapViewport {
             dur,
         ));
         self.post_flight_cooldown = 0.0;
-        self.user_camera_override = false;
+        // 不在此清 user_camera_override：列表点选会在 fly 后立刻锁镜头；
+        // 自动跟焦路径本身不会带锁，由调用方决定。
     }
 
     /// 推进镜头动画；返回是否仍在飞跃中。
@@ -218,8 +225,8 @@ impl MapViewport {
             self.center_lat = elat;
             self.zoom = ez;
             self.flight = None;
-            // 抑制落地瞬间波圈 auto_zoom 二次改 zoom（弹簧感）
-            self.post_flight_cooldown = 2.8;
+            // 短暂抑制落地弹簧；过长会挡住 S 波跟焦缩小
+            self.post_flight_cooldown = 0.85;
         }
         !done
     }
@@ -228,8 +235,13 @@ impl MapViewport {
         self.flight.is_some()
     }
 
+    /// 飞跃或落地冷却中，需要按目标帧率连续重绘（由应用层调度，勿在此硬编码 16ms）。
+    pub fn wants_anim_repaint(&self) -> bool {
+        self.flight.is_some() || self.post_flight_cooldown > 0.0
+    }
+
     /// 预警期跟 S 波：只线性缩小（zoom 减小），不放大、不停顿跳级。
-    /// 球体远距时按震中做太平洋侧构图偏置，减轻「左俄多、右美缺」。
+    /// 镜头始终对准震中经纬（不做球体构图偏置），避免加勒比等区域震中被顶到右侧栏。
     pub fn apply_linear_zoom_out(
         &mut self,
         target_zoom: f64,
@@ -248,23 +260,22 @@ impl MapViewport {
         if target < self.zoom - 0.02 {
             self.zoom = (self.zoom + (target - self.zoom) * k).clamp(ZOOM_MIN, ZOOM_MAX);
         }
-        if self.projection_mode.is_globe() {
-            if let (Some(flon), Some(flat)) = (focus_lon, focus_lat) {
-                let (tlon, tlat) = globe_framed_center(flon, flat, self.zoom);
-                let dlon = projection::normalize_lon(tlon - self.center_lon);
-                let dlon = if dlon > 180.0 {
-                    dlon - 360.0
-                } else if dlon < -180.0 {
-                    dlon + 360.0
-                } else {
-                    dlon
-                };
-                let dlat = tlat - self.center_lat;
-                if dlon.abs() > 0.05 || dlat.abs() > 0.05 {
-                    let kb = (k * 0.85).clamp(0.02, 0.3);
-                    self.center_lon = projection::normalize_lon(self.center_lon + dlon * kb);
-                    self.center_lat = projection::clamp_lat(self.center_lat + dlat * kb);
-                }
+        if let (Some(flon), Some(flat)) = (focus_lon, focus_lat) {
+            let tlon = projection::normalize_lon(flon);
+            let tlat = projection::clamp_lat(flat);
+            let dlon = projection::normalize_lon(tlon - self.center_lon);
+            let dlon = if dlon > 180.0 {
+                dlon - 360.0
+            } else if dlon < -180.0 {
+                dlon + 360.0
+            } else {
+                dlon
+            };
+            let dlat = tlat - self.center_lat;
+            if dlon.abs() > 0.05 || dlat.abs() > 0.05 {
+                let kb = (k * 0.85).clamp(0.02, 0.3);
+                self.center_lon = projection::normalize_lon(self.center_lon + dlon * kb);
+                self.center_lat = projection::clamp_lat(self.center_lat + dlat * kb);
             }
         }
     }
@@ -325,10 +336,7 @@ impl MapViewport {
         self.markers.ensure(ui.ctx());
 
         let dt = ui.input(|i| i.stable_dt) as f64;
-        if self.tick_flight(dt) || self.post_flight_cooldown > 0.0 {
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(16));
-        }
+        let _ = self.tick_flight(dt);
 
         let (resp, _) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let rect = resp.rect;
@@ -363,6 +371,11 @@ impl MapViewport {
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
 
+        let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
+        let interacting = resp.dragged()
+            || self.flight.is_some()
+            || (resp.hovered() && scroll_y.abs() > 0.0);
+
         // 暗色矢量 / 球体：只描轮廓，不填陆地（对齐旧版纯黑轮廓图）
         if globe || self.basemap.show_vector() {
             self.vector.paint(
@@ -372,16 +385,13 @@ impl MapViewport {
                 self.vector_style,
                 /* skip_world_stroke */ false,
                 self.paint_quality,
+                interacting,
             );
         }
 
         // 活动断层：矢量轮廓之上、事件叠加之下；瓦片底图时也绘制
         if show_faults {
             let dark = self.ocean_fill.r() < 80;
-            let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
-            let interacting = resp.dragged()
-                || self.flight.is_some()
-                || (resp.hovered() && scroll_y.abs() > 0.0);
             self.faults
                 .paint(ui, &view, dark, self.paint_quality, interacting);
         }
@@ -407,27 +417,49 @@ impl MapViewport {
                     && !e.event_id.starts_with("record:")
                     && !e.is_cancel
             });
-            detect::paint_detect_boxes(ui, &view, detect_boxes);
-            overlay::paint_stations(
-                ui,
-                &view,
-                stations,
-                selected_station,
-                icons,
-                eew_active,
-                self.paint_quality,
-            );
-            overlay::paint_records(ui, &view, records, selected_record, icons);
-            overlay::paint_volcanoes(ui, &view, volcanoes, selected_volcano);
-            if !typhoons.is_empty() {
-                let hover = resp.hover_pos();
-                typhoon_hover = overlay::paint_typhoons(
+            // 有传播中预警波圈时隐藏检知框；否则 500ms 闪烁
+            let hide_detect = wave_events.iter().any(|e| {
+                !e.is_cancel
+                    && !e.event_id.starts_with("station:")
+                    && !e.event_id.starts_with("record:")
+            });
+            // 飞跃中跳过重叠层（速报点/火山/台风/检知），两端 zoom 变化时避免每帧海量 project
+            let flying = self.flight.is_some();
+            if !flying && !hide_detect {
+                detect::paint_detect_boxes(
                     ui,
                     &view,
-                    typhoons,
-                    typhoon_forecast_agency,
-                    hover,
+                    detect_boxes,
+                    detect::detect_box_blink_on(now_ms),
                 );
+            }
+            if !flying {
+                let station_q = if interacting {
+                    PaintQuality::Eco
+                } else {
+                    self.paint_quality
+                };
+                overlay::paint_stations(
+                    ui,
+                    &view,
+                    stations,
+                    selected_station,
+                    icons,
+                    eew_active,
+                    station_q,
+                );
+                overlay::paint_records(ui, &view, records, selected_record, icons);
+                overlay::paint_volcanoes(ui, &view, volcanoes, selected_volcano);
+                if !typhoons.is_empty() {
+                    let hover = resp.hover_pos();
+                    typhoon_hover = overlay::paint_typhoons(
+                        ui,
+                        &view,
+                        typhoons,
+                        typhoon_forecast_agency,
+                        hover,
+                    );
+                }
             }
 
             if let Some((hlon, hlat)) = home {

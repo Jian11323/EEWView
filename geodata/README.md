@@ -2,52 +2,28 @@
 
 ## 暗色矢量（默认）
 
-`basemap = "auto"` 且主题 `dark` 时加载矢量世界轮廓 + 中日区划。
+`basemap = "auto"` 且主题 `dark` 时加载矢量世界轮廓 + 中日**省级**区划。
+
+平面与球体按当前投影**分别加载**，切换投影时重载，避免两套几何同时常驻。
 
 ### 世界轮廓优先级
 
 | 顺序 | 路径 | 说明 |
 |------|------|------|
-| 1 | `globalquake/countries{MD,HD,UHD}.json` | **GlobalQuake Special** 藏南修复版国界（远/中/近分档） |
-| 2 | `medium.global.modified.geo.json` | 精细全球国界（展开 GeoJSON） |
-| 3 | `kanameishi/medium.global.modified.topo.json` | 要石 TopoJSON 同套边界 |
-| 4 | `Globalmap.geo.json` + `world/` | 旧全球轮廓回退 |
+| 1 | `globalquake/countriesMD.json` | GlobalQuake Special 藏南修复国界（单档） |
+| 2 | `kanameishi/medium.global.modified.topo.json` | 要石 TopoJSON 回退 |
+| 3 | `world/` | 粗全球轮廓回退 |
 
-GQ Special 世界层已含调整后的中国国界（含藏南）；另叠内置钓鱼岛点状。
+另叠内置钓鱼岛点状。不再加载 HD/UHD、地市/区县或美新区划细图。
 
-### 区划层优先级
+### 区划层
 
-| 顺序 | 路径 | 内容 |
-|------|------|------|
-| 1 | `<省市区>/*.json`、根目录如 `台湾省.json` | **中国地市/区县**（烈度填色与近距描边） |
-| 2 | `globalquake/jp-prefectures.geojson` → `日本/` → 要石 | 日本都道府县 |
-| 3 | `globalquake/cn-prefectures.geojson` / 要石省级 | 仅当中国扫盘为空时回退；远距外轮廓溶解仍优先用一级区划 |
-
-近距区划使用地市/区县边界。
-
-要石来源：[Lipomoea/kanameishi](https://github.com/Lipomoea/kanameishi)（AGPL-3.0）。详见 [`kanameishi/README.md`](kanameishi/README.md)。  
-GQ Special 说明见 [`globalquake/README.md`](globalquake/README.md)。
-
-## 亮色：自有海洋地形瓦片
-
-主题 `light` 时使用 XYZ：`{tile_base}/{tile_source}/{z}/{x}/{y}`  
-默认 `https://tilemap.sismotide.top/arcwob/...`（支持横向循环铺贴）。
-
-暗色 / 球体：近黑底 + 国界/区划轮廓线（不填陆地）。数据优先 `globalquake/`（藏南修复）。  
-`globe_dark.png` / `tools/gen_globe_texture.py` 为备用贴图资源，当前运行时不铺贴。
+| 路径 | 内容 |
+|------|------|
+| `globalquake/cn-prefectures.geojson` | 中国省级（含藏南） |
+| `globalquake/jp-prefectures.geojson` | 日本都道府县 |
+| 要石 `cn_province` / `jp_pref` | 上述缺失时回退 |
 
 ## 活动断层
 
-| 路径 | 内容 |
-|------|------|
-| `faults/global_active_faults.geojson` | 全球 GEM 活动断层（简化，近距） |
-| `faults/*_lod0.geojson` / `*_lod1.geojson` | 远距/中距 LOD（可选；缺则运行时分档） |
-| `faults/china_active_faults.geojson` | 中国及邻区 CAFD / CN-faults（简化，近距） |
-
-平面与球体共用；`ui.show_faults` 开关。详见 [`faults/README.md`](faults/README.md)。
-
-## 其它回退
-
-| 路径 | 内容 |
-|------|------|
-| `world/cn_boundary_patches.geojson` | 历史补丁（运行时不加载；钓鱼岛已内置） |
+`ui.show_faults` 默认关闭；**仅开启后才加载与绘制**。详见 [`faults/README.md`](faults/README.md)。

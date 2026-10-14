@@ -123,10 +123,11 @@ impl MainShell {
         lat: f64,
         zoom: f64,
         projection: ProjectionMode,
+        show_faults: bool,
     ) {
         self.map.set_projection_mode(projection);
         self.map
-            .configure(basemap, tile_base, tile_source, geodata_dir);
+            .configure(basemap, tile_base, tile_source, geodata_dir, show_faults);
         self.map.center_lon = lon;
         self.map.center_lat = lat;
         self.map.zoom = zoom;
@@ -143,13 +144,14 @@ impl MainShell {
         tile_source: impl Into<String>,
         geodata_dir: Option<&Path>,
         projection: ProjectionMode,
+        show_faults: bool,
     ) {
         let lon = self.map.center_lon;
         let lat = self.map.center_lat;
         let zoom = self.map.zoom;
         self.map.set_projection_mode(projection);
         self.map
-            .configure(basemap, tile_base, tile_source, geodata_dir);
+            .configure(basemap, tile_base, tile_source, geodata_dir, show_faults);
         self.map.center_lon = lon;
         self.map.center_lat = lat;
         self.map.zoom = zoom;
@@ -185,7 +187,7 @@ impl MainShell {
         let live_refs =
             live_wave_eews_travel(&snap.eew_list, now_ms, &snap.wave_spread_km, travel);
         let mut wave_owned: Vec<_> = live_refs.into_iter().cloned().collect();
-        // 演示样本：无有效发震时刻时用 map_elapsed 驱动波圈
+        // 无有效发震时刻时用 map_elapsed 驱动波圈（上游 origin 缺测）
         let sample_elapsed = self.map_elapsed % 120.0;
         let mut map_ui = MapUiResult::default();
 
@@ -303,16 +305,22 @@ impl MainShell {
                         let r = s_km
                             .min(max_s_wave_spread_km(ev.magnitude))
                             .max(8.0);
+                        // 勿设 9.0 地板：大波圈需要 zoom<9，否则 S 波出屏却不缩小
                         let z = zoom_to_fit_radius_km(
                             ev.latitude,
                             r,
                             map_rect.width().min(map_rect.height()),
-                            0.34,
+                            0.42,
                         )
-                        .clamp(9.0, 13.8);
+                        .clamp(3.0, 12.0);
+                        let rate = if z < self.map.zoom - 0.8 {
+                            0.22
+                        } else {
+                            0.12
+                        };
                         self.map.apply_linear_zoom_out(
                             z,
-                            0.10,
+                            rate,
                             Some(ev.longitude),
                             Some(ev.latitude),
                         );
@@ -337,7 +345,7 @@ impl MainShell {
                 );
                 if let Some(net) = station_card_bottom.clicked {
                     if let Some((lon, lat, zoom)) = snap.focus_max_station(net) {
-                        self.map.fly_to_centered(lon, lat, Some(zoom), 0.7);
+                        self.map.fly_to_centered(lon, lat, Some(zoom.clamp(7.5, 11.0)), 0.4);
                         self.map.user_camera_override = true;
                     }
                 }
@@ -401,13 +409,15 @@ impl MainShell {
                                     0.52,
                                 )
                                 .clamp(8.0, 12.5);
-                                let dur = if tab == SidebarTab::Eew { 1.0 } else { 0.85 };
+                                let dur = if tab == SidebarTab::Eew { 1.2 } else { 1.0 };
                                 self.map.fly_to_centered(lon, lat, Some(end_z), dur);
-                                // 手动点选：锁定镜头，避免影院 10s 轮播 / 跟焦把缩放突然改掉
+                                // 手动点选：锁定镜头，避免影院轮播 / 跟焦抢走速报跳转
                                 self.map.user_camera_override = true;
                             }
                             SidebarTab::Station => {
-                                self.map.fly_to_centered(lon, lat, Some(zoom.max(9.5)), 0.7);
+                                // 短飞跃 + 勿强行拉到 9.5（大缩放差会触发底图重建卡顿）
+                                let z = zoom.clamp(7.5, 11.0);
+                                self.map.fly_to_centered(lon, lat, Some(z), 0.4);
                                 self.map.user_camera_override = true;
                             }
                             SidebarTab::Volcano => {

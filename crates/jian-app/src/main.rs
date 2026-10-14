@@ -182,13 +182,12 @@ fn run_app() -> Result<()> {
     };
 
     let live = cfg.any_source_enabled();
-    let mut snap = if live {
+    let mut snap = AppSnapshot::empty();
+    if live {
         tracing::info!("waiting for source events");
-        AppSnapshot::empty()
     } else {
-        tracing::info!("all sources disabled → offline sample");
-        AppSnapshot::offline_sample()
-    };
+        tracing::info!("all sources disabled");
+    }
 
     let rt = Runtime::new()?;
     let net_rx = if live {
@@ -224,6 +223,7 @@ fn run_app() -> Result<()> {
         cfg.map.default_lat,
         cfg.map.default_zoom,
         ProjectionMode::parse(&cfg.map.projection),
+        cfg.ui.show_faults,
     );
     snap.tab = match cfg.ui.sidebar_default_tab.to_ascii_lowercase().as_str() {
         "records" | "record" => jian_core::SidebarTab::Records,
@@ -351,7 +351,8 @@ enum RepaintNeed {
 
 fn repaint_ms(perf: &jian_config::PerformanceConfig, need: RepaintNeed) -> u64 {
     match need {
-        RepaintNeed::Interactive => perf.repaint_interval_ms().min(16),
+        // 跟手/飞跃：严格按用户目标帧率，不再强制 ≤16ms（否则 30fps 设定下飞跃仍按 60 重绘更易卡）
+        RepaintNeed::Interactive => perf.repaint_interval_ms(),
         RepaintNeed::Waves => perf.wave_repaint_ms(),
         RepaintNeed::Soft => perf.soft_repaint_ms(),
         RepaintNeed::Idle => perf.idle_repaint_ms(),
@@ -632,30 +633,16 @@ impl eframe::App for JianApp {
                 if let Some((lon, lat, _zoom)) = self.snap.focus_latest_event() {
                     let z = if let Some(ev) = &self.snap.active {
                         let now = chrono::Utc::now().timestamp_millis();
-                        let wave_elapsed = if ev.origin_ms > 0 {
-                            ((now - ev.origin_ms) as f64 / 1000.0).max(0.0)
-                        } else {
-                            0.0
-                        };
-                        let s_km = if let Some(eng) = self.travel.as_ref() {
-                            eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, wave_elapsed)
-                        } else {
-                            wave_elapsed * 5.0
-                        };
-                        let r = s_km
-                            .min(max_s_wave_spread_km(ev.magnitude))
-                            .max(8.0);
-                        zoom_to_fit_radius_km(
-                            ev.latitude,
-                            r,
+                        gq_jump_zoom(
+                            ev,
+                            now,
+                            self.travel.as_ref(),
                             self.shell.map.last_viewport_min_px,
-                            0.34,
                         )
-                        .clamp(9.0, 13.8)
                     } else {
                         8.5
                     };
-                    self.shell.map.fly_to(lon, lat, Some(z), 1.0);
+                    self.shell.map.fly_to(lon, lat, Some(z), 1.6);
                     self.auto_center_pending = false;
                     if let Some(ev) = &self.snap.active {
                         self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
@@ -677,6 +664,14 @@ impl eframe::App for JianApp {
                 .active
                 .as_ref()
                 .is_some_and(|e| e.event_id.starts_with("station:"));
+            let browsing_record = self
+                .snap
+                .active
+                .as_ref()
+                .is_some_and(|e| e.event_id.starts_with("record:"));
+            // 用户点选速报并锁镜头时，勿把 active/Tab 抢回预警（新预警到达仍强制打断）
+            let hold_record_pick =
+                browsing_record && self.shell.map.user_camera_override;
             let now = chrono::Utc::now().timestamp_millis();
             // 跟焦/轮播只认侧栏源槽最新一条（与列表、TTS 一致；多 GQ 不再各自乱跳）
             let live: Vec<&EewReport> = latest_eew_per_source(&self.snap.eew_list)
@@ -716,12 +711,15 @@ impl eframe::App for JianApp {
                             self.shell.map.last_viewport_min_px,
                         );
                         self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 1.6);
+                        self.shell.map.user_camera_override = false;
                         self.last_follow_key = Some(key);
                         self.cinema_idx = 0;
                         self.cinema_seen_key = seen_key;
                         self.snap.active = Some(ev.clone());
                         self.snap.tab = jian_core::SidebarTab::Eew;
                         self.snap.overlay_mode = jian_core::OverlayMode::Wave;
+                    } else if hold_record_pick {
+                        // 保留用户点选的速报镜头
                     } else if self.last_follow_key.as_ref() != Some(&key) {
                         // 同震更新报：刷新 active，不重飞
                         self.last_follow_key = Some(key);
@@ -777,6 +775,9 @@ impl eframe::App for JianApp {
                                 self.shell.map.last_viewport_min_px,
                             );
                             self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 1.6);
+                            if is_new_arrival {
+                                self.shell.map.user_camera_override = false;
+                            }
                             self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
                             self.cinema_idx = idx;
                             // GlobalQuake cinemaModeSwitchTime 默认 10 秒
@@ -786,7 +787,7 @@ impl eframe::App for JianApp {
                             self.snap.tab = jian_core::SidebarTab::Eew;
                             self.snap.overlay_mode = jian_core::OverlayMode::Wave;
                         }
-                    } else {
+                    } else if !hold_record_pick {
                         // 停留中：同步当前震中最新报文，绝不因 serial 重置计时或跳转
                         let idx = self.cinema_idx.min(live.len() - 1);
                         let ev = live[idx];
@@ -991,11 +992,19 @@ impl eframe::App for JianApp {
             && self.snap.eew_list.iter().any(|e| {
                 eew_wave_live(e, now_ms, &self.snap.wave_spread_km, self.travel.as_ref())
             });
-        let need = if pointer_busy || self.shell.map.is_flying() || self.splash.active() {
+        let detect_blink = !detect_boxes.is_empty() && !waves_busy;
+        let need = if pointer_busy
+            || self.shell.map.wants_anim_repaint()
+            || self.splash.active()
+        {
             RepaintNeed::Interactive
         } else if waves_busy {
             RepaintNeed::Waves
-        } else if self.shell.settings.open || self.snap.countdown_s.is_some() {
+        } else if detect_blink
+            || self.shell.settings.open
+            || self.snap.countdown_s.is_some()
+        {
+            // Soft：检知框 500ms 闪烁需要高于 Idle 的重绘
             RepaintNeed::Soft
         } else {
             RepaintNeed::Idle
@@ -1208,6 +1217,7 @@ impl JianApp {
             self.cfg.map.tile_source.clone(),
             Some(self.geodata_dir.as_path()),
             ProjectionMode::parse(&self.cfg.map.projection),
+            self.cfg.ui.show_faults,
         );
 
         if !travel_same {
@@ -1276,7 +1286,7 @@ fn gq_jump_zoom(
     } else {
         elapsed * 5.0
     };
-    // 视野再拉近：S 圈约占短边 34%（越小越近）
+    // 落地要近（高 zoom），中途抛物线才能「先缩小再放大」；波圈撑满由落地后 auto_zoom 跟。
     let r = s_km
         .min(max_s_wave_spread_km(ev.magnitude))
         .max(8.0);
@@ -1287,8 +1297,8 @@ fn gq_jump_zoom(
         0.0
     };
     let scroll = (age_min / 5.0).clamp(0.05, 1.2);
-    let prefer = (14.5 - scroll * 1.4).clamp(9.2, 13.8);
-    prefer.min(fit_s).clamp(9.0, 13.8)
+    let prefer = (14.5 - scroll * 1.4).clamp(9.2, 12.0);
+    prefer.min(fit_s).clamp(9.0, 12.0)
 }
 
 fn tsunami_audio_grade(grade: &str) -> u8 {

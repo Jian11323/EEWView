@@ -252,6 +252,7 @@ impl SettingsSession {
         self.draft = Some(cfg.clone());
         self.tab = SettingsTab::Sources;
         self.save_note = None;
+        self.keep_open = false;
         self.login_key.clear();
         self.auth_busy = false;
         self.auth_rx = None;
@@ -483,6 +484,13 @@ impl SettingsSession {
             return Some(SettingsAction::Cancelled);
         }
 
+        if let Some(SettingsAction::Saved { close: true, .. }) = &action {
+            // 保存且需关闭：本帧立刻卸窗，避免等主循环 close_after_save 才藏
+            self.open = false;
+            self.draft = None;
+            self.opened_at = None;
+            return action;
+        }
         if matches!(
             action,
             Some(SettingsAction::Saved { .. })
@@ -1558,7 +1566,7 @@ fn draw_general(
             toggle(ui, &mut draft.ui.show_typhoons);
         });
         row_divider(ui);
-        control_row(ui, "活动断层", "全球 GEM 与中国 CAFD 活断层迹线", "\u{25ce}", |ui| {
+        control_row(ui, "活动断层", "默认关；开启后才加载并绘制 GEM/CAFD 迹线", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_faults);
         });
         row_divider(ui);
