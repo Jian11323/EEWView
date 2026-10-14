@@ -136,7 +136,8 @@ impl RingSet {
         }
         let lon_span = unwrapped_lon_span(&exterior);
         let (min_lon, min_lat, max_lon, max_lat) = bbox_of(&exterior);
-        let mut ring = Self {
+        // 当前底图只描轮廓（fill_land=false），不预计算耳切，显著省内存
+        Some(Self {
             exterior,
             holes,
             min_lon,
@@ -145,11 +146,7 @@ impl RingSet {
             max_lat,
             lon_span,
             tris: Vec::new(),
-        };
-        if ring.may_fill() {
-            ring.tris = triangulate_ring(&ring.exterior, &ring.holes);
-        }
-        Some(ring)
+        })
     }
 
     /// 绕地过半或跨日界的环只描边；其余用 earcut 预剖分后 Mesh 填色。
@@ -400,24 +397,19 @@ impl VectorBasemap {
                     return;
                 }
 
-                let (mut regional_fine, r_files, r_skip) = load_regional_rings(&dir);
-                let diaoyu = builtin_diaoyu_patches();
-                let mut dissolve_src = load_coarse_admin_for_dissolve(&dir);
-                if dissolve_src.is_empty() {
-                    dissolve_src = regional_fine.clone();
-                }
-                dissolve_src.extend(diaoyu.iter().cloned());
-                let national_fine = dissolve_national_outlines(&dissolve_src);
-                regional_fine.extend(diaoyu);
-                let regional_n = regional_fine.len();
-                let national_lods = LayerLods::from_fine(national_fine, 0.25, 0.08);
-                let regional_lods = LayerLods::from_fine(regional_fine, 0.08, 0.02);
-
-                // 球体：区划已在 GqLayers，平面 LayerLods 留空
-                let (regional_lods, national_lods, regional_n) = if for_globe {
-                    (empty_lods(), empty_lods(), 0usize)
+                // 球体区划已在 GqLayers；平面只保留一份省级 LOD（不溶解 national、不三重简化）
+                let (regional_lods, national_lods, regional_n, r_files, r_skip) = if for_globe {
+                    (empty_lods(), empty_lods(), 0usize, 0usize, 0usize)
                 } else {
-                    (regional_lods, national_lods, regional_n)
+                    let (mut regional_fine, r_files, r_skip) = load_regional_rings(&dir);
+                    regional_fine.extend(builtin_diaoyu_patches());
+                    let regional_n = regional_fine.len();
+                    let regional_lods = LayerLods {
+                        coarse: regional_fine,
+                        medium: Vec::new(),
+                        fine: Vec::new(),
+                    };
+                    (regional_lods, empty_lods(), regional_n, r_files, r_skip)
                 };
 
                 let _ = tx.send((
@@ -492,8 +484,8 @@ impl VectorBasemap {
                 } => {
                     self.regional = lods;
                     self.national = national;
-                    self.regional_ready =
-                        !self.regional.fine.is_empty() || !self.national.fine.is_empty();
+                    self.regional_ready = !self.regional.coarse.is_empty() || !self.regional.medium.is_empty() || !self.regional.fine.is_empty()
+                        || !self.national.coarse.is_empty() || !self.national.medium.is_empty() || !self.national.fine.is_empty();
                     self.state = if self.world_ready || self.regional_ready {
                         BasemapLoadState::Ready
                     } else {
@@ -621,9 +613,9 @@ impl VectorBasemap {
         };
 
         if view.mode.is_globe() {
-            // 对齐 GQ GlobePanel：按 scroll 切换 MD / HD·UHD(过滤) + 区划填色描边
+            // 球体轮廓：关 feathering，显著减小常驻 Mesh
             paint_globe_gq_style(&mut shapes, self, view, fill_land, style);
-            let mesh = bake_shapes_mesh(ppp, shapes);
+            let mesh = bake_shapes_mesh_lite(ppp, shapes);
             painter.add(egui::Shape::Mesh(mesh.clone()));
             self.paint_cache = Some(VectorPaintCache {
                 key: cache_key,
@@ -697,7 +689,11 @@ impl VectorBasemap {
             // 中景 HD/UHD 已去中日 → 补一级区划；近景再叠地市/都道府县。交互中跳过区划以免飞跃卡顿。
             if !interacting {
                 let stroke_admin = Stroke::new(0.85_f32, style.admin_border);
-                if zoom >= regional_zoom && !self.regional.fine.is_empty() {
+                if zoom >= regional_zoom
+                    && (!self.regional.coarse.is_empty()
+                        || !self.regional.medium.is_empty()
+                        || !self.regional.fine.is_empty())
+                {
                     let rings = self
                         .regional
                         .pick(zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
@@ -991,7 +987,11 @@ fn paint_globe_gq_style(
 
     let rings = basemap.world.pick(view.zoom, 4.0, 6.0);
     paint_rings_globe(shapes, rings, view, min_lon, min_lat, max_lon, max_lat, stroke_w);
-    if view.zoom >= ZOOM_REGIONAL && !basemap.regional.fine.is_empty() {
+    if view.zoom >= ZOOM_REGIONAL
+        && (!basemap.regional.coarse.is_empty()
+            || !basemap.regional.medium.is_empty()
+            || !basemap.regional.fine.is_empty())
+    {
         let rings = basemap
             .regional
             .pick(view.zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
@@ -1429,6 +1429,11 @@ fn try_load_gq_globe(dir: &Path) -> Option<(LayerLods, usize, usize, usize, GqLa
 
     let cn = load_reg("cn-prefectures.geojson");
     let jp = load_reg("jp-prefectures.geojson");
+    // 描边专用：抽稀国界顶点，减小球体 Mesh 常驻
+    let md: Vec<RingSet> = md
+        .iter()
+        .flat_map(|r| simplify_ringsets(r, 0.08))
+        .collect();
     let mut md_with_diaoyu = md;
     let diaoyu = builtin_diaoyu_patches();
     if !diaoyu.is_empty() {
@@ -1452,12 +1457,16 @@ fn try_load_gq_flat(dir: &Path) -> Option<(LayerLods, usize, usize, usize)> {
     }
     let mut files = 0usize;
     let mut skipped = 0usize;
-    let mut md = try_load_rings(
+    let md = try_load_rings(
         &gq_dir.join("countriesMD.json"),
         &mut files,
         &mut skipped,
         "gq countriesMD",
     )?;
+    let mut md: Vec<RingSet> = md
+        .iter()
+        .flat_map(|r| simplify_ringsets(r, 0.08))
+        .collect();
     let diaoyu = builtin_diaoyu_patches();
     if !diaoyu.is_empty() {
         files += 1;
@@ -2661,7 +2670,9 @@ mod tests {
         assert_eq!(parts.len(), 1);
         let set = RingSet::from_parts(parts[0].clone(), Vec::new()).unwrap();
         assert!(set.may_fill());
-        assert_eq!(set.tris.len(), 6); // 四边形 → 2 个三角形
+        // 运行时不再预剖分；耳切由 triangulate_ring 单测覆盖
+        let tris = triangulate_ring(&set.exterior, &set.holes);
+        assert_eq!(tris.len(), 6); // 四边形 → 2 个三角形
     }
 
     #[test]

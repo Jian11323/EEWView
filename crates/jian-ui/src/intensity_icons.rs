@@ -75,60 +75,12 @@ const CSIS_INST_SVG: [(&[u8], u8); 12] = [
     (svg!("csis_inst/CSIS 12.svg"), 12),
 ];
 
-const MMI_SVG: [(&[u8], u8); 12] = [
-    (svg!("mmi/MMI 1.svg"), 1),
-    (svg!("mmi/MMI 2.svg"), 2),
-    (svg!("mmi/MMI 3.svg"), 3),
-    (svg!("mmi/MMI 4.svg"), 4),
-    (svg!("mmi/MMI 5.svg"), 5),
-    (svg!("mmi/MMI 6.svg"), 6),
-    (svg!("mmi/MMI 7.svg"), 7),
-    (svg!("mmi/MMI 8.svg"), 8),
-    (svg!("mmi/MMI 9.svg"), 9),
-    (svg!("mmi/MMI 10.svg"), 10),
-    (svg!("mmi/MMI 11.svg"), 11),
-    (svg!("mmi/MMI 12.svg"), 12),
-];
-
-const MMI_INST_SVG: [(&[u8], u8); 12] = [
-    (svg!("mmi_inst/MMI 1.svg"), 1),
-    (svg!("mmi_inst/MMI 2.svg"), 2),
-    (svg!("mmi_inst/MMI 3.svg"), 3),
-    (svg!("mmi_inst/MMI 4.svg"), 4),
-    (svg!("mmi_inst/MMI 5.svg"), 5),
-    (svg!("mmi_inst/MMI 6.svg"), 6),
-    (svg!("mmi_inst/MMI 7.svg"), 7),
-    (svg!("mmi_inst/MMI 8.svg"), 8),
-    (svg!("mmi_inst/MMI 9.svg"), 9),
-    (svg!("mmi_inst/MMI 10.svg"), 10),
-    (svg!("mmi_inst/MMI 11.svg"), 11),
-    (svg!("mmi_inst/MMI 12.svg"), 12),
-];
-
-const LPGM_SVG: [(&[u8], u8); 4] = [
-    (svg!("lpgm/LPGM 1.svg"), 1),
-    (svg!("lpgm/LPGM 2.svg"), 2),
-    (svg!("lpgm/LPGM 3.svg"), 3),
-    (svg!("lpgm/LPGM 4.svg"), 4),
-];
-
-const LPGM_INST_SVG: [(&[u8], u8); 4] = [
-    (svg!("lpgm_inst/LPGM 1.svg"), 1),
-    (svg!("lpgm_inst/LPGM 2.svg"), 2),
-    (svg!("lpgm_inst/LPGM 3.svg"), 3),
-    (svg!("lpgm_inst/LPGM 4.svg"), 4),
-];
-
 #[derive(Default)]
 pub struct IntensityIcons {
     jma: HashMap<u8, TextureHandle>,
     jma_inst: HashMap<u8, TextureHandle>,
     csis: HashMap<u8, TextureHandle>,
     csis_inst: HashMap<u8, TextureHandle>,
-    mmi: HashMap<u8, TextureHandle>,
-    mmi_inst: HashMap<u8, TextureHandle>,
-    lpgm: HashMap<u8, TextureHandle>,
-    lpgm_inst: HashMap<u8, TextureHandle>,
     tried: bool,
 }
 
@@ -138,14 +90,11 @@ impl IntensityIcons {
             return;
         }
         self.tried = true;
+        // 启动只加载侧栏常用的 JMA / CSIS；MMI·LPGM 首次取用时再栅格化
         load_set(ctx, "eewview/shindo", &SHINDO_SVG, &mut self.jma);
         load_set(ctx, "eewview/shindo_inst", &SHINDO_INST_SVG, &mut self.jma_inst);
         load_set(ctx, "eewview/csis", &CSIS_SVG, &mut self.csis);
         load_set(ctx, "eewview/csis_inst", &CSIS_INST_SVG, &mut self.csis_inst);
-        load_set(ctx, "eewview/mmi", &MMI_SVG, &mut self.mmi);
-        load_set(ctx, "eewview/mmi_inst", &MMI_INST_SVG, &mut self.mmi_inst);
-        load_set(ctx, "eewview/lpgm", &LPGM_SVG, &mut self.lpgm);
-        load_set(ctx, "eewview/lpgm_inst", &LPGM_INST_SVG, &mut self.lpgm_inst);
         if self.jma.len() < 10 || self.csis.len() < 12 {
             tracing::warn!("部分烈度/震度 SVG 未能加载，将回退为色块文字");
         }
@@ -173,23 +122,13 @@ impl IntensityIcons {
     }
 
     #[allow(dead_code)]
-    pub fn get_mmi(&self, level: u8, instrumental: bool) -> Option<&TextureHandle> {
-        let lv = level.clamp(1, 12);
-        if instrumental {
-            self.mmi_inst.get(&lv).or_else(|| self.mmi.get(&lv))
-        } else {
-            self.mmi.get(&lv)
-        }
+    pub fn get_mmi(&self, _level: u8, _instrumental: bool) -> Option<&TextureHandle> {
+        None
     }
 
     #[allow(dead_code)]
-    pub fn get_lpgm(&self, level: u8, instrumental: bool) -> Option<&TextureHandle> {
-        let lv = level.clamp(1, 4);
-        if instrumental {
-            self.lpgm_inst.get(&lv).or_else(|| self.lpgm.get(&lv))
-        } else {
-            self.lpgm.get(&lv)
-        }
+    pub fn get_lpgm(&self, _level: u8, _instrumental: bool) -> Option<&TextureHandle> {
+        None
     }
 }
 

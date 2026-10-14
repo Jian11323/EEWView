@@ -18,10 +18,16 @@ pub fn app_icon_data() -> Option<IconData> {
     })
 }
 
-/// 关于页等 UI 用的 logo 贴图（缓存于 egui 纹理）。
+/// 关于页 / 启动画面 logo（按 Context 缓存，避免每帧解码上传）。
 pub fn logo_texture(ctx: &Context) -> Option<TextureHandle> {
+    let id = egui::Id::new("eewview/brand_logo_tex");
+    if let Some(tex) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
+        return Some(tex);
+    }
     let img = image::load_from_memory(APP_PNG).ok()?.into_rgba8();
     let size = [img.width() as usize, img.height() as usize];
     let color = ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-    Some(ctx.load_texture("eewview/brand_logo", color, TextureOptions::LINEAR))
+    let tex = ctx.load_texture("eewview/brand_logo", color, TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
+    Some(tex)
 }

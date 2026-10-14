@@ -70,7 +70,8 @@ fn resolve_geodata_dir(configured: &str) -> PathBuf {
     }
 }
 
-/// 编译嵌入霞鹜文楷 Regular（约 25MB；不另嵌 Mono、不读系统字体，加快编译与启动）。
+/// 嵌入霞鹜文楷作 CJK 回退。拉丁走 egui 默认字体，汉字才回退文楷（避免文楷当主字体撑爆字形图集）。
+/// 使用 from_static：字体页落在映像映射里，避免 from_owned 再堆一份 24MB。
 fn install_cjk_fonts(ctx: &egui::Context) {
     const LXGW_WENKAI: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -87,13 +88,17 @@ fn install_cjk_fonts(ctx: &egui::Context) {
         vec!["lxgw_wenkai".to_string()],
     );
     if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-        fam.insert(0, "lxgw_wenkai".to_string());
+        if !fam.iter().any(|n| n == "lxgw_wenkai") {
+            fam.push("lxgw_wenkai".to_string());
+        }
     }
     if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-        fam.insert(0, "lxgw_wenkai".to_string());
+        if !fam.iter().any(|n| n == "lxgw_wenkai") {
+            fam.push("lxgw_wenkai".to_string());
+        }
     }
     ctx.set_fonts(fonts);
-    tracing::info!(bytes = LXGW_WENKAI.len(), "embedded LXGW WenKai");
+    tracing::info!(bytes = LXGW_WENKAI.len(), "embedded LXGW WenKai as CJK fallback");
 }
 
 fn main() {

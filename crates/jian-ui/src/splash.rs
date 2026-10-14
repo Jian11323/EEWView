@@ -87,10 +87,16 @@ fn with_alpha(c: Color32, opacity: f32) -> Color32 {
 }
 
 fn splash_bg_texture(ctx: &Context) -> Option<TextureHandle> {
+    let id = egui::Id::new("eewview/splash_bg_tex");
+    if let Some(tex) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
+        return Some(tex);
+    }
     let img = image::load_from_memory(SPLASH_BG_PNG).ok()?.into_rgba8();
     let size = [img.width() as usize, img.height() as usize];
     let color = ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-    Some(ctx.load_texture("eewview/splash_bg", color, TextureOptions::LINEAR))
+    let tex = ctx.load_texture("eewview/splash_bg", color, TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
+    Some(tex)
 }
 
 pub fn draw_splash(
