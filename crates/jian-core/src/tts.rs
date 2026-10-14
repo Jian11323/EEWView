@@ -250,12 +250,16 @@ pub fn build_record_tts_script(rec: &EqRecord) -> String {
     };
     let time = format_origin_for_tts(rec.origin_ms);
     let place = sanitize_place(&rec.place);
-    let mut body = if rec.magnitude > 0.0 {
+    let mut body = if rec.magnitude_unknown {
+        format!("{place}发生地震，震级调查中")
+    } else if rec.magnitude > 0.0 {
         format!("{place}发生{:.1}级地震", rec.magnitude)
     } else {
         format!("{place}发生地震")
     };
-    if rec.depth_km >= 0.0 {
+    if rec.hypocenter_unknown {
+        body.push_str("，震源调查中");
+    } else if rec.depth_km >= 0.0 {
         body.push_str(&format!("，震源深度{:.0}千米", rec.depth_km));
     }
     // 速报也用「预估最大烈度 / 推定最大震度」+ 阿拉伯数字
@@ -297,6 +301,7 @@ mod tests {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
+            warn_areas: Vec::new(),
         };
         assert!(!should_play_eew_tts(Some(&ev), &ev));
         let mut place_jitter = ev.clone();
@@ -330,6 +335,7 @@ mod tests {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
+            warn_areas: Vec::new(),
         };
         let s = build_eew_tts_script(&ev);
         assert!(s.contains("日本气象厅预报"));
@@ -361,6 +367,8 @@ mod tests {
             depth_km: 10.0,
             origin_ms: 0,
             is_auto: true,
+            magnitude_unknown: false,
+            hypocenter_unknown: false,
         };
         let s = build_record_tts_script(&rec);
         assert!(s.starts_with("中国地震台网中心自动测定"));
@@ -383,6 +391,8 @@ mod tests {
             depth_km: 8.0,
             origin_ms: 0,
             is_auto: false,
+            magnitude_unknown: false,
+            hypocenter_unknown: false,
         };
         let s = build_record_tts_script(&rec);
         assert!(s.contains("美国地质调查局地震速报"));

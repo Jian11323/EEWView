@@ -10,7 +10,7 @@ use crate::topojson;
 use crate::PaintQuality;
 use egui::{Color32, Pos2, Rect, Stroke, Ui};
 use jian_core::palette::color_for;
-use jian_core::EewReport;
+use jian_core::{EewReport, IntensityKind};
 use jian_util::haversine_km;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -242,6 +242,8 @@ enum LoadPacket {
     Regional {
         lods: LayerLods,
         national: LayerLods,
+        /// JMA EEW 预报分区：name → 多边形环
+        jp_eew: HashMap<String, Vec<RingSet>>,
         rings: usize,
         files: usize,
         skipped: usize,
@@ -303,6 +305,8 @@ pub struct VectorBasemap {
     loaded_dir: Option<PathBuf>,
     paint_cache: Option<VectorPaintCache>,
     intensity_cache: Option<IntensityPaintCache>,
+    /// JMA EEW 官方预报区（`geodata/eew/jp.eew.topo.json`）
+    jp_eew: HashMap<String, Vec<RingSet>>,
 }
 
 impl Default for VectorBasemap {
@@ -333,6 +337,7 @@ impl Default for VectorBasemap {
             loaded_dir: None,
             paint_cache: None,
             intensity_cache: None,
+            jp_eew: HashMap::new(),
         }
     }
 }
@@ -426,11 +431,13 @@ impl VectorBasemap {
                 let national_lods = LayerLods::from_fine(national_fine, 0.25, 0.08);
                 // 区县数量大：跳过 Visvalingam 全量简化，三档共用 fine（后台加载更快）
                 let regional_lods = LayerLods::from_fine_or_shared(regional_fine, 0.08, 0.02, 800);
+                let jp_eew = load_jp_eew_regions(&dir);
                 let _ = tx.send((
                     gen,
                     LoadPacket::Regional {
                         lods: regional_lods,
                         national: national_lods,
+                        jp_eew,
                         rings: regional_n,
                         files: r_files,
                         skipped: r_skip,
@@ -481,12 +488,15 @@ impl VectorBasemap {
                 LoadPacket::Regional {
                     lods,
                     national,
+                    jp_eew,
                     rings,
                     files,
                     skipped,
                 } => {
                     self.regional = lods;
                     self.national = national;
+                    let jp_eew_n = jp_eew.len();
+                    self.jp_eew = jp_eew;
                     self.regional_ready =
                         !self.regional.fine.is_empty() || !self.national.fine.is_empty();
                     self.state = if self.world_ready || self.regional_ready {
@@ -506,6 +516,7 @@ impl VectorBasemap {
                         world = self.world.fine.len(),
                         regional = self.regional.fine.len(),
                         national = self.national.fine.len(),
+                        jp_eew = jp_eew_n,
                         "vector basemap fully loaded"
                     );
                     keep = false;
@@ -677,6 +688,120 @@ impl VectorBasemap {
         });
     }
 
+    /// 官方 `warnArea`：按区划名给 `jp.eew` 多边形填色。至少命中一区返回 true。
+    pub fn paint_warn_area_regions(
+        &mut self,
+        ui: &mut Ui,
+        view: &ViewCtx,
+        ev: &EewReport,
+        selected: bool,
+    ) -> bool {
+        if ev.is_cancel || ev.event_id.starts_with("station:") {
+            return false;
+        }
+        if ev.warn_areas.is_empty() || self.jp_eew.is_empty() {
+            return false;
+        }
+        if !matches!(ev.intensity_kind, IntensityKind::JmaShindo) {
+            return false;
+        }
+
+        let cache_key = intensity_cache_key(view, ev, selected, self.gen, 0);
+        if let Some(c) = self.intensity_cache.as_ref() {
+            if c.key == cache_key {
+                if c.shapes.is_empty() {
+                    return false;
+                }
+                ui.painter_at(view.rect).extend((*c.shapes).clone());
+                return true;
+            }
+        }
+
+        let fill_alpha = if selected { 120_u8 } else { 88_u8 };
+        let rect = view.rect;
+        let globe = view.mode.is_globe();
+        let world_px = if globe {
+            rect.width().max(rect.height())
+        } else {
+            projection::world_size(view.zoom) as f32
+        };
+        let max_edge_px = rect.width().hypot(rect.height()).max(64.0);
+        let (min_lon, min_lat, max_lon, max_lat) = if globe {
+            (-180.0, -85.0, 180.0, 85.0)
+        } else {
+            let full_wrap = rect.width() >= world_px * 0.92;
+            if full_wrap {
+                (-180.0, -85.0, 180.0, 85.0)
+            } else {
+                viewport_bounds(view.center_lon, view.center_lat, view.zoom, rect)
+            }
+        };
+        let lon_shifts: Vec<f64> = if globe {
+            vec![0.0]
+        } else if min_lon < -150.0 || max_lon > 150.0 || view.center_lon.abs() > 150.0 {
+            vec![-360.0, 0.0, 360.0]
+        } else {
+            vec![0.0]
+        };
+
+        let level_by_name: HashMap<&str, u8> = ev
+            .warn_areas
+            .iter()
+            .map(|a| (a.name.as_str(), a.level))
+            .collect();
+
+        let mut meshes: HashMap<u8, egui::epaint::Mesh> = HashMap::new();
+        let mut painted = 0usize;
+        for (name, level) in &level_by_name {
+            let Some(rings) = self.jp_eew.get(*name) else {
+                continue;
+            };
+            if *level < 1 {
+                continue;
+            }
+            let rgb = color_for(IntensityKind::JmaShindo, *level);
+            let fill = Color32::from_rgba_unmultiplied(rgb.r, rgb.g, rgb.b, fill_alpha);
+            for ring in rings {
+                if !ring.may_fill() || ring.tris.is_empty() {
+                    continue;
+                }
+                for &lon_shift in &lon_shifts {
+                    if !ring_visible(
+                        ring,
+                        min_lon - lon_shift,
+                        min_lat,
+                        max_lon - lon_shift,
+                        max_lat,
+                    ) {
+                        continue;
+                    }
+                    if let Some(mesh) =
+                        mesh_fill_intensity_ring(ring, view, lon_shift, fill, max_edge_px)
+                    {
+                        append_mesh(meshes.entry(*level).or_default(), mesh);
+                        painted += 1;
+                    }
+                }
+            }
+        }
+
+        let mut shapes: Vec<egui::Shape> = Vec::with_capacity(meshes.len());
+        for (_lv, mesh) in meshes {
+            if !mesh.indices.is_empty() {
+                shapes.push(egui::Shape::mesh(mesh));
+            }
+        }
+        let ok = painted > 0 && !shapes.is_empty();
+        if ok {
+            ui.painter_at(view.rect).extend(shapes.clone());
+        }
+        self.intensity_cache = Some(IntensityPaintCache {
+            key: cache_key,
+            shapes: Arc::new(if ok { shapes } else { Vec::new() }),
+        });
+        ok
+    }
+
     /// 陆地贴边的衰减烈度：区划耳切三角按震中距估档，大边再四分（有预算+缓存）。
     ///
     /// 外缘跟区划走（锯齿陆地，对齐 Hikari 类参考）；区内随距离分档。
@@ -699,7 +824,7 @@ impl VectorBasemap {
             return false;
         }
 
-        let cache_key = intensity_cache_key(view, ev, selected, self.gen);
+        let cache_key = intensity_cache_key(view, ev, selected, self.gen, 1);
         if let Some(c) = self.intensity_cache.as_ref() {
             if c.key == cache_key {
                 if c.shapes.is_empty() {
@@ -889,18 +1014,30 @@ impl VectorBasemap {
     }
 }
 
-fn intensity_cache_key(view: &ViewCtx, ev: &EewReport, selected: bool, gen: u64) -> u64 {
+/// `paint_kind`: 0=官方 warnArea，1=衰减区划估算。
+fn intensity_cache_key(
+    view: &ViewCtx,
+    ev: &EewReport,
+    selected: bool,
+    gen: u64,
+    paint_kind: u8,
+) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     gen.hash(&mut h);
+    paint_kind.hash(&mut h);
     ev.event_id.hash(&mut h);
     ev.magnitude.to_bits().hash(&mut h);
     ev.depth_km.to_bits().hash(&mut h);
     match ev.intensity_kind {
-        jian_core::IntensityKind::JmaShindo => 0_u8,
-        jian_core::IntensityKind::CnIntensity => 1_u8,
+        IntensityKind::JmaShindo => 0_u8,
+        IntensityKind::CnIntensity => 1_u8,
     }
     .hash(&mut h);
     selected.hash(&mut h);
+    for a in &ev.warn_areas {
+        a.name.hash(&mut h);
+        a.level.hash(&mut h);
+    }
     // 视口量化：轻微平移不重算
     ((view.center_lon * 20.0).round() as i32).hash(&mut h);
     ((view.center_lat * 20.0).round() as i32).hash(&mut h);
@@ -909,6 +1046,35 @@ fn intensity_cache_key(view: &ViewCtx, ev: &EewReport, selected: bool, gen: u64)
     (view.rect.height() as i32 / 32).hash(&mut h);
     view.mode.is_globe().hash(&mut h);
     h.finish()
+}
+
+fn load_jp_eew_regions(dir: &Path) -> HashMap<String, Vec<RingSet>> {
+    let path = dir.join("eew").join("jp.eew.topo.json");
+    let mut out: HashMap<String, Vec<RingSet>> = HashMap::new();
+    let text = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            warn!(path = %path.display(), error = %e, "缺少 jp.eew.topo.json，官方 warnArea 填色不可用");
+            return out;
+        }
+    };
+    let named = match topojson::load_named_region_polygons(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(path = %path.display(), error = %e, "jp.eew.topo.json 解析失败");
+            return out;
+        }
+    };
+    for (name, exterior, holes) in named {
+        if name.is_empty() {
+            continue;
+        }
+        if let Some(ring) = RingSet::from_parts(exterior, holes) {
+            out.entry(name).or_default().push(ring);
+        }
+    }
+    info!(regions = out.len(), path = %path.display(), "loaded jp.eew warnArea regions");
+    out
 }
 
 fn ring_centroid(ring: &RingSet) -> (f64, f64) {

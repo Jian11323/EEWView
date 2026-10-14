@@ -38,6 +38,16 @@ pub enum IntensityKind {
     CnIntensity,
 }
 
+/// JMA 等官方预报分区（`warnArea` / `WarnArea`），按区划名上色。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntensityWarnArea {
+    pub name: String,
+    /// 展示文案，如 "5弱"
+    pub intensity_text: String,
+    /// 与 `IntensityKind` 档位一致（JMA: 0–9）
+    pub level: u8,
+}
+
 /// 单次预警报文（归一化后）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EewReport {
@@ -69,6 +79,9 @@ pub struct EewReport {
     /// 收到最终报的本地时刻 unix ms（0=尚未最终）
     #[serde(default)]
     pub final_at_ms: i64,
+    /// 官方烈度/震度分区（有则地图优先按名填色）
+    #[serde(default)]
+    pub warn_areas: Vec<IntensityWarnArea>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,9 +102,29 @@ pub struct EqRecord {
     /// CENC 等：自动测定（Wolfx `type=automatic`）
     #[serde(default)]
     pub is_auto: bool,
+    /// 震级调查中（上游 `magnitudeUnknown` / M=-1 / 「調査中」）；`magnitude` 无业务含义
+    #[serde(default)]
+    pub magnitude_unknown: bool,
+    /// 震源调查中（上游 `hypocenterUnknown` / 坐标缺测）；经纬深无地图/走时含义
+    #[serde(default)]
+    pub hypocenter_unknown: bool,
 }
 
 impl EqRecord {
+    /// 侧栏 / TTS 用震级文案。
+    pub fn magnitude_label(&self) -> String {
+        if self.magnitude_unknown {
+            "调查中".into()
+        } else {
+            format!("M{:.1}", self.magnitude)
+        }
+    }
+
+    /// 是否有可投影的震中坐标。
+    pub fn has_map_coord(&self) -> bool {
+        !self.hypocenter_unknown && (self.latitude.abs() > 0.01 || self.longitude.abs() > 0.01)
+    }
+
     /// 供 Header / 地图标记展示（非实时 EEW，serial=0，不驱动正式倒计时语义）
     pub fn as_header_report(&self) -> EewReport {
         EewReport {
@@ -99,19 +132,37 @@ impl EqRecord {
             event_id: format!("record:{}", self.place),
             serial: 0,
             place: self.place.clone(),
-            magnitude: self.magnitude,
-            depth_km: self.depth_km,
-            latitude: self.latitude,
-            longitude: self.longitude,
+            magnitude: if self.magnitude_unknown {
+                0.0
+            } else {
+                self.magnitude
+            },
+            depth_km: if self.hypocenter_unknown {
+                0.0
+            } else {
+                self.depth_km
+            },
+            latitude: if self.hypocenter_unknown {
+                0.0
+            } else {
+                self.latitude
+            },
+            longitude: if self.hypocenter_unknown {
+                0.0
+            } else {
+                self.longitude
+            },
             origin_ms: self.origin_ms,
             max_intensity_text: self.intensity_text.clone(),
             intensity_kind: self.intensity_kind,
             intensity_level: self.intensity_level,
             is_final: false,
             is_cancel: false,
-            is_assumption: false,
+            // 调查中：不驱动本地倒计时（与 EEW 仮定同源开关）
+            is_assumption: self.hypocenter_unknown || self.magnitude_unknown,
             is_warn: false,
             final_at_ms: 0,
+            warn_areas: Vec::new(),
         }
     }
 }
@@ -479,6 +530,7 @@ impl StationSample {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
+            warn_areas: Vec::new(),
         }
     }
 }
@@ -548,7 +600,7 @@ pub struct AppSnapshot {
     pub selection: Option<ListSelection>,
     /// 图例 P-S：是否绘制走时波圈
     pub show_wave_rings: bool,
-    /// 是否绘制衰减估算烈度（市级三角形填色 / 回退同心环）
+    /// 是否绘制烈度区划（官方分区优先 / 市级三角衰减 / 同心环回退）
     pub show_intensity_rings: bool,
     /// 当前有效的 JMA 海啸情报（取消后为 None）
     pub tsunami: Option<TsunamiInfo>,
@@ -593,6 +645,7 @@ impl AppSnapshot {
             is_assumption: false,
             is_warn: true,
             final_at_ms: 0,
+            warn_areas: Vec::new(),
         };
         let eew_b = EewReport {
             agency: AgencyId("cea".into()),
@@ -612,6 +665,7 @@ impl AppSnapshot {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
+            warn_areas: Vec::new(),
         };
         let eew_pr = EewReport {
             agency: AgencyId("cea-pr:四川".into()),
@@ -631,6 +685,7 @@ impl AppSnapshot {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
+            warn_areas: Vec::new(),
         };
         let eew_c = EewReport {
             agency: AgencyId("jma-eew".into()),
@@ -650,6 +705,7 @@ impl AppSnapshot {
             is_assumption: false,
             is_warn: true,
             final_at_ms: 0,
+            warn_areas: Vec::new(),
         };
 
         Self {
@@ -669,6 +725,8 @@ impl AppSnapshot {
                     depth_km: 12.0,
                     origin_ms: 0,
                     is_auto: false,
+                    magnitude_unknown: false,
+                    hypocenter_unknown: false,
                 },
                 EqRecord {
                     agency: AgencyId("jma".into()),
@@ -683,6 +741,8 @@ impl AppSnapshot {
                     depth_km: 40.0,
                     origin_ms: 0,
                     is_auto: false,
+                    magnitude_unknown: false,
+                    hypocenter_unknown: false,
                 },
                 EqRecord {
                     agency: AgencyId("jma".into()),
@@ -697,6 +757,8 @@ impl AppSnapshot {
                     depth_km: 10.0,
                     origin_ms: 0,
                     is_auto: false,
+                    magnitude_unknown: false,
+                    hypocenter_unknown: false,
                 },
             ],
             eew_list: vec![eew_a, eew_b, eew_pr, eew_c],
@@ -777,9 +839,14 @@ impl AppSnapshot {
                 let r = self.records.get(index)?;
                 let lon = r.longitude;
                 let lat = r.latitude;
+                let has_coord = r.has_map_coord();
                 self.active = Some(r.as_header_report());
                 self.overlay_mode = OverlayMode::Wave;
-                Some((lon, lat, 8.0))
+                if has_coord {
+                    Some((lon, lat, 8.0))
+                } else {
+                    None
+                }
             }
             SidebarTab::Station => {
                 let s = self.stations.get(index)?;
@@ -1028,9 +1095,14 @@ impl AppSnapshot {
                 return;
             }
             let auto_to_final = cur.is_auto && !record.is_auto;
-            let prefer_new = if auto_to_final {
+            // 震度速报（调查中）→ 震源\u{00b7}震度情报：优先采用已测定条目
+            let detail_upgrade = (cur.hypocenter_unknown && !record.hypocenter_unknown)
+                || (cur.magnitude_unknown && !record.magnitude_unknown);
+            let prefer_new = if auto_to_final || detail_upgrade {
                 true
             } else if !cur.is_auto && record.is_auto {
+                false
+            } else if !cur.hypocenter_unknown && record.hypocenter_unknown {
                 false
             } else {
                 let pn = eew_feed_priority(&record.agency.0);
@@ -1069,12 +1141,13 @@ impl AppSnapshot {
         }
         let lon = record.longitude;
         let lat = record.latitude;
-        let has_coord = lat.abs() > 0.01 || lon.abs() > 0.01;
+        let has_coord = record.has_map_coord();
         if let Some(i) = self.records.iter().position(|r| {
             r.agency == record.agency
                 && r.place == record.place
                 && r.origin_ms == record.origin_ms
-                && (r.magnitude - record.magnitude).abs() < 0.05
+                && r.magnitude_unknown == record.magnitude_unknown
+                && (record.magnitude_unknown || (r.magnitude - record.magnitude).abs() < 0.05)
         }) {
             self.tab = SidebarTab::Records;
             self.selection = Some(ListSelection {
@@ -1475,12 +1548,16 @@ pub fn latest_eew_per_source(list: &[EewReport]) -> Vec<&EewReport> {
 /// 速报内容是否实质相同（列表重放判定）。
 fn records_content_equivalent(a: &EqRecord, b: &EqRecord) -> bool {
     a.is_auto == b.is_auto
-        && (a.magnitude - b.magnitude).abs() < 0.05
+        && a.magnitude_unknown == b.magnitude_unknown
+        && a.hypocenter_unknown == b.hypocenter_unknown
+        && (a.magnitude_unknown || (a.magnitude - b.magnitude).abs() < 0.05)
         && a.intensity_level == b.intensity_level
+        && a.intensity_text == b.intensity_text
         && a.place == b.place
-        && (a.depth_km - b.depth_km).abs() < 0.5
-        && (a.latitude - b.latitude).abs() < 0.02
-        && (a.longitude - b.longitude).abs() < 0.02
+        && (a.hypocenter_unknown
+            || ((a.depth_km - b.depth_km).abs() < 0.5
+                && (a.latitude - b.latitude).abs() < 0.02
+                && (a.longitude - b.longitude).abs() < 0.02))
 }
 
 /// 发震时刻相对现在超过此年龄则视为过期（防 API 推送陈旧预警/速报）。
@@ -1503,7 +1580,7 @@ fn record_fresh_for_tts(origin_ms: i64) -> bool {
     origin_ms > 0 && !origin_is_stale(origin_ms)
 }
 
-/// 跨 API 是否同一 EEW 事件（同机构族 + 同 EventID，或发震时刻/震中接近）。
+/// 跨 API 是否同一速报事件（同机构族 + 发震时刻接近；调查中条目跳过震中/震级近邻）。
 fn same_record_event(a: &EqRecord, b: &EqRecord) -> bool {
     if agency_family(&a.agency.0) != agency_family(&b.agency.0) {
         return false;
@@ -1514,6 +1591,11 @@ fn same_record_event(a: &EqRecord, b: &EqRecord) -> bool {
         }
     } else if a.time_text != b.time_text {
         return false;
+    }
+    // 震度速报（震源/震级调查中）与后续震源\u{00b7}震度情报：同发震窗即合并
+    if a.hypocenter_unknown || b.hypocenter_unknown || a.magnitude_unknown || b.magnitude_unknown
+    {
+        return true;
     }
     let dlat = (a.latitude - b.latitude).abs();
     let dlon = (a.longitude - b.longitude).abs();
@@ -1700,6 +1782,7 @@ mod eew_dedup_tests {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
+            warn_areas: Vec::new(),
         }
     }
 
@@ -1812,6 +1895,8 @@ mod eew_dedup_tests {
             depth_km: 10.0,
             origin_ms: 1_577_836_800_000, // 2020，远超 10 分钟窗口
             is_auto: false,
+            magnitude_unknown: false,
+            hypocenter_unknown: false,
         };
         snap.upsert_record(old);
         assert!(snap.records.iter().any(|r| r.place == "测试地点"));
@@ -1876,6 +1961,8 @@ mod eew_dedup_tests {
             depth_km: 10.0,
             origin_ms: eew.origin_ms,
             is_auto: false,
+            magnitude_unknown: false,
+            hypocenter_unknown: false,
         });
         assert!(snap.records.iter().any(|r| r.place == "宫古岛近海"));
         assert!(snap.pending_tts_record.is_some());

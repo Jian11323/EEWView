@@ -14,7 +14,7 @@
 | 速报 | 速报历史（地名 / 时间 / M / 震度色块） |
 | 预警 | 预警列表（报数 / M / 最大震度） |
 | 测站 | NIED Kmoni 有感测站（列表 + 地图色点） |
-| 地图 | 暗色 GQ Special 矢量（藏南修复）/ 亮色地形瓦片 + 震中 + P/S 波圈（JMA2001 走时）+ 衰减估算烈度区划填色 |
+| 地图 | 暗色 GQ Special 矢量（藏南修复）/ 亮色地形瓦片 + 震中 + P/S 波圈（JMA2001 走时）+ 烈度区划填色（官方 warnArea 优先） |
 | 图例 / 时钟 | ·下烈度色标；右下本地时间（可加 JST） |
 | 信息头 / 倒计时 | 当前事件；本机经纬有效时 S 波剩余秒叠在右下时钟上方 |
 | 主题 | 设置 → 显示：暗色 / 亮色（主界面色板 + auto 底图同步切换） |
@@ -58,12 +58,13 @@
 | 远·走时 | IASPEI **ak135**（回退表） |
 | 震度色 | 气象厅配色指针表２－２ |
 | 烈度色 | 按 GB/T 38226 制图规范摘录（见 `media/palette/`） |
+| 烈度区划 | 官方 `warnArea`（JMA）→ 市县三角衰减估算 → 同心环回退 |
 
 ---
 
 ## 版本
 
-当前通道：**Beta**，版本与 Cargo workspace 一致（现为 **1.3.0**）。界面展示为 `Beta x.y.z`。
+当前通道：**Beta**，版本与 Cargo workspace 一致（现为 **1.4.0**）。界面展示为 `Beta x.y.z`。
 
 | 变更性质 | 递增位 | 示例 |
 |----------|--------|------|
@@ -125,7 +126,7 @@ python tools/pack_nix.py
 
 资源根默认是可执行文件所在目录（或其上级仓库根）；也可用环境变量 `EEWVIEW_ROOT` 指定。
 
-Windows 安装包默认装到 `C:\Program Files (x86)\eew view`。本地配置 `%APPDATA%\eew view\settings.json`，运行日志同目录 `log.txt`。设置 → 高级可打开日志目录。环境变量 `RUST_LOG` 优先于配置中的等级。
+Windows 安装包默认装到 `C:\Program Files (x86)\eew view`。本地配置 `%APPDATA%\eew view\settings.json`，运行日志同目录 `log.txt`（UTF-8、令牌已脱敏）。设置 → 高级可打开日志目录。环境变量 `RUST_LOG` 优先于配置中的等级。
 
 ---
 

@@ -360,14 +360,20 @@ impl MapViewport {
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
 
-        // 烈度衰减：优先陆地三角分带（贴区划，类 Hikari 锯齿外缘）；无区划时回退同心环。
+        // 烈度区划：官方 warnArea（jp.eew）→ 市县三角衰减 → 同心环。
         // `show_intensity_rings`：由设置控制；速报另需右键预览标志。
         if show_intensity_rings {
             let ring_ev = active.filter(|e| {
-                !e.is_cancel && !e.event_id.starts_with("station:")
+                !e.is_cancel
+                    && !e.is_assumption
+                    && !e.event_id.starts_with("station:")
+                    && (e.latitude.abs() > 0.01 || e.longitude.abs() > 0.01)
             });
             if let Some(ev) = ring_ev {
-                if !self.vector.paint_intensity_regions(ui, &view, ev, true) {
+                let painted = (!ev.warn_areas.is_empty()
+                    && self.vector.paint_warn_area_regions(ui, &view, ev, true))
+                    || self.vector.paint_intensity_regions(ui, &view, ev, true);
+                if !painted {
                     overlay::paint_intensity_rings(ui, &view, ev, true);
                 }
             }

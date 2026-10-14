@@ -117,6 +117,11 @@ def check_geodata(errors: list[str]) -> None:
     ka = geo / "kanameishi"
     if not gq.is_dir() and not ka.is_dir():
         fail("geodata 缺少 globalquake/ 与 kanameishi/", errors)
+    jp_eew = geo / "eew" / "jp.eew.topo.json"
+    if not jp_eew.is_file():
+        fail("geodata 缺少 eew/jp.eew.topo.json（JMA warnArea 填色）", errors)
+    elif jp_eew.stat().st_size < 1000:
+        fail(f"jp.eew.topo.json 过小: {jp_eew.stat().st_size}", errors)
 
 
 def main() -> int:

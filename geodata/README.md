@@ -24,6 +24,7 @@ GQ Special 世界层已含调整后的中国国界（含藏南）；另叠内置
 | 3 | `globalquake/cn-prefectures.geojson` / 要石省级 | 仅当中国扫盘为空时回退；远距外轮廓溶解仍优先用一级区划 |
 
 近距区划与烈度区划填色使用地市/区县边界；烈度按耳切三角形质心估档（大区内随距离衰减，非整块一色）。
+有 JMA 官方 `warnArea` 时优先按 `eew/jp.eew.topo.json` 区划名填色，再回退市县三角 / 同心环。详见 [`eew/NOTICE.md`](eew/NOTICE.md)。
 
 要石来源：[Lipomoea/kanameishi](https://github.com/Lipomoea/kanameishi)（AGPL-3.0）。详见 [`kanameishi/README.md`](kanameishi/README.md)。  
 GQ Special 说明见 [`globalquake/README.md`](globalquake/README.md)。

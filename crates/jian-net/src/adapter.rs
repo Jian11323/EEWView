@@ -2,8 +2,8 @@
 
 use jian_core::{
     agency_family, cea_pr_agency_id, cn_intensity_text, fill_intensity, instrumental_display_text,
-    intensity_kind_for_agency, jma_from_instrumental, jma_shindo_level, AgencyId, EewReport,
-    EqRecord, IntensityKind, StationSample, TsunamiArea, TsunamiInfo,
+    intensity_kind_for_agency, jma_from_instrumental, jma_shindo_level, jma_shindo_text, AgencyId,
+    EewReport, EqRecord, IntensityKind, IntensityWarnArea, StationSample, TsunamiArea, TsunamiInfo,
 };
 use serde_json::Value;
 use tracing::debug;
@@ -52,6 +52,76 @@ fn field_f64(data: &Value, keys: &[&str]) -> Option<f64> {
         }
     }
     None
+}
+
+/// 上游「调查中 / 不明」文案（JMA 震度速报等）。
+fn is_investigating_text(s: &str) -> bool {
+    let t = s.trim();
+    matches!(
+        t,
+        "調査中"
+            | "调查中"
+            | "不明"
+            | "?"
+            | "なし"
+            | "无"
+            | "N/A"
+            | "n/a"
+            | "—"
+            | "-"
+            | "null"
+    )
+}
+
+/// 字段值为调查中文案，或无法解析为数字。
+fn field_looks_unknown(data: &Value, keys: &[&str]) -> bool {
+    for k in keys {
+        if let Some(v) = data.get(*k) {
+            match v {
+                Value::String(s) if is_investigating_text(s) => return true,
+                Value::String(s) => {
+                    let s = s.trim().trim_end_matches("km").trim_end_matches("KM").trim();
+                    if !s.is_empty() && json_f64(v).is_none() {
+                        return true;
+                    }
+                }
+                Value::Number(n) => {
+                    if n.as_f64().is_some_and(|f| f < 0.0) {
+                        return true;
+                    }
+                }
+                Value::Null => return true,
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
+/// 有震度原文时解析；震级调查中且无震度时不估算假烈度。
+fn fill_record_intensity(
+    kind: IntensityKind,
+    magnitude: f64,
+    depth_km: f64,
+    raw: Option<&str>,
+    magnitude_unknown: bool,
+) -> (String, u8) {
+    let raw_trim = raw.map(str::trim).unwrap_or("");
+    if magnitude_unknown {
+        if raw_trim.is_empty() || is_investigating_text(raw_trim) {
+            let text = if raw_trim.is_empty() {
+                "调查中".into()
+            } else if raw_trim == "調査中" {
+                "调查中".into()
+            } else {
+                raw_trim.into()
+            };
+            return (text, 0);
+        }
+        // 震度速报：最大震度已知，震级仍调查中
+        return fill_intensity(kind, magnitude, depth_km, Some(raw_trim));
+    }
+    fill_intensity(kind, magnitude, depth_km, raw)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -146,7 +216,8 @@ pub fn ingest_kmoni_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
     });
 }
 
-/// Jian `/s-net`：协议与 kmoni 相同（`stations` + `int[]`）。
+/// Jian `/s-net`：首包 `stations[]`；其后约每秒一帧 `time`+`timestamp`（对时）+ `int[]`。
+/// `time` 为资料时刻（常按分钟对齐），`timestamp` 每秒递增，用于保活/对时，勿当僵死。
 pub fn ingest_snet_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
     ingest_int_station_frame(state, tx, text, "s-net", "snet", true);
 }
@@ -316,7 +387,10 @@ pub fn ingest_jian_frame(tx: &NetTx, text: &str, cfg: Option<&jian_config::JianS
             .get("message")
             .and_then(|m| m.as_str())
             .unwrap_or("(no message)");
-        tracing::warn!(message = msg, "jian: error 帧（常见原因：同令牌/同 IP 并发已满，白名单不增加并发额度）");
+        tracing::warn!(
+            message = %jian_util::redact_secrets(msg),
+            "jian: error 帧（常见原因：同令牌/同 IP 并发已满，白名单不增加并发额度）"
+        );
         return;
     }
 
@@ -817,6 +891,11 @@ fn parse_jian_eew(agency: &str, data: &Value) -> Option<EewReport> {
     }
     let is_assumption = eew_is_assumption(data, &place);
     let is_warn = eew_is_warn(data, intensity_level, kind);
+    let warn_areas = if matches!(kind, IntensityKind::JmaShindo) && !is_cancel {
+        parse_jma_warn_areas(data)
+    } else {
+        Vec::new()
+    };
 
     Some(EewReport {
         agency: AgencyId(agency.clone()),
@@ -836,7 +915,104 @@ fn parse_jian_eew(agency: &str, data: &Value) -> Option<EewReport> {
         is_assumption,
         is_warn,
         final_at_ms: 0,
+        warn_areas,
     })
+}
+
+/// 解析 JMA 官方预报分区（Wolfx `WarnArea` / Jian `warnArea`）。
+/// 仅保留有区域名且能解析出震度档的项；缺字段不补假值。
+fn parse_jma_warn_areas(data: &Value) -> Vec<IntensityWarnArea> {
+    let raw = data
+        .get("WarnArea")
+        .or_else(|| data.get("warnArea"))
+        .or_else(|| data.get("warn_area"));
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+    let parsed_string;
+    let arr: &[Value] = match raw {
+        Value::Array(a) => a.as_slice(),
+        Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() || t == "[]" {
+                return Vec::new();
+            }
+            parsed_string = serde_json::from_str::<Value>(t).ok();
+            match parsed_string.as_ref() {
+                Some(Value::Array(a)) => a.as_slice(),
+                _ => return Vec::new(),
+            }
+        }
+        _ => return Vec::new(),
+    };
+    let mut best: std::collections::HashMap<String, IntensityWarnArea> =
+        std::collections::HashMap::new();
+    for item in arr {
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
+        let name = obj
+            .get("Chiiki")
+            .or_else(|| obj.get("name"))
+            .or_else(|| obj.get("Name"))
+            .or_else(|| obj.get("addr"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let Some(name) = name else {
+            continue;
+        };
+        let intensity_raw = obj
+            .get("Shindo1")
+            .or_else(|| obj.get("intensity"))
+            .or_else(|| obj.get("Intensity"))
+            .or_else(|| obj.get("shindo"))
+            .or_else(|| obj.get("maxIntensity"));
+        let intensity_text = match intensity_raw {
+            Some(Value::String(s)) => s.trim().to_string(),
+            Some(Value::Number(n)) => n
+                .as_i64()
+                .map(|i| i.to_string())
+                .or_else(|| n.as_f64().map(|f| format!("{f}")))
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        let intensity_text = intensity_text.trim().to_string();
+        if intensity_text.is_empty()
+            || intensity_text == "?"
+            || intensity_text == "不明"
+            || intensity_text == "なし"
+            || intensity_text == "无"
+        {
+            continue;
+        }
+        let level = jma_shindo_level(&intensity_text);
+        let explicit_zero = {
+            let t = intensity_text
+                .replace('弱', "-")
+                .replace('強', "+")
+                .replace('强', "+");
+            matches!(t.as_str(), "0" | "０") || t.parse::<i32>().ok() == Some(0)
+        };
+        if level == 0 && !explicit_zero {
+            continue;
+        }
+        let display = jma_shindo_text(level).to_string();
+        let area = IntensityWarnArea {
+            name: name.clone(),
+            intensity_text: display,
+            level,
+        };
+        match best.get(&name) {
+            Some(prev) if prev.level >= level => {}
+            _ => {
+                best.insert(name, area);
+            }
+        }
+    }
+    let mut out: Vec<_> = best.into_values().collect();
+    out.sort_by(|a, b| b.level.cmp(&a.level).then_with(|| a.name.cmp(&b.name)));
+    out
 }
 
 /// Wolfx/JMA：仮定震源 / PLUM / 调查中。
@@ -932,36 +1108,47 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
     if info_type.contains("取消") {
         return None;
     }
-    let place = data
+    let place_raw = data
         .get("placeName")
         .or_else(|| data.get("location"))
         .or_else(|| data.get("place"))
         .or_else(|| data.get("Place"))
-        .and_then(|v| v.as_str())?
-        .to_string();
-    let hypo_unknown = flag_true(data, &["hypocenterUnknown", "hypocenter_unknown"]);
-    let mag_unknown = flag_true(data, &["magnitudeUnknown", "magnitude_unknown"]);
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let hypo_unknown = flag_true(data, &["hypocenterUnknown", "hypocenter_unknown"])
+        || field_looks_unknown(data, &["latitude", "Latitude", "longitude", "Longitude"])
+        || place_raw
+            .as_deref()
+            .is_some_and(|p| is_investigating_text(p) || p.contains("調査中") || p.contains("调查中"));
+    let mag_unknown = flag_true(data, &["magnitudeUnknown", "magnitude_unknown"])
+        || field_looks_unknown(data, &["magnitude", "Magnitude", "Magunitude"]);
     let magnitude = match field_f64(data, &["magnitude", "Magnitude", "Magunitude"]) {
-        Some(m) if m > 0.0 || !mag_unknown => m,
+        Some(m) if m >= 0.0 && !mag_unknown => m,
         Some(_) if mag_unknown => 0.0,
         None if mag_unknown || hypo_unknown => 0.0,
         _ => return None,
     };
     let latitude = match field_f64(data, &["latitude", "Latitude"]) {
-        Some(v) if v.abs() > 0.01 || !hypo_unknown => v,
-        Some(_) if hypo_unknown => 0.0,
-        None if hypo_unknown => 0.0,
+        Some(v) if !hypo_unknown => v,
+        _ if hypo_unknown => 0.0,
         _ => return None,
     };
     let longitude = match field_f64(data, &["longitude", "Longitude"]) {
-        Some(v) if v.abs() > 0.01 || !hypo_unknown => v,
-        Some(_) if hypo_unknown => 0.0,
-        None if hypo_unknown => 0.0,
+        Some(v) if !hypo_unknown => v,
+        _ if hypo_unknown => 0.0,
         _ => return None,
     };
     let depth_km = match field_f64(data, &["depth", "Depth"]) {
+        Some(v) if v >= 0.0 && !hypo_unknown => v,
+        _ if hypo_unknown => 0.0,
         Some(v) => v,
-        None if hypo_unknown => 0.0,
+        None => return None,
+    };
+    let place = match place_raw {
+        Some(p) if !is_investigating_text(&p) => p,
+        _ if hypo_unknown => "调查中".into(),
+        Some(p) => p,
         None => return None,
     };
     let origin_ms = data
@@ -975,7 +1162,7 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
     let kind = intensity_kind_for_agency(agency);
     let raw = json_intensity_raw(data, &["maxIntensity", "intensity", "MaxIntensity"]);
     let (intensity_text, intensity_level) =
-        fill_intensity(kind, magnitude, depth_km, raw.as_deref());
+        fill_record_intensity(kind, magnitude, depth_km, raw.as_deref(), mag_unknown);
     let is_auto = cenc_is_auto(agency, data);
 
     Some(EqRecord {
@@ -991,6 +1178,8 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
         depth_km,
         origin_ms,
         is_auto,
+        magnitude_unknown: mag_unknown,
+        hypocenter_unknown: hypo_unknown,
     })
 }
 
@@ -1146,6 +1335,11 @@ fn emit_wolfx_eew(tx: &NetTx, v: &Value, agency: &str) {
 
     let is_assumption = eew_is_assumption(v, &place);
     let is_warn = eew_is_warn(v, intensity_level, kind);
+    let warn_areas = if matches!(kind, IntensityKind::JmaShindo) && !is_cancel {
+        parse_jma_warn_areas(v)
+    } else {
+        Vec::new()
+    };
     let _ = tx.send(NetEvent::Eew(EewReport {
         agency: AgencyId(agency.into()),
         event_id,
@@ -1164,6 +1358,7 @@ fn emit_wolfx_eew(tx: &NetTx, v: &Value, agency: &str) {
         is_assumption,
         is_warn,
         final_at_ms: 0,
+        warn_areas,
     }));
 }
 
@@ -1264,31 +1459,52 @@ fn ingest_wolfx_cenc_eqlist_value(tx: &NetTx, v: &Value) {
             depth_km,
             origin_ms,
             is_auto,
+            magnitude_unknown: false,
+            hypocenter_unknown: false,
         }));
     }
 }
 
 fn ingest_wolfx_jma_eqlist_value(tx: &NetTx, v: &Value) {
     for item in wolfx_eqlist_items(v).into_iter().take(50) {
-        let place = item
+        let place_raw = item
             .get("location")
             .or_else(|| item.get("place"))
             .or_else(|| item.get("Hypocenter"))
             .and_then(|x| x.as_str())
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "\u{2014}".into());
-        let Some(magnitude) = field_f64(item, &["magnitude", "Magnitude"]) else {
-            continue;
+            .filter(|s| !s.is_empty());
+        let mag_unknown = field_looks_unknown(item, &["magnitude", "Magnitude"]);
+        let hypo_unknown = field_looks_unknown(item, &["latitude", "Latitude", "longitude", "Longitude"])
+            || place_raw
+                .as_deref()
+                .is_some_and(|p| is_investigating_text(p) || p.contains("調査中") || p.contains("调查中"));
+        let magnitude = match field_f64(item, &["magnitude", "Magnitude"]) {
+            Some(m) if m >= 0.0 && !mag_unknown => m,
+            _ if mag_unknown || hypo_unknown => 0.0,
+            _ => continue,
         };
-        let Some(latitude) = field_f64(item, &["latitude", "Latitude"]) else {
-            continue;
+        let latitude = match field_f64(item, &["latitude", "Latitude"]) {
+            Some(v) if !hypo_unknown => v,
+            _ if hypo_unknown => 0.0,
+            _ => continue,
         };
-        let Some(longitude) = field_f64(item, &["longitude", "Longitude"]) else {
-            continue;
+        let longitude = match field_f64(item, &["longitude", "Longitude"]) {
+            Some(v) if !hypo_unknown => v,
+            _ if hypo_unknown => 0.0,
+            _ => continue,
         };
-        let Some(depth_km) = field_f64(item, &["depth", "Depth"]) else {
-            continue;
+        let depth_km = match field_f64(item, &["depth", "Depth"]) {
+            Some(v) if v >= 0.0 && !hypo_unknown => v,
+            _ if hypo_unknown => 0.0,
+            Some(v) => v,
+            None => continue,
+        };
+        let place = match place_raw {
+            Some(p) if !is_investigating_text(&p) => p,
+            _ if hypo_unknown => "调查中".into(),
+            Some(p) => p,
+            None => "\u{2014}".into(),
         };
         let origin_ms = item
             .get("time")
@@ -1308,11 +1524,25 @@ fn ingest_wolfx_jma_eqlist_value(tx: &NetTx, v: &Value) {
             .unwrap_or_else(|| "\u{2014}".into());
 
         let raw = json_intensity_raw(item, &["shindo", "MaxIntensity", "intensity"]);
-        let (intensity_text, intensity_level) = fill_intensity(
+        // 无震度且震级/震源皆调查中：仍入库（震度速报占位），不丢弃
+        if mag_unknown
+            && hypo_unknown
+            && raw
+                .as_deref()
+                .map(|s| s.trim().is_empty() || is_investigating_text(s))
+                .unwrap_or(true)
+        {
+            // 至少要有发震时刻，否则无展示价值
+            if origin_ms <= 0 {
+                continue;
+            }
+        }
+        let (intensity_text, intensity_level) = fill_record_intensity(
             IntensityKind::JmaShindo,
             magnitude,
             depth_km,
             raw.as_deref(),
+            mag_unknown,
         );
 
         let _ = tx.send(NetEvent::Record(EqRecord {
@@ -1328,6 +1558,8 @@ fn ingest_wolfx_jma_eqlist_value(tx: &NetTx, v: &Value) {
             depth_km,
             origin_ms,
             is_auto: false,
+            magnitude_unknown: mag_unknown,
+            hypocenter_unknown: hypo_unknown,
         }));
     }
 }
@@ -1360,26 +1592,57 @@ pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
         let Some(hypo) = eq.get("hypocenter") else {
             continue;
         };
-        let place = hypo.get("name").and_then(|x| x.as_str()).unwrap_or("—");
-        let Some(latitude) = field_f64(hypo, &["latitude", "Latitude"]) else {
-            continue;
+        // P2P：震源缺测 lat/lon=-200、depth=-1、magnitude=-1（震度速报等）
+        let lat_raw = field_f64(hypo, &["latitude", "Latitude"]).unwrap_or(-200.0);
+        let lon_raw = field_f64(hypo, &["longitude", "Longitude"]).unwrap_or(-200.0);
+        let mag_raw = field_f64(hypo, &["magnitude", "Magnitude"]).unwrap_or(-1.0);
+        let depth_raw = field_f64(hypo, &["depth", "Depth"]).unwrap_or(-1.0);
+        let hypo_unknown = lat_raw <= -180.0 || lon_raw <= -180.0;
+        let mag_unknown = mag_raw < 0.0;
+        let depth_unknown = depth_raw < 0.0;
+        let latitude = if hypo_unknown { 0.0 } else { lat_raw };
+        let longitude = if hypo_unknown { 0.0 } else { lon_raw };
+        let magnitude = if mag_unknown { 0.0 } else { mag_raw };
+        let depth_km = if hypo_unknown || depth_unknown {
+            0.0
+        } else {
+            depth_raw
         };
-        let Some(longitude) = field_f64(hypo, &["longitude", "Longitude"]) else {
-            continue;
-        };
-        let Some(magnitude) = field_f64(hypo, &["magnitude", "Magnitude"]) else {
-            continue;
-        };
-        let Some(depth_km) = field_f64(hypo, &["depth", "Depth"]) else {
-            continue;
+        let place_raw = hypo
+            .get("name")
+            .and_then(|x| x.as_str())
+            .map(|s| s.trim())
+            .unwrap_or("");
+        let place = if place_raw.is_empty() || is_investigating_text(place_raw) {
+            if hypo_unknown {
+                "调查中"
+            } else if place_raw.is_empty() {
+                "\u{2014}"
+            } else {
+                place_raw
+            }
+        } else {
+            place_raw
         };
         let max_scale = eq.get("maxScale").and_then(|x| x.as_i64());
-        let (intensity_text, level) = if let Some(scale) = max_scale {
-            let t = jian_core::jma_shindo_text(jma_shindo_level(&scale.to_string()));
-            fill_intensity(IntensityKind::JmaShindo, magnitude, depth_km, Some(t))
-        } else {
-            fill_intensity(IntensityKind::JmaShindo, magnitude, depth_km, None)
-        };
+        // 无震源、无震级、无有效震度：丢弃
+        if hypo_unknown && mag_unknown && max_scale.filter(|&s| s > 0).is_none() {
+            continue;
+        }
+        let raw_intensity = max_scale.and_then(|scale| {
+            if scale <= 0 {
+                None
+            } else {
+                Some(jian_core::jma_shindo_text(jma_shindo_level(&scale.to_string())).to_string())
+            }
+        });
+        let (intensity_text, level) = fill_record_intensity(
+            IntensityKind::JmaShindo,
+            magnitude,
+            depth_km,
+            raw_intensity.as_deref(),
+            mag_unknown,
+        );
         let origin_ms = eq
             .get("time")
             .and_then(|x| x.as_str())
@@ -1393,7 +1656,7 @@ pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
                     .map(format_time_text)
                     .unwrap_or_else(|| s.to_string())
             })
-            .unwrap_or_else(|| "—".into());
+            .unwrap_or_else(|| "\u{2014}".into());
 
         let _ = tx.send(NetEvent::Record(EqRecord {
             agency: AgencyId("p2pquake".into()),
@@ -1408,6 +1671,8 @@ pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
             depth_km,
             origin_ms,
             is_auto: false,
+            magnitude_unknown: mag_unknown,
+            hypocenter_unknown: hypo_unknown,
         }));
     }
 }
@@ -1658,6 +1923,7 @@ fn ingest_pancakes_gq(tx: &NetTx, action: &str, payload: &Value, min_mag: f64) {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
+            warn_areas: Vec::new(),
         }));
         return;
     }
@@ -1723,6 +1989,7 @@ fn ingest_pancakes_gq(tx: &NetTx, action: &str, payload: &Value, min_mag: f64) {
         is_assumption: false,
         is_warn: false,
         final_at_ms: 0,
+            warn_areas: Vec::new(),
     }));
 }
 
@@ -1867,6 +2134,32 @@ mod tests {
         assert!(rec.origin_ms > 0, "CENC time must parse to origin_ms");
         // 2026-10-10 12:14:01 CST
         assert_eq!(rec.origin_ms, 1_791_605_641_000);
+    }
+
+    #[test]
+    fn snet_accepts_1hz_time_sync_intensity_frame() {
+        // 实况形状：首包 stations；其后每秒 time+timestamp+int（对时帧兼强度）
+        let mut state = KmoniState::default();
+        let (tx, mut rx) = channel();
+        ingest_snet_frame(
+            &mut state,
+            &tx,
+            r#"{"type":"s-net","timestamp":1,"stations":[{"code":"A","name":"a","lat":35.0,"lon":139.0},{"code":"B","name":"b","lat":36.0,"lon":140.0}],"source":"s-net"}"#,
+        );
+        assert!(rx.try_recv().is_err(), "meta-only must not emit Stations");
+        ingest_snet_frame(
+            &mut state,
+            &tx,
+            r#"{"type":"s-net","time":"20261014084800","timestamp":1791967763000,"int":[-1.3,-4.0],"source":"s-net"}"#,
+        );
+        let NetEvent::Stations { network, list } = rx.try_recv().expect("stations") else {
+            panic!("expected Stations");
+        };
+        assert_eq!(network, "snet");
+        // -1.3 有感档；-4.0 缺测跳过
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "A");
+        assert!((list[0].instrumental - (-1.3)).abs() < 1e-9);
     }
 
     #[test]
@@ -2024,6 +2317,26 @@ mod tests {
     }
 
     #[test]
+    fn jma_warn_areas_from_wolfx_chiiki() {
+        let v = serde_json::json!({
+            "WarnArea": [
+                {"Chiiki": "石狩地方北部", "Shindo1": "5弱"},
+                {"Chiiki": "石狩地方北部", "Shindo1": "4"},
+                {"Chiiki": "渡島地方北部", "Shindo1": "3"},
+                {"Chiiki": "", "Shindo1": "5強"},
+                {"Chiiki": "不明区", "Shindo1": "不明"}
+            ]
+        });
+        let areas = parse_jma_warn_areas(&v);
+        assert_eq!(areas.len(), 2);
+        assert_eq!(areas[0].name, "石狩地方北部");
+        assert_eq!(areas[0].level, 5);
+        assert_eq!(areas[0].intensity_text, "5弱");
+        assert_eq!(areas[1].name, "渡島地方北部");
+        assert_eq!(areas[1].level, 3);
+    }
+
+    #[test]
     fn jian_eew_skips_training_and_maps_plum() {
         let body = r#"{
             "type": "jma-eew",
@@ -2059,6 +2372,65 @@ mod tests {
         };
         assert!(e.is_assumption);
         assert_eq!(e.event_id, "202610120001");
+    }
+
+    #[test]
+    fn jian_record_investigating_keeps_intensity() {
+        let body = r#"{
+            "type": "jma",
+            "Data": {
+                "id": "20261014120000",
+                "originTime": "2026-10-14T12:00:00+09:00",
+                "latitude": 0,
+                "longitude": 0,
+                "depth": 0,
+                "magnitude": 0,
+                "placeName": "調査中",
+                "intensity": "4",
+                "infoType": "発表",
+                "hypocenterUnknown": true,
+                "magnitudeUnknown": true
+            }
+        }"#;
+        let (tx, mut rx) = channel();
+        ingest_jian_frame(&tx, body, None);
+        let NetEvent::Record(rec) = rx.try_recv().expect("record") else {
+            panic!("expected Record");
+        };
+        assert!(rec.magnitude_unknown);
+        assert!(rec.hypocenter_unknown);
+        assert!(!rec.has_map_coord());
+        assert_eq!(rec.intensity_text, "4");
+        assert_eq!(rec.intensity_level, 4);
+        assert_eq!(rec.place, "调查中");
+        assert_eq!(rec.magnitude_label(), "调查中");
+    }
+
+    #[test]
+    fn p2p_scale_prompt_investigating_hypocenter() {
+        let body = r#"[{
+            "code": 551,
+            "earthquake": {
+                "time": "2026/10/14 12:00:00",
+                "maxScale": 40,
+                "hypocenter": {
+                    "name": "",
+                    "latitude": -200,
+                    "longitude": -200,
+                    "depth": -1,
+                    "magnitude": -1
+                }
+            }
+        }]"#;
+        let (tx, mut rx) = channel();
+        ingest_p2p_items(&tx, body);
+        let NetEvent::Record(rec) = rx.try_recv().expect("record") else {
+            panic!("expected Record");
+        };
+        assert!(rec.hypocenter_unknown);
+        assert!(rec.magnitude_unknown);
+        assert_eq!(rec.intensity_text, "4");
+        assert_eq!(rec.place, "调查中");
     }
 
     #[test]

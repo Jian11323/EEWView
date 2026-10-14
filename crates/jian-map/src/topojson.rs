@@ -31,22 +31,47 @@ struct TopoGeometry {
     #[serde(rename = "type")]
     geom_type: String,
     arcs: Option<Value>,
+    #[serde(default)]
+    properties: Option<TopoProps>,
+}
+
+#[derive(Deserialize)]
+struct TopoProps {
+    #[serde(default)]
+    name: Option<String>,
 }
 
 /// 解析要石风格 TopoJSON，返回 `(exterior, holes)[]`，坐标为经纬。
 pub fn load_region_polygons(
     text: &str,
 ) -> Result<Vec<(Vec<[f32; 2]>, Vec<Vec<[f32; 2]>>)>, String> {
+    Ok(load_named_region_polygons(text)?
+        .into_iter()
+        .map(|(_, exterior, holes)| (exterior, holes))
+        .collect())
+}
+
+/// 带 `properties.name` 的区划多边形（JMA EEW 预报区等）。
+/// 返回 `(name, exterior, holes)`；无名几何 `name` 为空串。
+pub fn load_named_region_polygons(
+    text: &str,
+) -> Result<Vec<(String, Vec<[f32; 2]>, Vec<Vec<[f32; 2]>>)>, String> {
     let topo: Topology = serde_json::from_str(text).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for geom in &topo.objects.region.geometries {
+        let name = geom
+            .properties
+            .as_ref()
+            .and_then(|p| p.name.as_ref())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
         let Some(arcs) = geom.arcs.as_ref() else {
             continue;
         };
         match geom.geom_type.as_str() {
             "Polygon" => {
-                if let Some(r) = polygon_from_arcs(arcs, &topo) {
-                    out.push(r);
+                if let Some((exterior, holes)) = polygon_from_arcs(arcs, &topo) {
+                    out.push((name, exterior, holes));
                 }
             }
             "MultiPolygon" => {
@@ -54,8 +79,8 @@ pub fn load_region_polygons(
                     continue;
                 };
                 for poly in polys {
-                    if let Some(r) = polygon_from_arcs(poly, &topo) {
-                        out.push(r);
+                    if let Some((exterior, holes)) = polygon_from_arcs(poly, &topo) {
+                        out.push((name.clone(), exterior, holes));
                     }
                 }
             }
