@@ -2,8 +2,8 @@
 
 use jian_core::{
     agency_family, cea_pr_agency_id, cn_intensity_text, fill_intensity, instrumental_display_text,
-    intensity_kind_for_agency, jma_from_instrumental, jma_shindo_level, jma_shindo_text, AgencyId,
-    EewReport, EqRecord, IntensityKind, IntensityWarnArea, StationSample, TsunamiArea, TsunamiInfo,
+    intensity_kind_for_agency, jma_from_instrumental, jma_shindo_level, AgencyId,
+    EewReport, EqRecord, IntensityKind, StationSample, TsunamiArea, TsunamiInfo,
 };
 use serde_json::Value;
 use tracing::debug;
@@ -891,12 +891,6 @@ fn parse_jian_eew(agency: &str, data: &Value) -> Option<EewReport> {
     }
     let is_assumption = eew_is_assumption(data, &place);
     let is_warn = eew_is_warn(data, intensity_level, kind);
-    let warn_areas = if matches!(kind, IntensityKind::JmaShindo) && !is_cancel {
-        parse_jma_warn_areas(data)
-    } else {
-        Vec::new()
-    };
-
     Some(EewReport {
         agency: AgencyId(agency.clone()),
         event_id,
@@ -915,104 +909,7 @@ fn parse_jian_eew(agency: &str, data: &Value) -> Option<EewReport> {
         is_assumption,
         is_warn,
         final_at_ms: 0,
-        warn_areas,
     })
-}
-
-/// 解析 JMA 官方预报分区（Wolfx `WarnArea` / Jian `warnArea`）。
-/// 仅保留有区域名且能解析出震度档的项；缺字段不补假值。
-fn parse_jma_warn_areas(data: &Value) -> Vec<IntensityWarnArea> {
-    let raw = data
-        .get("WarnArea")
-        .or_else(|| data.get("warnArea"))
-        .or_else(|| data.get("warn_area"));
-    let Some(raw) = raw else {
-        return Vec::new();
-    };
-    let parsed_string;
-    let arr: &[Value] = match raw {
-        Value::Array(a) => a.as_slice(),
-        Value::String(s) => {
-            let t = s.trim();
-            if t.is_empty() || t == "[]" {
-                return Vec::new();
-            }
-            parsed_string = serde_json::from_str::<Value>(t).ok();
-            match parsed_string.as_ref() {
-                Some(Value::Array(a)) => a.as_slice(),
-                _ => return Vec::new(),
-            }
-        }
-        _ => return Vec::new(),
-    };
-    let mut best: std::collections::HashMap<String, IntensityWarnArea> =
-        std::collections::HashMap::new();
-    for item in arr {
-        let Some(obj) = item.as_object() else {
-            continue;
-        };
-        let name = obj
-            .get("Chiiki")
-            .or_else(|| obj.get("name"))
-            .or_else(|| obj.get("Name"))
-            .or_else(|| obj.get("addr"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-        let Some(name) = name else {
-            continue;
-        };
-        let intensity_raw = obj
-            .get("Shindo1")
-            .or_else(|| obj.get("intensity"))
-            .or_else(|| obj.get("Intensity"))
-            .or_else(|| obj.get("shindo"))
-            .or_else(|| obj.get("maxIntensity"));
-        let intensity_text = match intensity_raw {
-            Some(Value::String(s)) => s.trim().to_string(),
-            Some(Value::Number(n)) => n
-                .as_i64()
-                .map(|i| i.to_string())
-                .or_else(|| n.as_f64().map(|f| format!("{f}")))
-                .unwrap_or_default(),
-            _ => String::new(),
-        };
-        let intensity_text = intensity_text.trim().to_string();
-        if intensity_text.is_empty()
-            || intensity_text == "?"
-            || intensity_text == "不明"
-            || intensity_text == "なし"
-            || intensity_text == "无"
-        {
-            continue;
-        }
-        let level = jma_shindo_level(&intensity_text);
-        let explicit_zero = {
-            let t = intensity_text
-                .replace('弱', "-")
-                .replace('強', "+")
-                .replace('强', "+");
-            matches!(t.as_str(), "0" | "０") || t.parse::<i32>().ok() == Some(0)
-        };
-        if level == 0 && !explicit_zero {
-            continue;
-        }
-        let display = jma_shindo_text(level).to_string();
-        let area = IntensityWarnArea {
-            name: name.clone(),
-            intensity_text: display,
-            level,
-        };
-        match best.get(&name) {
-            Some(prev) if prev.level >= level => {}
-            _ => {
-                best.insert(name, area);
-            }
-        }
-    }
-    let mut out: Vec<_> = best.into_values().collect();
-    out.sort_by(|a, b| b.level.cmp(&a.level).then_with(|| a.name.cmp(&b.name)));
-    out
 }
 
 /// Wolfx/JMA：仮定震源 / PLUM / 调查中。
@@ -1335,11 +1232,6 @@ fn emit_wolfx_eew(tx: &NetTx, v: &Value, agency: &str) {
 
     let is_assumption = eew_is_assumption(v, &place);
     let is_warn = eew_is_warn(v, intensity_level, kind);
-    let warn_areas = if matches!(kind, IntensityKind::JmaShindo) && !is_cancel {
-        parse_jma_warn_areas(v)
-    } else {
-        Vec::new()
-    };
     let _ = tx.send(NetEvent::Eew(EewReport {
         agency: AgencyId(agency.into()),
         event_id,
@@ -1358,7 +1250,6 @@ fn emit_wolfx_eew(tx: &NetTx, v: &Value, agency: &str) {
         is_assumption,
         is_warn,
         final_at_ms: 0,
-        warn_areas,
     }));
 }
 
@@ -1923,7 +1814,6 @@ fn ingest_pancakes_gq(tx: &NetTx, action: &str, payload: &Value, min_mag: f64) {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
-            warn_areas: Vec::new(),
         }));
         return;
     }
@@ -1989,7 +1879,6 @@ fn ingest_pancakes_gq(tx: &NetTx, action: &str, payload: &Value, min_mag: f64) {
         is_assumption: false,
         is_warn: false,
         final_at_ms: 0,
-            warn_areas: Vec::new(),
     }));
 }
 
@@ -2314,26 +2203,6 @@ mod tests {
             http_eqlist: String::new(),
         });
         assert!(rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn jma_warn_areas_from_wolfx_chiiki() {
-        let v = serde_json::json!({
-            "WarnArea": [
-                {"Chiiki": "石狩地方北部", "Shindo1": "5弱"},
-                {"Chiiki": "石狩地方北部", "Shindo1": "4"},
-                {"Chiiki": "渡島地方北部", "Shindo1": "3"},
-                {"Chiiki": "", "Shindo1": "5強"},
-                {"Chiiki": "不明区", "Shindo1": "不明"}
-            ]
-        });
-        let areas = parse_jma_warn_areas(&v);
-        assert_eq!(areas.len(), 2);
-        assert_eq!(areas[0].name, "石狩地方北部");
-        assert_eq!(areas[0].level, 5);
-        assert_eq!(areas[0].intensity_text, "5弱");
-        assert_eq!(areas[1].name, "渡島地方北部");
-        assert_eq!(areas[1].level, 3);
     }
 
     #[test]

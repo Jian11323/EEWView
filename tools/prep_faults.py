@@ -1,7 +1,16 @@
 # -*- coding: utf-8 -*-
-"""下载并简化活动断层 GeoJSON 到 geodata/faults/。"""
+"""下载并简化活动断层 GeoJSON 到 geodata/faults/。
+
+产出：
+- `*_active_faults.geojson`：全部分段（近距 fine）
+- `*_active_faults_lod0.geojson`：长断层（远距）
+- `*_active_faults_lod1.geojson`：中等断层（中距）
+
+也可对已有 fine 只生成 LOD：`python tools/prep_faults.py --lod-only`
+"""
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import re
@@ -18,6 +27,10 @@ GEM_URL = (
 CN_URL = (
     "https://raw.githubusercontent.com/gmt-china/china-geospatial-data/main/CN-faults.gmt"
 )
+
+# 与 jian-map fault_lines 阈值对齐
+LOD0_MIN_DIAG = 1.0
+LOD1_MIN_DIAG = 0.28
 
 
 def download(url: str, dest: Path) -> None:
@@ -115,6 +128,14 @@ def extract_lines(geom: dict) -> list[list[list[float]]]:
     return []
 
 
+def line_diag(coords: list[list[float]]) -> float:
+    if len(coords) < 2:
+        return 0.0
+    xs = [p[0] for p in coords]
+    ys = [p[1] for p in coords]
+    return math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+
+
 def slim_collection(features: list[dict], tol: float, source: str) -> dict:
     out = []
     n_in = n_pts_in = n_pts_out = 0
@@ -147,8 +168,80 @@ def write_fc(path: Path, fc: dict) -> None:
     print(f"wrote {path} ({path.stat().st_size} bytes)")
 
 
+def emit_lod_from_fine(fine_path: Path, stem: str, source: str) -> None:
+    """从 fine FeatureCollection 写出互斥 lod0/lod1（lod2 即 fine 全量）。"""
+    fc = json.loads(fine_path.read_text(encoding="utf-8"))
+    feats = fc.get("features") or []
+    lod0, lod1 = [], []
+    for f in feats:
+        geom = f.get("geometry") or {}
+        lines = extract_lines(geom)
+        if not lines:
+            continue
+        # 取最长一段代表 diag
+        best = max(lines, key=lambda ln: line_diag(ln))
+        diag = line_diag(best)
+        props = dict(f.get("properties") or {})
+        props["src"] = source
+        if diag >= LOD0_MIN_DIAG:
+            slim = simplify_line(
+                [[float(p[0]), float(p[1])] for p in best if len(p) >= 2], 0.05
+            )
+            if len(slim) >= 2:
+                lod0.append(
+                    {
+                        "type": "Feature",
+                        "properties": props,
+                        "geometry": {"type": "LineString", "coordinates": slim},
+                    }
+                )
+        elif diag >= LOD1_MIN_DIAG:
+            slim = simplify_line(
+                [[float(p[0]), float(p[1])] for p in best if len(p) >= 2], 0.02
+            )
+            if len(slim) >= 2:
+                lod1.append(
+                    {
+                        "type": "Feature",
+                        "properties": props,
+                        "geometry": {"type": "LineString", "coordinates": slim},
+                    }
+                )
+    write_fc(
+        FAULTS / f"{stem}_lod0.geojson",
+        {"type": "FeatureCollection", "features": lod0},
+    )
+    write_fc(
+        FAULTS / f"{stem}_lod1.geojson",
+        {"type": "FeatureCollection", "features": lod1},
+    )
+    print(f"{stem} lod: lod0={len(lod0)} lod1={len(lod1)} fine={len(feats)}")
+
+
+def emit_all_lod() -> None:
+    emit_lod_from_fine(
+        FAULTS / "global_active_faults.geojson", "global_active_faults", "gem"
+    )
+    emit_lod_from_fine(
+        FAULTS / "china_active_faults.geojson", "china_active_faults", "cn"
+    )
+
+
 def main() -> None:
+    ap = argparse.ArgumentParser(description="Prepare active fault GeoJSON + LOD")
+    ap.add_argument(
+        "--lod-only",
+        action="store_true",
+        help="只从已有 fine GeoJSON 生成 lod0/lod1，不下载上游",
+    )
+    args = ap.parse_args()
     FAULTS.mkdir(parents=True, exist_ok=True)
+
+    if args.lod_only:
+        emit_all_lod()
+        print("done (lod-only)")
+        return
+
     raw_gem = FAULTS / "_raw_gem_active_faults.geojson"
     raw_cn = FAULTS / "_raw_CN-faults.gmt"
 
@@ -168,6 +261,7 @@ def main() -> None:
 
     raw_gem.unlink(missing_ok=True)
     raw_cn.unlink(missing_ok=True)
+    emit_all_lod()
     print("done (raw intermediates removed)")
 
 

@@ -88,9 +88,6 @@ pub struct UiConfig {
     /// 绘制 P/S 走时波圈
     #[serde(default = "default_true")]
     pub show_wave_rings: bool,
-    /// 绘制烈度区划：官方 warnArea 优先，否则市级三角衰减，再回退同心环
-    #[serde(default = "default_false")]
-    pub show_intensity_rings: bool,
     /// 地图左下角烈度图例
     #[serde(default = "default_true")]
     pub show_legend: bool,
@@ -690,7 +687,6 @@ impl Default for AppConfig {
                 auto_follow_eew: true,
                 auto_zoom_waves: true,
                 show_wave_rings: true,
-                show_intensity_rings: false,
                 show_legend: true,
                 show_volcanoes: true,
                 show_typhoons: true,

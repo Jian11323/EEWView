@@ -14,7 +14,7 @@ use egui::{Color32, FontFamily, FontId, Frame, Margin, RichText, Sense, Stroke, 
 use intensity_icons::IntensityIcons;
 use jian_core::palette::color_for;
 use jian_core::{
-    agency_bracket, eew_sidebar_entries, eew_wave_active_spread, intensity_rings,
+    agency_bracket, eew_sidebar_entries, eew_wave_active_spread,
     is_wave_candidate, max_s_spread_km, place_with_agency, prefer_intensity_scale, AppSnapshot,
     EewReport, IntensityKind, ListSelection, OverlayMode, SidebarTab,
 };
@@ -91,8 +91,6 @@ pub struct MainShell {
     pub show_nied_clock: bool,
     pub intensity_scale: String,
     pub settings: SettingsSession,
-    /// 速报右键：为当前选中速报绘制衰减烈度区划填色（仍受 `ui.show_intensity_rings` 约束）
-    pub record_intensity_rings: bool,
     intensity_icons: IntensityIcons,
 }
 
@@ -109,7 +107,6 @@ impl Default for MainShell {
             show_nied_clock: false,
             intensity_scale: "auto".into(),
             settings: SettingsSession::default(),
-            record_intensity_rings: false,
             intensity_icons: IntensityIcons::default(),
         }
     }
@@ -181,16 +178,8 @@ impl MainShell {
         self.map_elapsed += ctx.input(|i| i.stable_dt) as f64;
         let now_ms = chrono::Utc::now().timestamp_millis();
         snap.show_wave_rings = cfg.ui.show_wave_rings;
-        snap.show_intensity_rings = cfg.ui.show_intensity_rings;
         // 多震：只要仍有未取消的传播中事件就画波圈（不因当前选中项取消而全灭）
         let show_waves = snap.overlay_mode == OverlayMode::Wave && snap.show_wave_rings;
-        // 预警跟设置；速报需设置开启且右键预览
-        let active_is_record = snap
-            .active
-            .as_ref()
-            .is_some_and(|e| e.event_id.starts_with("record:"));
-        let show_intensity_rings = snap.show_intensity_rings
-            && (!active_is_record || self.record_intensity_rings);
         let scale = self.intensity_scale.clone();
 
         let live_refs =
@@ -231,7 +220,6 @@ impl MainShell {
                     scale.as_str(),
                     &self.intensity_icons,
                     cfg.ui.show_volcanoes,
-                    cfg.ui.show_intensity_rings,
                     [
                         cfg.sources.jian.enabled,
                         cfg.sources.wolfx.enabled,
@@ -279,7 +267,6 @@ impl MainShell {
                     travel,
                     now_ms,
                     show_waves,
-                    show_intensity_rings,
                     &snap.stations,
                     &snap.records,
                     volcanoes_for_map,
@@ -363,11 +350,6 @@ impl MainShell {
         if let Some(act) = side_action {
             match act {
                 SideAction::List(tab, idx) => {
-                    if tab == SidebarTab::Records {
-                        self.record_intensity_rings = false;
-                    } else if tab == SidebarTab::Eew {
-                        self.record_intensity_rings = false;
-                    }
                     if let Some((lon, lat, zoom)) = snap.select_list_item(tab, idx) {
                         let vp = ctx.screen_rect();
                         let map_w = (vp.width() - sidebar_w).max(120.0);
@@ -436,31 +418,6 @@ impl MainShell {
                         if snap.overlay_mode == OverlayMode::Wave {
                             self.map_elapsed = 0.0;
                         }
-                    }
-                }
-                SideAction::RecordIntensity(idx) => {
-                    self.record_intensity_rings = true;
-                    if let Some((lon, lat, _)) =
-                        snap.select_list_item(SidebarTab::Records, idx)
-                    {
-                        let vp = ctx.screen_rect();
-                        let map_w = (vp.width() - sidebar_w).max(120.0);
-                        let map_h = vp.height().max(120.0);
-                        let r_km = snap
-                            .records
-                            .get(idx)
-                            .map(|r| {
-                                intensity_rings(r.intensity_kind, r.magnitude, r.depth_km)
-                                    .last()
-                                    .map(|(_, km)| *km)
-                                    .unwrap_or(55.0)
-                                    .max(25.0)
-                            })
-                            .unwrap_or(55.0);
-                        let end_z = zoom_to_fit_radius_km(lat, r_km, map_w.min(map_h), 0.55)
-                            .clamp(5.5, 11.5);
-                        self.map.fly_to_centered(lon, lat, Some(end_z), 0.9);
-                        self.map.user_camera_override = true;
                     }
                 }
                 SideAction::Settings => {
@@ -751,8 +708,19 @@ fn draw_event_header(
                         format!("{idx_mark}{} ({agency})", ev.place)
                     };
                     let time_line = format_header_time(ev.origin_ms);
-                    let mag_line = format!("M{:.1}", ev.magnitude);
-                    let depth_line = format!("{:.0}km", ev.depth_km);
+                    let mag_line = if ev.is_assumption && ev.magnitude <= 0.0 {
+                        "调查中".to_string()
+                    } else {
+                        format!("M{:.1}", ev.magnitude)
+                    };
+                    let depth_line = if ev.is_assumption
+                        && ev.latitude.abs() < 0.01
+                        && ev.longitude.abs() < 0.01
+                    {
+                        "调查中".to_string()
+                    } else {
+                        format!("{:.0}km", ev.depth_km)
+                    };
                     let focused = snap.active.as_ref().is_some_and(|a| {
                         a.agency.0 == ev.agency.0 && a.event_id == ev.event_id
                     });
@@ -1596,8 +1564,6 @@ fn outlined_label(ui: &mut Ui, text: &str, color: Color32, size: f32, monospace:
 
 enum SideAction {
     List(SidebarTab, usize),
-    /// 速报右键：选中并绘制衰减烈度区划填色
-    RecordIntensity(usize),
     Settings,
 }
 
@@ -1605,7 +1571,6 @@ enum SideAction {
 enum RowClick {
     None,
     Primary,
-    Secondary,
 }
 
 fn health_dot(p: &ThemePalette, status: jian_core::HealthStatus) -> Color32 {
@@ -1624,7 +1589,6 @@ fn draw_sidebar(
     scale: &str,
     icons: &IntensityIcons,
     show_volcano_icons: bool,
-    allow_record_intensity: bool,
     source_enabled: [bool; 4],
 ) -> Option<SideAction> {
     let mut clicked = None;
@@ -1758,7 +1722,6 @@ fn draw_sidebar(
                                     col,
                                     selected,
                                     egui::Id::new(("st", i)),
-                                    false,
                                 ) == RowClick::Primary
                                 {
                                     clicked = Some(SideAction::List(SidebarTab::Station, i));
@@ -1796,13 +1759,13 @@ fn draw_sidebar(
                                         &r.intensity_text,
                                         scale,
                                     );
-                                    match list_row(
+                                    if list_row(
                                         ui,
                                         p,
                                         icons,
                                         &place,
                                         &r.time_text,
-                                        &format!("M{:.1}", r.magnitude),
+                                        &r.magnitude_label(),
                                         r.intensity_kind,
                                         r.intensity_level,
                                         &r.intensity_text,
@@ -1810,16 +1773,9 @@ fn draw_sidebar(
                                         col,
                                         selected,
                                         egui::Id::new(("rec", i)),
-                                        allow_record_intensity,
-                                    ) {
-                                        RowClick::Primary => {
-                                            clicked =
-                                                Some(SideAction::List(SidebarTab::Records, i));
-                                        }
-                                        RowClick::Secondary => {
-                                            clicked = Some(SideAction::RecordIntensity(i));
-                                        }
-                                        RowClick::None => {}
+                                    ) == RowClick::Primary
+                                    {
+                                        clicked = Some(SideAction::List(SidebarTab::Records, i));
                                     }
                                 }
                             }
@@ -1861,7 +1817,6 @@ fn draw_sidebar(
                                         col,
                                         selected,
                                         egui::Id::new(("eew", real_i)),
-                                        false,
                                     ) == RowClick::Primary
                                     {
                                         clicked = Some(SideAction::List(SidebarTab::Eew, real_i));
@@ -2051,8 +2006,6 @@ fn list_row(
     accent: Color32,
     selected: bool,
     id: egui::Id,
-    // 速报行：允许右键触发烈度环预览
-    allow_secondary: bool,
 ) -> RowClick {
     let bg = if selected {
         p.row_selected
@@ -2089,12 +2042,9 @@ fn list_row(
         })
         .response;
 
-    let mut full = ui
+    let full = ui
         .interact(resp.rect, id, Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
-    if allow_secondary {
-        full = full.on_hover_text("左键选中；右键绘制烈度区划填色");
-    }
     if full.hovered() && !selected {
         ui.painter().rect_stroke(
             resp.rect,
@@ -2103,13 +2053,10 @@ fn list_row(
             egui::StrokeKind::Outside,
         );
     }
-    let click = if full.clicked() {
+    ui.add_space(3.0);
+    if full.clicked() {
         RowClick::Primary
-    } else if allow_secondary && full.secondary_clicked() {
-        RowClick::Secondary
     } else {
         RowClick::None
-    };
-    ui.add_space(3.0);
-    click
+    }
 }

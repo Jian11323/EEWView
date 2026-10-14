@@ -303,7 +303,6 @@ impl MapViewport {
         travel: Option<&TravelEngine>,
         now_ms: i64,
         show_waves: bool,
-        show_intensity_rings: bool,
         stations: &[StationSample],
         records: &[EqRecord],
         volcanoes: &[VolcanoNotice],
@@ -318,6 +317,10 @@ impl MapViewport {
         if self.vector.poll() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
+        }
+        if self.faults.poll(ui.ctx()) {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(16));
         }
         self.markers.ensure(ui.ctx());
 
@@ -360,25 +363,6 @@ impl MapViewport {
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
 
-        // 烈度区划：官方 warnArea（jp.eew）→ 市县三角衰减 → 同心环。
-        // `show_intensity_rings`：由设置控制；速报另需右键预览标志。
-        if show_intensity_rings {
-            let ring_ev = active.filter(|e| {
-                !e.is_cancel
-                    && !e.is_assumption
-                    && !e.event_id.starts_with("station:")
-                    && (e.latitude.abs() > 0.01 || e.longitude.abs() > 0.01)
-            });
-            if let Some(ev) = ring_ev {
-                let painted = (!ev.warn_areas.is_empty()
-                    && self.vector.paint_warn_area_regions(ui, &view, ev, true))
-                    || self.vector.paint_intensity_regions(ui, &view, ev, true);
-                if !painted {
-                    overlay::paint_intensity_rings(ui, &view, ev, true);
-                }
-            }
-        }
-
         // 暗色矢量 / 球体：只描轮廓，不填陆地（对齐旧版纯黑轮廓图）
         if globe || self.basemap.show_vector() {
             self.vector.paint(
@@ -394,7 +378,12 @@ impl MapViewport {
         // 活动断层：矢量轮廓之上、事件叠加之下；瓦片底图时也绘制
         if show_faults {
             let dark = self.ocean_fill.r() < 80;
-            self.faults.paint(ui, &view, dark, self.paint_quality);
+            let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
+            let interacting = resp.dragged()
+                || self.flight.is_some()
+                || (resp.hovered() && scroll_y.abs() > 0.0);
+            self.faults
+                .paint(ui, &view, dark, self.paint_quality, interacting);
         }
 
         // JMA 海啸：按沿岸预报区描边闪烁（不对中日外轮廓整圈描边）

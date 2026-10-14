@@ -1545,17 +1545,7 @@ fn draw_general(
         control_row(ui, "P/S 波圈", "在地图上绘制走时波阵面", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_wave_rings);
         });
-        row_divider(ui);
-        control_row(
-            ui,
-            "烈度区划填色",
-            "官方分区优先，否则衰减估算；速报需右键预览",
-            "\u{25ce}",
-            |ui| {
-                toggle(ui, &mut draft.ui.show_intensity_rings);
-            },
-        );
-        row_divider(ui);
+                row_divider(ui);
         control_row(ui, "烈度图例", "地图·下角显示烈度色标", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_legend);
         });
@@ -1919,7 +1909,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
                 });
         });
         row_divider(ui);
-        control_row(ui, "同时输出 stderr", "开启后分配控制台写 stderr；关闭则无黑窗", "\u{25ce}", |ui| {
+        control_row(ui, "同时输出 stderr", "保存后立即分配/关闭控制台并写 stderr", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.log.console);
         });
         row_divider(ui);
@@ -1942,7 +1932,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
         });
         ui.add_space(6.0);
         ui.label(
-            RichText::new("等级与目录等项保存后需重启应用才会应用到写入器。")
+            RichText::new("日志等级与目录保存后需重启才会应用到写入器；stderr 开关保存后立即生效。")
                 .size(12.0)
                 .color(chrome().muted),
         );

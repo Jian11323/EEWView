@@ -112,7 +112,7 @@ pub fn exchange_login_key(login_key: &str) -> Result<TokenOk, String> {
     }
     let mut ok = post_bearer(REFRESH_URL, key)?;
     if !ok.token.starts_with("rt_") {
-        return Err(format!("期望 rt_ 长期 Token，收到：{}", &ok.token[..ok.token.len().min(8)]));
+        return Err("期望 rt_ 长期 Token，收到非预期前缀".into());
     }
     if ok.expire_at <= 0.0 {
         // 文档默认 180 天
@@ -133,7 +133,7 @@ pub fn exchange_access_token(refresh_token: &str) -> Result<TokenOk, String> {
     }
     let ok = post_bearer(ACCESS_URL, token)?;
     if !ok.token.starts_with("at_") {
-        return Err(format!("期望 at_ 访问令牌，收到：{}", &ok.token[..ok.token.len().min(8)]));
+        return Err("期望 at_ 访问令牌，收到非预期前缀".into());
     }
     Ok(ok)
 }

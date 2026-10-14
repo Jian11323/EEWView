@@ -266,7 +266,6 @@ fn run_app() -> Result<()> {
     let started = Instant::now();
     let has_local = cfg.local.latitude.is_some() && cfg.local.longitude.is_some();
     snap.show_wave_rings = cfg.ui.show_wave_rings;
-    snap.show_intensity_rings = cfg.ui.show_intensity_rings;
     eframe::run_native(
         jian_ui::APP_DISPLAY_NAME,
         options,
@@ -904,7 +903,6 @@ impl eframe::App for JianApp {
                                 },
                             ));
                             self.snap.show_wave_rings = self.cfg.ui.show_wave_rings;
-                            self.snap.show_intensity_rings = self.cfg.ui.show_intensity_rings;
                             let mut note = format!("已保存到 {}", path.display());
                             if renderer_changed {
                                 note.push_str("；渲染设备/GPU 接口需重启生效，其余已热重载");
@@ -1152,10 +1150,10 @@ impl JianApp {
         let Some(audio) = self.audio.as_mut() else {
             return;
         };
-        if key.is_empty() {
-            return;
-        }
-        if key == "cancel" {
+        // upsert 解除报会直接清空为 None；到期 prune 同理 → key 为空也视为解除
+        let is_cancel =
+            key == "cancel" || (key.is_empty() && !prev.is_empty() && prev != "cancel");
+        if is_cancel {
             if !prev.is_empty() && prev != "cancel" {
                 let g = tsunami_audio_grade(prev.split('|').next().unwrap_or("Forecast"));
                 audio.play(AudioCue::Tsunami {
@@ -1163,6 +1161,9 @@ impl JianApp {
                     kind: TsunamiCueKind::Cancel,
                 });
             }
+            return;
+        }
+        if key.is_empty() {
             return;
         }
         let grade = key.split('|').next().unwrap_or("Forecast");
@@ -1185,6 +1186,8 @@ impl JianApp {
             || self.cfg.performance.gpu_api.to_ascii_lowercase()
                 != new_cfg.performance.gpu_api.to_ascii_lowercase();
         self.cfg = new_cfg;
+        // 日志 stderr 热切换（控制台层启动时已挂载，此处只拨门闩 + Alloc/Free）
+        logging::set_console_output(self.cfg.log.console);
 
         self.local_lat = self.cfg.local.latitude;
         self.local_lon = self.cfg.local.longitude;

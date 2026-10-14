@@ -38,16 +38,6 @@ pub enum IntensityKind {
     CnIntensity,
 }
 
-/// JMA 等官方预报分区（`warnArea` / `WarnArea`），按区划名上色。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct IntensityWarnArea {
-    pub name: String,
-    /// 展示文案，如 "5弱"
-    pub intensity_text: String,
-    /// 与 `IntensityKind` 档位一致（JMA: 0–9）
-    pub level: u8,
-}
-
 /// 单次预警报文（归一化后）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EewReport {
@@ -79,9 +69,6 @@ pub struct EewReport {
     /// 收到最终报的本地时刻 unix ms（0=尚未最终）
     #[serde(default)]
     pub final_at_ms: i64,
-    /// 官方烈度/震度分区（有则地图优先按名填色）
-    #[serde(default)]
-    pub warn_areas: Vec<IntensityWarnArea>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,7 +149,6 @@ impl EqRecord {
             is_assumption: self.hypocenter_unknown || self.magnitude_unknown,
             is_warn: false,
             final_at_ms: 0,
-            warn_areas: Vec::new(),
         }
     }
 }
@@ -530,7 +516,6 @@ impl StationSample {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
-            warn_areas: Vec::new(),
         }
     }
 }
@@ -600,8 +585,6 @@ pub struct AppSnapshot {
     pub selection: Option<ListSelection>,
     /// 图例 P-S：是否绘制走时波圈
     pub show_wave_rings: bool,
-    /// 是否绘制烈度区划（官方分区优先 / 市级三角衰减 / 同心环回退）
-    pub show_intensity_rings: bool,
     /// 当前有效的 JMA 海啸情报（取消后为 None）
     pub tsunami: Option<TsunamiInfo>,
     /// JMA 火山情报（与 records 分离）
@@ -645,7 +628,6 @@ impl AppSnapshot {
             is_assumption: false,
             is_warn: true,
             final_at_ms: 0,
-            warn_areas: Vec::new(),
         };
         let eew_b = EewReport {
             agency: AgencyId("cea".into()),
@@ -665,7 +647,6 @@ impl AppSnapshot {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
-            warn_areas: Vec::new(),
         };
         let eew_pr = EewReport {
             agency: AgencyId("cea-pr:四川".into()),
@@ -685,7 +666,6 @@ impl AppSnapshot {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
-            warn_areas: Vec::new(),
         };
         let eew_c = EewReport {
             agency: AgencyId("jma-eew".into()),
@@ -705,7 +685,6 @@ impl AppSnapshot {
             is_assumption: false,
             is_warn: true,
             final_at_ms: 0,
-            warn_areas: Vec::new(),
         };
 
         Self {
@@ -808,7 +787,6 @@ impl AppSnapshot {
                 index: 0,
             }),
             show_wave_rings: true,
-            show_intensity_rings: false,
             tsunami: None,
             volcanoes: Vec::new(),
             typhoons: Vec::new(),
@@ -891,7 +869,6 @@ impl AppSnapshot {
             tab: SidebarTab::Eew,
             selection: None,
             show_wave_rings: true,
-            show_intensity_rings: false,
             tsunami: None,
             volcanoes: Vec::new(),
             typhoons: Vec::new(),
@@ -1782,7 +1759,6 @@ mod eew_dedup_tests {
             is_assumption: false,
             is_warn: false,
             final_at_ms: 0,
-            warn_areas: Vec::new(),
         }
     }
 

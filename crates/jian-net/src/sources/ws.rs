@@ -12,6 +12,8 @@ use tracing::{info, warn};
 
 use crate::bus::{emit_health, NetTx};
 
+pub use jian_util::{redact_secrets, redact_url};
+
 /// 每次连接前解析 URL（例如用 rt_ 换新 at_ 再拼 key=）。
 pub type ResolveUrl = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 
@@ -39,23 +41,6 @@ impl WsLoopOpts {
     }
 }
 
-/// 日志用：去掉 `key=` 查询参数中的令牌。
-pub fn redact_url(url: &str) -> String {
-    let Some(start) = url.find("key=") else {
-        return url.to_string();
-    };
-    let val_start = start + 4;
-    let val_end = url[val_start..]
-        .find(['&', '#', '?'])
-        .map(|i| val_start + i)
-        .unwrap_or(url.len());
-    let mut out = String::with_capacity(url.len());
-    out.push_str(&url[..val_start]);
-    out.push_str("***");
-    out.push_str(&url[val_end..]);
-    out
-}
-
 /// 收到文本帧时调用
 pub async fn run_ws_loop<F>(tx: NetTx, opts: WsLoopOpts, mut on_text: F)
 where
@@ -70,7 +55,11 @@ where
             match tokio::task::spawn_blocking(move || resolve()).await {
                 Ok(Ok(u)) => u,
                 Ok(Err(e)) => {
-                    warn!(source = opts.source, error = %e, "resolve url failed");
+                    warn!(
+                        source = opts.source,
+                        error = %redact_secrets(&e),
+                        "resolve url failed"
+                    );
                     emit_health(&tx, opts.source, HealthStatus::Abnormal);
                     backoff = backoff.max(15);
                     let jitter_ms = (backoff.saturating_mul(137) % 800) as u64;
@@ -152,7 +141,7 @@ where
                                         let msg = error_message(text).unwrap_or("auth error");
                                         warn!(
                                             source = opts.source,
-                                            message = %msg,
+                                            message = %redact_secrets(msg),
                                             "鉴权失败，将换票后重连（避免无钥狂连触发 IP 封禁）"
                                         );
                                         emit_health(&tx, opts.source, HealthStatus::Abnormal);
@@ -161,7 +150,11 @@ where
                                     }
                                     if is_error_frame(text) {
                                         let msg = error_message(text).unwrap_or("error");
-                                        warn!(source = opts.source, message = %msg, "上游 error 帧");
+                                        warn!(
+                                            source = opts.source,
+                                            message = %redact_secrets(msg),
+                                            "上游 error 帧"
+                                        );
                                         emit_health(&tx, opts.source, HealthStatus::Abnormal);
                                     }
                                     on_text(&tx, text);
@@ -180,7 +173,11 @@ where
                                     break;
                                 }
                                 Some(Err(e)) => {
-                                    warn!(source = opts.source, "ws error: {e}");
+                                    warn!(
+                                        source = opts.source,
+                                        "ws error: {}",
+                                        redact_secrets(&e.to_string())
+                                    );
                                     break;
                                 }
                                 None => break,
@@ -225,7 +222,11 @@ where
                 emit_health(&tx, opts.source, HealthStatus::Fluctuating);
             }
             Err(e) => {
-                warn!(source = opts.source, "connect failed: {e}");
+                warn!(
+                    source = opts.source,
+                    "connect failed: {}",
+                    redact_secrets(&e.to_string())
+                );
                 emit_health(&tx, opts.source, HealthStatus::Abnormal);
             }
         }
@@ -293,11 +294,11 @@ mod tests {
     #[test]
     fn redact_key_query() {
         assert_eq!(
-            redact_url("wss://api.example/all?key=at_secret"),
+            redact_url("wss://api.example/all?key=at_secret_token_xx"),
             "wss://api.example/all?key=***"
         );
         assert_eq!(
-            redact_url("wss://api.example/all?foo=1&key=at_secret&bar=2"),
+            redact_url("wss://api.example/all?foo=1&key=at_secret_token_xx&bar=2"),
             "wss://api.example/all?foo=1&key=***&bar=2"
         );
         assert_eq!(

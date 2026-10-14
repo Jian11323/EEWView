@@ -24,7 +24,7 @@ fn has_credentials(cfg: &JianSourceConfig) -> bool {
 }
 
 /// 优先 `rt_→at_`（每次连接前应调用）；无 rt_ 时才用环境变量/配置里的短期 `at_`。
-fn resolve_access_token(cfg: &JianSourceConfig) -> Result<String, String> {
+pub fn resolve_access_token(cfg: &JianSourceConfig) -> Result<String, String> {
     if let Some(rt) = cfg
         .refresh_token
         .as_ref()
@@ -48,10 +48,18 @@ fn resolve_access_token(cfg: &JianSourceConfig) -> Result<String, String> {
 }
 
 /// 去掉已有 `key=` 后再追加，避免旧票卡死 URL。
-fn url_with_key(base: &str, token: &str) -> String {
+pub fn url_with_key(base: &str, token: &str) -> String {
     let stripped = strip_key_param(base.trim());
     let sep = if stripped.contains('?') { '&' } else { '?' };
     format!("{stripped}{sep}key={token}")
+}
+
+/// `/all` 每次 connect 前换票拼 `key=`（测站中转无需鉴权，勿用于站网）。
+pub fn make_resolve_url(base_url: String, cfg: JianSourceConfig) -> crate::sources::ws::ResolveUrl {
+    Arc::new(move || {
+        let token = resolve_access_token(&cfg)?;
+        Ok(url_with_key(&base_url, &token))
+    })
 }
 
 fn strip_key_param(url: &str) -> String {
@@ -102,11 +110,7 @@ pub fn spawn(tx: NetTx, cfg: JianSourceConfig) -> Vec<JoinHandle<()>> {
         info!(url = %redact_url(&base_url), "jian: spawn /all");
         let tx_all = tx.clone();
         let cfg_all = cfg.clone();
-        let cfg_tok = cfg.clone();
-        let resolve: crate::sources::ws::ResolveUrl = Arc::new(move || {
-            let token = resolve_access_token(&cfg_tok)?;
-            Ok(url_with_key(&base_url, &token))
-        });
+        let resolve = make_resolve_url(base_url, cfg.clone());
         tasks.push(tokio::spawn(async move {
             run_ws_loop(
                 tx_all,
@@ -139,8 +143,9 @@ fn spawn_kmoni_if(tx: &NetTx, cfg: &JianSourceConfig) -> Vec<JoinHandle<()>> {
     if !cfg.station_enabled {
         return Vec::new();
     }
+    // 测站中转无需鉴权；hub 默认走 stations 模块，此路径仅兼容旧键。
     let url = cfg.station_ws_url.clone();
-    info!(url = %redact_url(&url), "jian: spawn kmoni");
+    info!(url = %redact_url(&url), "jian: spawn kmoni (no auth)");
     let tx = tx.clone();
     vec![tokio::spawn(async move {
         let mut state = KmoniState::default();

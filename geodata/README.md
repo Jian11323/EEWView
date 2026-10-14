@@ -23,8 +23,7 @@ GQ Special 世界层已含调整后的中国国界（含藏南）；另叠内置
 | 2 | `globalquake/jp-prefectures.geojson` → `日本/` → 要石 | 日本都道府县 |
 | 3 | `globalquake/cn-prefectures.geojson` / 要石省级 | 仅当中国扫盘为空时回退；远距外轮廓溶解仍优先用一级区划 |
 
-近距区划与烈度区划填色使用地市/区县边界；烈度按耳切三角形质心估档（大区内随距离衰减，非整块一色）。
-有 JMA 官方 `warnArea` 时优先按 `eew/jp.eew.topo.json` 区划名填色，再回退市县三角 / 同心环。详见 [`eew/NOTICE.md`](eew/NOTICE.md)。
+近距区划使用地市/区县边界。
 
 要石来源：[Lipomoea/kanameishi](https://github.com/Lipomoea/kanameishi)（AGPL-3.0）。详见 [`kanameishi/README.md`](kanameishi/README.md)。  
 GQ Special 说明见 [`globalquake/README.md`](globalquake/README.md)。
@@ -41,8 +40,9 @@ GQ Special 说明见 [`globalquake/README.md`](globalquake/README.md)。
 
 | 路径 | 内容 |
 |------|------|
-| `faults/global_active_faults.geojson` | 全球 GEM 活动断层（简化） |
-| `faults/china_active_faults.geojson` | 中国及邻区 CAFD / CN-faults（简化） |
+| `faults/global_active_faults.geojson` | 全球 GEM 活动断层（简化，近距） |
+| `faults/*_lod0.geojson` / `*_lod1.geojson` | 远距/中距 LOD（可选；缺则运行时分档） |
+| `faults/china_active_faults.geojson` | 中国及邻区 CAFD / CN-faults（简化，近距） |
 
 平面与球体共用；`ui.show_faults` 开关。详见 [`faults/README.md`](faults/README.md)。
 

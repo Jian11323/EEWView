@@ -85,7 +85,7 @@ pub fn spawn_hub_with_assets(
         "jian-net: spawning source tasks"
     );
     let mut tasks = Vec::new();
-    // 测站由 stations 模块统一管理；jian 侧不再重复拉 /kmoni
+    // 测站由 stations 模块统一管理（无需鉴权）；jian 侧不再重复拉 /kmoni
     let mut jian_cfg = sources.jian.clone();
     jian_cfg.station_enabled = false;
     tasks.extend(sources::jian::spawn(tx.clone(), jian_cfg));
@@ -119,7 +119,13 @@ pub fn apply_event_filtered(
         }
         NetEvent::Record(r) => {
             if let Some(f) = filters {
-                if !record_allowed(f, &r.agency.0, r.magnitude, &r.place) {
+                if !record_allowed(
+                    f,
+                    &r.agency.0,
+                    r.magnitude,
+                    &r.place,
+                    r.magnitude_unknown,
+                ) {
                     return;
                 }
             }
@@ -132,7 +138,13 @@ pub fn apply_event_filtered(
     }
 }
 
-fn record_allowed(f: &FiltersConfig, agency: &str, magnitude: f64, place: &str) -> bool {
+fn record_allowed(
+    f: &FiltersConfig,
+    agency: &str,
+    magnitude: f64,
+    place: &str,
+    magnitude_unknown: bool,
+) -> bool {
     let key = agency_family(agency).as_filter_key();
     // 源开关优先：关则整源丢弃（与震级过滤无关）
     if !f.record_source_enabled(key) {
@@ -140,6 +152,10 @@ fn record_allowed(f: &FiltersConfig, agency: &str, magnitude: f64, place: &str) 
     }
     let thr = f.record_mag_threshold(key);
     if thr <= 0.0 {
+        return true;
+    }
+    // 震级调查中（震度速报等）不过滤丢弃
+    if magnitude_unknown {
         return true;
     }
     if magnitude + 1e-9 >= thr {
