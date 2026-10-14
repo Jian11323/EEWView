@@ -13,6 +13,8 @@ pub struct PerfDiagnosis {
     pub gpu_api: String,
     /// `eco` | `normal` | `extreme`
     pub profile: String,
+    /// 建议目标帧率
+    pub target_fps: u32,
     pub summary: String,
 }
 
@@ -34,38 +36,42 @@ pub fn diagnose() -> PerfDiagnosis {
     let total = cpu_score + ram_score;
 
     // 无独立 GPU 枚举时：低配偏 CPU 软渲染；中高配 GPU+Vulkan
-    let (device, gpu_api, profile, gpu_hint) = if total < 35.0 || ram_gb < 6.0 {
+    let (device, gpu_api, profile, target_fps, gpu_hint) = if total < 35.0 || ram_gb < 6.0 {
         (
             "cpu",
             "opengl",
             "eco",
-            "未检测到强独显迹象，建议 CPU 软渲染 + 节能".into(),
+            20_u32,
+            "未检测到强独显迹象，建议 CPU 软渲染 + 节能 + 20fps".into(),
         )
     } else if total < 70.0 {
         (
             "gpu",
             "opengl",
             "normal",
-            "中端机：GPU + OpenGL，正常模式".into(),
+            30,
+            "中端机：GPU + OpenGL，正常模式 + 30fps".into(),
         )
     } else if total < 110.0 {
         (
             "gpu",
             "vulkan",
             "normal",
-            "中高端：GPU + Vulkan，正常模式".into(),
+            30,
+            "中高端：GPU + Vulkan，正常模式 + 30fps".into(),
         )
     } else {
         (
             "gpu",
             "vulkan",
             "extreme",
-            "高端：GPU + Vulkan，极致模式".into(),
+            60,
+            "高端：GPU + Vulkan，极致模式 + 60fps".into(),
         )
     };
 
     let summary = format!(
-        "CPU：{cpu_name}\n内存：{ram_gb:.1} GB（估分 CPU {cpu_score:.0} / 内存 {ram_score:.0}）\n{gpu_hint}\n建议：设备={device}，API={gpu_api}，档位={profile}\n（设备/GPU 接口需重启；性能档位立即生效）"
+        "CPU：{cpu_name}\n内存：{ram_gb:.1} GB（估分 CPU {cpu_score:.0} / 内存 {ram_score:.0}）\n{gpu_hint}\n建议：设备={device}，API={gpu_api}，档位={profile}，帧率={target_fps}\n（设备/GPU 接口需重启；性能档位与帧率立即生效）"
     );
 
     PerfDiagnosis {
@@ -75,6 +81,7 @@ pub fn diagnose() -> PerfDiagnosis {
         device: device.into(),
         gpu_api: gpu_api.into(),
         profile: profile.into(),
+        target_fps,
         summary,
     }
 }

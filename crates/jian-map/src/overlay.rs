@@ -259,6 +259,7 @@ pub fn paint_stations(
     selected_id: Option<&str>,
     icons: Option<&MarkerIcons>,
     eew_active: bool,
+    quality: crate::PaintQuality,
 ) {
     if stations.is_empty() {
         return;
@@ -266,49 +267,61 @@ pub fn paint_stations(
     let rect = view.rect;
     let painter = ui.painter_at(rect);
     let pad = 16.0_f32;
-    // 低缩放隐藏静默点；中缩放抽稀静默点以减负
-    let show_quiet = view.zoom >= 4.5;
-    let quiet_stride = if view.zoom < 5.5 {
-        4usize
-    } else if view.zoom < 6.5 {
-        2
-    } else {
-        1
-    };
     let _ = eew_active;
-    // 先静默点、后有感图标，且有感按震度升序，避免震度1被蓝点盖住
-    let mut order: Vec<usize> = (0..stations.len()).collect();
-    order.sort_by(|&a, &b| {
-        let sa = &stations[a];
-        let sb = &stations[b];
-        let la = felt_level(sa);
-        let lb = felt_level(sb);
-        la.cmp(&lb).then_with(|| {
-            sa.instrumental
-                .partial_cmp(&sb.instrumental)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-    });
+    // 低缩放隐藏静默点；中缩放抽稀；节能档更狠
+    let (quiet_zoom_min, quiet_stride, quiet_cap) = match quality {
+        crate::PaintQuality::Eco => (
+            5.2_f64,
+            if view.zoom < 6.0 {
+                8usize
+            } else if view.zoom < 7.0 {
+                4
+            } else {
+                2
+            },
+            350usize,
+        ),
+        crate::PaintQuality::Normal => (
+            4.5,
+            if view.zoom < 5.5 {
+                4usize
+            } else if view.zoom < 6.5 {
+                2
+            } else {
+                1
+            },
+            800,
+        ),
+        crate::PaintQuality::Extreme => (4.0, 1usize, 2000),
+    };
+    let show_quiet = view.zoom >= quiet_zoom_min;
+
+    // 两遍绘制：静默点不排序；有感点数量少，再按震度升序，避免全表 sort
     let mut quiet_i = 0usize;
-    for idx in order {
-        let s = &stations[idx];
+    let mut quiet_drawn = 0usize;
+    let mut felt_idx: Vec<usize> = Vec::new();
+    for (idx, s) in stations.iter().enumerate() {
         let felt = match s.intensity_kind {
             jian_core::IntensityKind::JmaShindo => {
                 s.intensity_level >= 1 || s.instrumental >= 0.5
             }
             jian_core::IntensityKind::CnIntensity => s.intensity_level >= 1,
         };
-        let quiet = !felt;
-        if quiet {
-            if !show_quiet {
-                if selected_id != Some(s.id.as_str()) {
-                    continue;
-                }
-            } else if selected_id != Some(s.id.as_str()) {
-                quiet_i += 1;
-                if quiet_stride > 1 && (quiet_i % quiet_stride) != 0 {
-                    continue;
-                }
+        if felt {
+            felt_idx.push(idx);
+            continue;
+        }
+        let selected = selected_id == Some(s.id.as_str());
+        if !show_quiet && !selected {
+            continue;
+        }
+        if !selected {
+            quiet_i += 1;
+            if quiet_stride > 1 && (quiet_i % quiet_stride) != 0 {
+                continue;
+            }
+            if quiet_drawn >= quiet_cap {
+                continue;
             }
         }
         let Some(p) = view.project(s.longitude, s.latitude) else {
@@ -321,134 +334,167 @@ pub fn paint_stations(
         {
             continue;
         }
+        quiet_drawn += 1;
+        paint_station_dot(&painter, view, icons, s, p, selected, true);
+    }
+
+    felt_idx.sort_by(|&a, &b| {
+        let sa = &stations[a];
+        let sb = &stations[b];
+        let la = felt_level(sa);
+        let lb = felt_level(sb);
+        la.cmp(&lb).then_with(|| {
+            sa.instrumental
+                .partial_cmp(&sb.instrumental)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+    for idx in felt_idx {
+        let s = &stations[idx];
+        let Some(p) = view.project(s.longitude, s.latitude) else {
+            continue;
+        };
+        if p.x < rect.left() - pad
+            || p.x > rect.right() + pad
+            || p.y < rect.top() - pad
+            || p.y > rect.bottom() + pad
+        {
+            continue;
+        }
         let selected = selected_id == Some(s.id.as_str());
-        let jma_lv = if s.intensity_kind == jian_core::IntensityKind::JmaShindo {
-            if s.intensity_level >= 1 {
-                s.intensity_level.min(9)
-            } else if s.instrumental >= 0.5 {
-                jian_core::jma_from_instrumental(s.instrumental).0
-            } else {
-                0
-            }
+        paint_station_dot(&painter, view, icons, s, p, selected, false);
+    }
+}
+
+fn paint_station_dot(
+    painter: &egui::Painter,
+    view: &ViewCtx,
+    icons: Option<&MarkerIcons>,
+    s: &StationSample,
+    p: Pos2,
+    selected: bool,
+    quiet: bool,
+) {
+    let jma_lv = if s.intensity_kind == jian_core::IntensityKind::JmaShindo {
+        if s.intensity_level >= 1 {
+            s.intensity_level.min(9)
+        } else if s.instrumental >= 0.5 {
+            jian_core::jma_from_instrumental(s.instrumental).0
         } else {
             0
-        };
-        if jma_lv >= 1 {
-            if let Some(tex) = icons.and_then(|i| i.shindo_inst(jma_lv)) {
-                // 震度1略小；高等级略大；选中再放大
-                let base = match jma_lv {
-                    1 => 12.0,
-                    2 => 14.0,
-                    3 | 4 => 16.0,
-                    5 | 6 => 18.0,
-                    _ => 20.0,
-                };
-                let size = if selected { base + 4.0 } else { base };
-                paint_tex(
-                    &painter,
-                    view,
-                    s.longitude,
-                    s.latitude,
-                    tex,
-                    p,
-                    size,
-                    Color32::WHITE,
-                );
-                if selected {
-                    painter.text(
-                        p + Vec2::new(size * 0.55, -size * 0.45),
-                        egui::Align2::LEFT_BOTTOM,
-                        format!("{} {}", s.name, jian_core::jma_shindo_text(jma_lv)),
-                        egui::FontId::proportional(12.0),
-                        Color32::WHITE,
-                    );
-                }
-                continue;
-            }
         }
-        // 烈度网有感：csis_inst 图标（与侧栏一致）。
-        // KMA 密网点只画色、不贴数字图标，避免全国「1」糊满半岛。
-        let is_kma = s.id.starts_with("kma:");
-        if !is_kma
-            && s.intensity_kind == jian_core::IntensityKind::CnIntensity
-            && s.intensity_level >= 1
-        {
-            let cn_lv = s.intensity_level.clamp(1, 12);
-            if let Some(tex) = icons.and_then(|i| i.csis_inst(cn_lv)) {
-                let base = match cn_lv {
-                    1..=3 => 12.0,
-                    4..=6 => 15.0,
-                    7..=9 => 18.0,
-                    _ => 20.0,
-                };
-                let size = if selected { base + 4.0 } else { base };
-                paint_tex(
-                    &painter,
-                    view,
-                    s.longitude,
-                    s.latitude,
-                    tex,
-                    p,
-                    size,
-                    Color32::WHITE,
-                );
-                if selected {
-                    painter.text(
-                        p + Vec2::new(size * 0.55, -size * 0.45),
-                        egui::Align2::LEFT_BOTTOM,
-                        format!("{} {}", s.name, s.intensity_text),
-                        egui::FontId::proportional(12.0),
-                        Color32::WHITE,
-                    );
-                }
-                continue;
-            }
-        }
-        // 回退色点：烈度用 CN 色；JMA 計測用色带
-        let rgb = match s.intensity_kind {
-            jian_core::IntensityKind::CnIntensity => {
-                if s.intensity_level >= 1 {
-                    color_for(s.intensity_kind, s.intensity_level)
-                } else {
-                    jian_core::palette::Rgb::new(0x66, 0x66, 0x66)
-                }
-            }
-            jian_core::IntensityKind::JmaShindo => {
-                if s.instrumental >= -3.0 {
-                    jian_core::instrumental_rgb(s.instrumental)
-                } else {
-                    color_for(s.intensity_kind, s.intensity_level)
-                }
-            }
-        };
-        let fill = Color32::from_rgb(rgb.r, rgb.g, rgb.b);
-        let r = if selected {
-            5.5
-        } else if s.intensity_kind == jian_core::IntensityKind::CnIntensity && felt {
-            match s.intensity_level {
-                1..=3 => 3.6,
-                4..=6 => 4.4,
-                _ => 5.2,
-            }
-        } else if quiet {
-            2.2
-        } else {
-            3.2
-        };
-        painter.circle_filled(p, r, fill);
-        // 选中才描边；常态无白边，避免测站密网发糊发脏
-        if selected {
-            painter.circle_stroke(p, r, Stroke::new(1.5_f32, Color32::WHITE));
-        }
-        if selected {
-            painter.text(
-                p + Vec2::new(8.0, -12.0),
-                egui::Align2::LEFT_BOTTOM,
-                format!("{} {}", s.name, s.intensity_text),
-                egui::FontId::proportional(12.0),
+    } else {
+        0
+    };
+    if jma_lv >= 1 {
+        if let Some(tex) = icons.and_then(|i| i.shindo_inst(jma_lv)) {
+            let base = match jma_lv {
+                1 => 12.0,
+                2 => 14.0,
+                3 | 4 => 16.0,
+                5 | 6 => 18.0,
+                _ => 20.0,
+            };
+            let size = if selected { base + 4.0 } else { base };
+            paint_tex(
+                painter,
+                view,
+                s.longitude,
+                s.latitude,
+                tex,
+                p,
+                size,
                 Color32::WHITE,
             );
+            if selected {
+                painter.text(
+                    p + Vec2::new(size * 0.55, -size * 0.45),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("{} {}", s.name, jian_core::jma_shindo_text(jma_lv)),
+                    egui::FontId::proportional(12.0),
+                    Color32::WHITE,
+                );
+            }
+            return;
         }
+    }
+    let is_kma = s.id.starts_with("kma:");
+    if !is_kma
+        && s.intensity_kind == jian_core::IntensityKind::CnIntensity
+        && s.intensity_level >= 1
+    {
+        let cn_lv = s.intensity_level.clamp(1, 12);
+        if let Some(tex) = icons.and_then(|i| i.csis_inst(cn_lv)) {
+            let base = match cn_lv {
+                1..=3 => 12.0,
+                4..=6 => 15.0,
+                7..=9 => 18.0,
+                _ => 20.0,
+            };
+            let size = if selected { base + 4.0 } else { base };
+            paint_tex(
+                painter,
+                view,
+                s.longitude,
+                s.latitude,
+                tex,
+                p,
+                size,
+                Color32::WHITE,
+            );
+            if selected {
+                painter.text(
+                    p + Vec2::new(size * 0.55, -size * 0.45),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("{} {}", s.name, s.intensity_text),
+                    egui::FontId::proportional(12.0),
+                    Color32::WHITE,
+                );
+            }
+            return;
+        }
+    }
+    let felt = !quiet;
+    let rgb = match s.intensity_kind {
+        jian_core::IntensityKind::CnIntensity => {
+            if s.intensity_level >= 1 {
+                color_for(s.intensity_kind, s.intensity_level)
+            } else {
+                jian_core::palette::Rgb::new(0x66, 0x66, 0x66)
+            }
+        }
+        jian_core::IntensityKind::JmaShindo => {
+            if s.instrumental >= -3.0 {
+                jian_core::instrumental_rgb(s.instrumental)
+            } else {
+                color_for(s.intensity_kind, s.intensity_level)
+            }
+        }
+    };
+    let fill = Color32::from_rgb(rgb.r, rgb.g, rgb.b);
+    let r = if selected {
+        5.5
+    } else if s.intensity_kind == jian_core::IntensityKind::CnIntensity && felt {
+        match s.intensity_level {
+            1..=3 => 3.6,
+            4..=6 => 4.4,
+            _ => 5.2,
+        }
+    } else if quiet {
+        2.2
+    } else {
+        3.2
+    };
+    painter.circle_filled(p, r, fill);
+    if selected {
+        painter.circle_stroke(p, r, Stroke::new(1.5_f32, Color32::WHITE));
+        painter.text(
+            p + Vec2::new(8.0, -12.0),
+            egui::Align2::LEFT_BOTTOM,
+            format!("{} {}", s.name, s.intensity_text),
+            egui::FontId::proportional(12.0),
+            Color32::WHITE,
+        );
     }
 }
 

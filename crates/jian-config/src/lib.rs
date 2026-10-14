@@ -196,6 +196,39 @@ impl PerformanceConfig {
         let fps = self.clamped_fps().max(1);
         (1000 / fps).max(1) as u64
     }
+
+    fn profile_norm(&self) -> String {
+        self.profile.to_ascii_lowercase()
+    }
+
+    /// 空闲（无交互、无波圈）重绘间隔：老机器靠降频省 CPU/GPU。
+    pub fn idle_repaint_ms(&self) -> u64 {
+        match self.profile_norm().as_str() {
+            "extreme" => self.repaint_interval_ms(),
+            "eco" => 500, // ~2 fps
+            _ => 250,     // ~4 fps
+        }
+    }
+
+    /// 波圈 / 跟焦缩放等动画重绘间隔。
+    pub fn wave_repaint_ms(&self) -> u64 {
+        match self.profile_norm().as_str() {
+            "extreme" => self.repaint_interval_ms(),
+            // 节能：约 10fps，波圈仍可读
+            "eco" => 100,
+            // 正常：不超过目标帧率，且至少约 25fps 上限（interval≥40）
+            _ => self.repaint_interval_ms().max(40),
+        }
+    }
+
+    /// 设置页打开、倒计时秒显等「软忙」间隔（无需跟手 60fps）。
+    pub fn soft_repaint_ms(&self) -> u64 {
+        match self.profile_norm().as_str() {
+            "extreme" => self.repaint_interval_ms(),
+            "eco" => 200,
+            _ => 120,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -434,7 +467,7 @@ pub struct JianSourceConfig {
     /// 长期 Token 过期 unix 秒；0 表示未知
     #[serde(default)]
     pub refresh_expire_at: f64,
-    /// NIED Kmoni 测站（无需令牌，独立连接）
+    /// 兼容旧键：与 `stations.jma_enabled` 对齐；实际由 stations 模块拉 `/kmoni`（测站中转无需令牌）
     #[serde(default = "default_true")]
     pub station_enabled: bool,
     #[serde(default = "default_jian_station_ws")]

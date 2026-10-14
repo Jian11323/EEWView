@@ -7,6 +7,7 @@
 use crate::globe::zoom_to_scroll;
 use crate::projection::{self, ViewCtx};
 use crate::topojson;
+use crate::PaintQuality;
 use egui::{Color32, Pos2, Rect, Stroke, Ui};
 use jian_core::palette::color_for;
 use jian_core::EewReport;
@@ -17,6 +18,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::thread;
 use tracing::{info, warn};
 
@@ -271,16 +273,17 @@ pub enum BasemapLoadState {
     Failed,
 }
 
-/// 视口不变时复用投影后的 Shape，避免每帧全量投影抬高 CPU。
+/// 视口不变时复用已镶嵌 Mesh（Arc），命中只增引用计数，避免每帧深拷 Path。
 struct VectorPaintCache {
     key: u64,
-    shapes: Vec<egui::Shape>,
+    mesh: Arc<egui::epaint::Mesh>,
 }
 
 /// 烈度区划填色缓存（事件+视口不变时不每帧重算）。
 struct IntensityPaintCache {
     key: u64,
-    shapes: Vec<egui::Shape>,
+    /// 空表示无命中区划；非空为已包 Arc 的 Mesh Shape，克隆廉价。
+    shapes: Arc<Vec<egui::Shape>>,
 }
 
 pub struct VectorBasemap {
@@ -522,6 +525,7 @@ impl VectorBasemap {
         fill_land: bool,
         style: VectorStyle,
         skip_world_stroke: bool,
+        quality: PaintQuality,
     ) {
         if !self.world_ready && !self.regional_ready {
             return;
@@ -530,23 +534,40 @@ impl VectorBasemap {
         let rect = view.rect;
         let zoom = view.zoom;
         let painter = ui.painter_at(rect);
-        let cache_key = paint_cache_key(view, fill_land, style, self.gen, skip_world_stroke);
+        let ppp = ui.ctx().pixels_per_point();
+        let cache_key =
+            paint_cache_key(view, fill_land, style, self.gen, skip_world_stroke, quality, ppp);
         if let Some(c) = self.paint_cache.as_ref() {
             if c.key == cache_key {
-                painter.extend(c.shapes.clone());
+                painter.add(egui::Shape::Mesh(c.mesh.clone()));
                 return;
             }
         }
         let mut shapes = Vec::with_capacity(512);
+        let seg_bias = match quality {
+            PaintQuality::Eco => 1.6_f32,
+            PaintQuality::Normal => 1.0,
+            PaintQuality::Extreme => 0.85,
+        };
+        let (z_world_med, z_world_fine) = match quality {
+            PaintQuality::Eco => (3.2_f64, 5.2_f64),
+            PaintQuality::Normal => (4.0, 6.0),
+            PaintQuality::Extreme => (4.0, 6.0),
+        };
+        let regional_zoom = match quality {
+            PaintQuality::Eco => ZOOM_REGIONAL + 0.6,
+            _ => ZOOM_REGIONAL,
+        };
 
         if view.mode.is_globe() {
             // 对齐 GQ GlobePanel：按 scroll 切换 MD / HD·UHD(过滤) + 区划填色描边
             paint_globe_gq_style(&mut shapes, self, view, fill_land, style);
+            let mesh = bake_shapes_mesh(ppp, shapes);
+            painter.add(egui::Shape::Mesh(mesh.clone()));
             self.paint_cache = Some(VectorPaintCache {
                 key: cache_key,
-                shapes: shapes.clone(),
+                mesh,
             });
-            painter.extend(shapes);
             return;
         }
 
@@ -565,8 +586,12 @@ impl VectorBasemap {
             let lon_shift = f64::from(k) * 360.0;
 
             if !self.world.fine.is_empty() {
-                let rings = self.world.pick(zoom, 4.0, 6.0);
-                let min_seg = if zoom < 4.0 { 2.2_f32 } else { 1.4_f32 };
+                let rings = self.world.pick(zoom, z_world_med, z_world_fine);
+                let min_seg = if zoom < z_world_med {
+                    2.2_f32 * seg_bias
+                } else {
+                    1.4_f32 * seg_bias
+                };
                 let stroke = Stroke::new(0.9_f32, style.world_border);
                 paint_rings(
                     &mut shapes,
@@ -597,7 +622,7 @@ impl VectorBasemap {
                     min_lat,
                     max_lon + lon_shift,
                     max_lat,
-                    2.2,
+                    2.2 * seg_bias,
                     max_jump_px,
                     stroke,
                     fill_land,
@@ -606,16 +631,16 @@ impl VectorBasemap {
                     lon_shift,
                 );
             }
-            if zoom >= ZOOM_REGIONAL && !self.regional.fine.is_empty() {
+            if zoom >= regional_zoom && !self.regional.fine.is_empty() {
                 let rings = self
                     .regional
                     .pick(zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
                 let min_seg = if zoom < ZOOM_REGIONAL_MED {
-                    2.0_f32
+                    2.0_f32 * seg_bias
                 } else if zoom < ZOOM_REGIONAL_FINE {
-                    1.4_f32
+                    1.4_f32 * seg_bias
                 } else {
-                    1.0_f32
+                    1.0_f32 * seg_bias
                 };
                 let stroke = Stroke::new(
                     if zoom < ZOOM_REGIONAL_MED {
@@ -637,18 +662,19 @@ impl VectorBasemap {
                     max_jump_px,
                     stroke,
                     fill_land,
-                    zoom >= ZOOM_REGIONAL_FINE,
+                    quality != PaintQuality::Eco && zoom >= ZOOM_REGIONAL_FINE,
                     style.land_fill,
                     lon_shift,
                 );
             }
         }
 
+        let mesh = bake_shapes_mesh(ppp, shapes);
+        painter.add(egui::Shape::Mesh(mesh.clone()));
         self.paint_cache = Some(VectorPaintCache {
             key: cache_key,
-            shapes: shapes.clone(),
+            mesh,
         });
-        painter.extend(shapes);
     }
 
     /// 陆地贴边的衰减烈度：区划耳切三角按震中距估档，大边再四分（有预算+缓存）。
@@ -679,7 +705,7 @@ impl VectorBasemap {
                 if c.shapes.is_empty() {
                     return false;
                 }
-                ui.painter_at(view.rect).extend(c.shapes.clone());
+                ui.painter_at(view.rect).extend((*c.shapes).clone());
                 return true;
             }
         }
@@ -688,7 +714,7 @@ impl VectorBasemap {
         let Some(&(_, max_r_km)) = rings.last() else {
             self.intensity_cache = Some(IntensityPaintCache {
                 key: cache_key,
-                shapes: Vec::new(),
+                shapes: Arc::new(Vec::new()),
             });
             return false;
         };
@@ -823,8 +849,9 @@ impl VectorBasemap {
             }
         }
         let ok = !shapes.is_empty();
+        let shapes = Arc::new(shapes);
         if ok {
-            ui.painter_at(rect).extend(shapes.clone());
+            ui.painter_at(rect).extend((*shapes).clone());
         }
         self.intensity_cache = Some(IntensityPaintCache {
             key: cache_key,
@@ -1062,6 +1089,8 @@ fn paint_cache_key(
     style: VectorStyle,
     gen: u64,
     skip_world_stroke: bool,
+    quality: PaintQuality,
+    ppp: f32,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1079,7 +1108,24 @@ fn paint_cache_key(
     style.world_border.to_array().hash(&mut h);
     style.admin_border.to_array().hash(&mut h);
     std::mem::discriminant(&view.mode).hash(&mut h);
+    quality.hash(&mut h);
+    ((ppp * 100.0).round() as i32).hash(&mut h);
     h.finish()
+}
+
+/// 将 Path 等 Shape 预镶嵌为 Arc\<Mesh\>，缓存命中时 O(1) 克隆。
+fn bake_shapes_mesh(ppp: f32, shapes: Vec<egui::Shape>) -> Arc<egui::epaint::Mesh> {
+    let opts = egui::epaint::TessellationOptions {
+        feathering: true,
+        ..Default::default()
+    };
+    let mut tess = egui::epaint::Tessellator::new(ppp, opts, [1024, 1024], Vec::new());
+    tess.set_clip_rect(egui::Rect::EVERYTHING);
+    let mut mesh = egui::epaint::Mesh::default();
+    for shape in shapes {
+        tess.tessellate_shape(shape, &mut mesh);
+    }
+    Arc::new(mesh)
 }
 
 

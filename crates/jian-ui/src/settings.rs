@@ -454,7 +454,7 @@ impl SettingsSession {
                 self.save_note = Some(format!("鉴权失败：{e}"));
             }
             Some(Err(mpsc::TryRecvError::Empty)) => {
-                ctx.request_repaint();
+                ctx.request_repaint_after(std::time::Duration::from_millis(50));
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.auth_rx = None;
@@ -1719,7 +1719,7 @@ fn draw_general(
         control_row(
             ui,
             "目标帧率",
-            "空闲与波圈重绘；默认 60，范围 20–300",
+            "交互/极致档跟手上限；空闲与波圈另有降频；默认 30，范围 20–300",
             "\u{25ce}",
             |ui| {
                 let mut fps = draft.performance.target_fps as i32;
@@ -1747,6 +1747,7 @@ fn draw_general(
                 draft.performance.device = d.device;
                 draft.performance.gpu_api = d.gpu_api;
                 draft.performance.profile = d.profile;
+                draft.performance.target_fps = d.target_fps;
                 *perf_diag = Some(d.summary);
             }
         });

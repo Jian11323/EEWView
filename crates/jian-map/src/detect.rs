@@ -29,6 +29,9 @@ pub struct DetectTracker {
     until: HashMap<String, i64>,
     /// 本轮检出最大震度播报档（0–7）；静默后清空
     last_max_audio: Option<u8>,
+    /// 无活动时降频 tick，减轻每帧邻域扫描
+    last_tick_ms: i64,
+    cached_boxes: Vec<DetectBox>,
 }
 
 impl DetectTracker {
@@ -38,6 +41,15 @@ impl DetectTracker {
         stations: &[StationSample],
         now_ms: i64,
     ) -> (Vec<DetectBox>, Option<u8>) {
+        let felt_any = stations.iter().any(|s| {
+            s.intensity_kind == IntensityKind::JmaShindo && s.instrumental >= 0.5
+        });
+        // 无有感且无保持框：约 4Hz 扫描即可
+        if !felt_any && self.until.is_empty() && now_ms.saturating_sub(self.last_tick_ms) < 250 {
+            return (self.cached_boxes.clone(), None);
+        }
+
+        self.last_tick_ms = now_ms;
         self.until.retain(|_, exp| *exp > now_ms);
 
         let felt: Vec<&StationSample> = stations
@@ -93,6 +105,7 @@ impl DetectTracker {
             self.last_max_audio = Some(self.last_max_audio.map(|p| p.max(m)).unwrap_or(m));
         }
 
+        self.cached_boxes = boxes.clone();
         (boxes, rose)
     }
 }

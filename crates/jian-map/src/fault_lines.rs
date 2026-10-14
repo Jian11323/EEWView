@@ -4,11 +4,13 @@
 //! 避免每帧对上万条 PathShape 做描边镶嵌与 clone。
 
 use crate::projection::{self, ViewCtx};
+use crate::PaintQuality;
 use egui::{Color32, Mesh, Pos2, Ui};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 /// 网格单元边长（度）。约 5° 一格，全球约 36×36 格。
@@ -37,7 +39,8 @@ struct SegLayer {
 
 struct PaintCache {
     key: u64,
-    mesh: Mesh,
+    /// Arc：命中时只增引用计数，避免每帧克隆上万顶点
+    mesh: Arc<Mesh>,
 }
 
 #[derive(Default)]
@@ -84,30 +87,37 @@ impl FaultLines {
         self.paint_cache = None;
     }
 
-    pub fn paint(&mut self, ui: &mut Ui, view: &ViewCtx, dark: bool) {
+    pub fn paint(&mut self, ui: &mut Ui, view: &ViewCtx, dark: bool, quality: PaintQuality) {
         if self.global.segs.is_empty() && self.china.segs.is_empty() {
             return;
         }
 
         let ppp = ui.ctx().pixels_per_point();
-        let key = paint_key(view, dark, ppp);
+        let key = paint_key(view, dark, ppp, quality);
         if let Some(c) = self.paint_cache.as_ref() {
             if c.key == key {
                 ui.painter_at(view.rect)
-                    .add(egui::Shape::mesh(c.mesh.clone()));
+                    .add(egui::Shape::Mesh(c.mesh.clone()));
                 return;
             }
         }
 
         let (min_lon, min_lat, max_lon, max_lat) = view_lonlat_bounds(view);
-        let step = lod_step(view.zoom);
-        let stride_g = seg_stride(view.zoom, false);
-        let stride_c = seg_stride(view.zoom, true);
+        let (step_bias, stride_mul, budget_scale) = match quality {
+            PaintQuality::Eco => (1usize, 2usize, 0.45_f32),
+            PaintQuality::Normal => (0, 1, 1.0),
+            PaintQuality::Extreme => (0, 1, 1.0),
+        };
+        let step = lod_step(view.zoom) + step_bias;
+        let stride_g = (seg_stride(view.zoom, false) * stride_mul).max(1);
+        let stride_c = (seg_stride(view.zoom, true) * stride_mul).max(1);
         let min_diag = min_diag_deg(view.zoom);
         let (global_rgba, china_rgba, width) = stroke_style(dark, view.zoom);
+        let max_segs = ((MAX_PAINT_SEGS as f32) * budget_scale) as usize;
+        let china_reserve = ((CHINA_RESERVE as f32) * budget_scale) as usize;
 
         let mut mesh = Mesh::default();
-        let global_budget = MAX_PAINT_SEGS.saturating_sub(CHINA_RESERVE);
+        let global_budget = max_segs.saturating_sub(china_reserve);
         let painted_g = paint_layer(
             &mut mesh,
             &self.global,
@@ -125,7 +135,7 @@ impl FaultLines {
         );
         // 近距叠全国 CAFD；远距仍画但更狠抽稀（GEM 华东偏稀）
         // 中国层至少 CHINA_RESERVE，全球未用完的额度一并给中国
-        let china_budget = CHINA_RESERVE + global_budget.saturating_sub(painted_g);
+        let china_budget = china_reserve + global_budget.saturating_sub(painted_g);
         let _ = paint_layer(
             &mut mesh,
             &self.china,
@@ -142,8 +152,9 @@ impl FaultLines {
             china_budget,
         );
 
+        let mesh = Arc::new(mesh);
         ui.painter_at(view.rect)
-            .add(egui::Shape::mesh(mesh.clone()));
+            .add(egui::Shape::Mesh(mesh.clone()));
         self.paint_cache = Some(PaintCache { key, mesh });
     }
 }
@@ -439,7 +450,7 @@ fn stroke_style(dark: bool, zoom: f64) -> (Color32, Color32, f32) {
     }
 }
 
-fn paint_key(view: &ViewCtx, dark: bool, ppp: f32) -> u64 {
+fn paint_key(view: &ViewCtx, dark: bool, ppp: f32, quality: PaintQuality) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     view.mode.hash(&mut h);
     // 量化：兼顾拖拽流畅与断层相对底图不错位（过粗会「粘滞」）
@@ -450,6 +461,7 @@ fn paint_key(view: &ViewCtx, dark: bool, ppp: f32) -> u64 {
     ((view.rect.height() * 0.5).round() as i32).hash(&mut h);
     ((ppp * 4.0).round() as i32).hash(&mut h);
     dark.hash(&mut h);
+    quality.hash(&mut h);
     h.finish()
 }
 

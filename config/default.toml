@@ -33,8 +33,9 @@ device = "gpu"
 # opengl | vulkan（仅 gpu；Windows 默认 opengl，更稳）
 gpu_api = "opengl"
 # eco 节能 | normal 正常 | extreme 极致（档位热重载，无需重启）
+# 节能：空闲约 2fps、波圈约 10fps、测站/矢量更狠抽稀；老机器优先
 profile = "normal"
-# 目标帧率（空闲/波圈重绘）；默认 30，范围 20–300（老 CPU 建议 30 + 节能档）
+# 交互/极致档跟手上限；空闲与波圈另有降频。默认 30，范围 20–300（老 CPU 建议节能 + 20）
 target_fps = 30
 
 [window]

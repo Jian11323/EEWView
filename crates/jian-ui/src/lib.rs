@@ -173,6 +173,8 @@ impl MainShell {
         self.map.set_ocean_fill(if ui_theme.is_light() { p.map_bg } else { OCEAN });
         self.map
             .set_vector_style(VectorStyle::for_theme(&cfg.ui.theme));
+        self.map
+            .set_paint_quality(jian_map::PaintQuality::from_profile(&cfg.performance.profile));
 
         snap.prune_finished_eews();
         self.intensity_icons.ensure(ctx);
@@ -193,15 +195,14 @@ impl MainShell {
 
         let live_refs =
             live_wave_eews_travel(&snap.eew_list, now_ms, &snap.wave_spread_km, travel);
-        let wave_owned: Vec<_> = live_refs.into_iter().cloned().collect();
-        let marker_owned = wave_owned.clone();
+        let mut wave_owned: Vec<_> = live_refs.into_iter().cloned().collect();
         // 演示样本：无有效发震时刻时用 map_elapsed 驱动波圈
         let sample_elapsed = self.map_elapsed % 120.0;
         let mut map_ui = MapUiResult::default();
 
-        // 波圈动画按目标帧率重绘，避免 uncapped request_repaint 拉高 CPU
+        // 波圈动画按档位降频，避免 uncapped request_repaint 拉高 CPU
         if show_waves && !wave_owned.is_empty() {
-            let ms = cfg.performance.repaint_interval_ms();
+            let ms = cfg.performance.wave_repaint_ms();
             ctx.request_repaint_after(std::time::Duration::from_millis(ms));
         }
 
@@ -248,8 +249,7 @@ impl MainShell {
                     (Some(lon), Some(lat)) => Some((lon, lat)),
                     _ => None,
                 };
-                let mut wave_for_map = wave_owned.clone();
-                for ev in &mut wave_for_map {
+                for ev in &mut wave_owned {
                     if ev.origin_ms <= 0 {
                         ev.origin_ms = now_ms - (sample_elapsed * 1000.0) as i64;
                     }
@@ -274,8 +274,8 @@ impl MainShell {
                 map_ui = self.map.ui(
                     ui,
                     snap.active.as_ref(),
-                    &wave_for_map,
-                    &marker_owned,
+                    &wave_owned,
+                    &wave_owned,
                     travel,
                     now_ms,
                     show_waves,
@@ -330,7 +330,7 @@ impl MainShell {
                             Some(ev.latitude),
                         );
                         ctx.request_repaint_after(std::time::Duration::from_millis(
-                            cfg.performance.repaint_interval_ms(),
+                            cfg.performance.wave_repaint_ms(),
                         ));
                     }
                 }

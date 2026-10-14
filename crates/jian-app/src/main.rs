@@ -337,16 +337,25 @@ fn build_native_options(
     }
 }
 
-/// 目标帧率 → 重绘间隔（毫秒）。
-/// `busy`：交互/飞跃/设置/波圈/倒计时等需要跟手刷新；空闲则大幅降频，避免老 CPU 空载仍 60fps。
-fn idle_repaint_ms(perf: &jian_config::PerformanceConfig, busy: bool) -> u64 {
-    if busy {
-        return perf.repaint_interval_ms();
-    }
-    match perf.profile.to_ascii_lowercase().as_str() {
-        "extreme" => perf.repaint_interval_ms(),
-        "eco" => 333,  // ~3 fps
-        _ => 200,      // ~5 fps（normal）；矢量缓存命中时进一步降 CPU
+/// 按忙碌类型选重绘间隔，避免老机器空载/软忙仍按目标帧率烧 CPU/GPU。
+#[derive(Clone, Copy)]
+enum RepaintNeed {
+    /// 拖拽/飞跃/启动画面：跟手
+    Interactive,
+    /// 波圈动画
+    Waves,
+    /// 设置页打开或倒计时秒显
+    Soft,
+    /// 完全空闲
+    Idle,
+}
+
+fn repaint_ms(perf: &jian_config::PerformanceConfig, need: RepaintNeed) -> u64 {
+    match need {
+        RepaintNeed::Interactive => perf.repaint_interval_ms().min(16),
+        RepaintNeed::Waves => perf.wave_repaint_ms(),
+        RepaintNeed::Soft => perf.soft_repaint_ms(),
+        RepaintNeed::Idle => perf.idle_repaint_ms(),
     }
 }
 
@@ -596,15 +605,20 @@ impl eframe::App for JianApp {
             self.snap.pending_tts_record = None;
         }
 
-        // 同步自定义震级传播表到快照（波圈判定用）
-        self.snap.wave_spread_km = self
-            .cfg
-            .travel
-            .mag_spread_km
-            .iter()
-            .map(|p| (p.min_magnitude, p.max_magnitude, p.max_km))
-            .collect();
-        self.snap.wave_spread_km.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        // 同步自定义震级传播表到快照（仅变更时写入，避免每帧分配+排序）
+        {
+            let mut next: Vec<(f64, f64, f64)> = self
+                .cfg
+                .travel
+                .mag_spread_km
+                .iter()
+                .map(|p| (p.min_magnitude, p.max_magnitude, p.max_km))
+                .collect();
+            next.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            if self.snap.wave_spread_km != next {
+                self.snap.wave_spread_km = next;
+            }
+        }
 
         self.tick_health_audio();
         self.tick_tsunami_audio();
@@ -979,19 +993,17 @@ impl eframe::App for JianApp {
             && self.snap.eew_list.iter().any(|e| {
                 eew_wave_live(e, now_ms, &self.snap.wave_spread_km, self.travel.as_ref())
             });
-        let busy = pointer_busy
-            || self.shell.map.is_flying()
-            || self.shell.settings.open
-            || self.splash.active()
-            || waves_busy
-            || self.snap.countdown_s.is_some();
-        let fps_ms = idle_repaint_ms(&self.cfg.performance, busy);
-        if pointer_busy || self.shell.map.is_flying() || self.shell.settings.open || self.splash.active()
-        {
-            ctx.request_repaint_after(std::time::Duration::from_millis(fps_ms.min(16)));
+        let need = if pointer_busy || self.shell.map.is_flying() || self.splash.active() {
+            RepaintNeed::Interactive
+        } else if waves_busy {
+            RepaintNeed::Waves
+        } else if self.shell.settings.open || self.snap.countdown_s.is_some() {
+            RepaintNeed::Soft
         } else {
-            ctx.request_repaint_after(std::time::Duration::from_millis(fps_ms));
-        }
+            RepaintNeed::Idle
+        };
+        let fps_ms = repaint_ms(&self.cfg.performance, need);
+        ctx.request_repaint_after(std::time::Duration::from_millis(fps_ms));
     }
 }
 

@@ -21,6 +21,25 @@ pub use projection::{clamp_lat, km_to_pixels, lonlat_to_screen, normalize_lon, P
 pub use tile_cache::TileCache;
 pub use vector_basemap::{BasemapLoadState, BasemapMode, VectorBasemap, VectorStyle, OCEAN};
 
+/// 绘制质量：随性能档位降低测站密度 / 矢量细度，减轻老 GPU/CPU。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PaintQuality {
+    Eco,
+    #[default]
+    Normal,
+    Extreme,
+}
+
+impl PaintQuality {
+    pub fn from_profile(profile: &str) -> Self {
+        match profile.to_ascii_lowercase().as_str() {
+            "eco" => Self::Eco,
+            "extreme" => Self::Extreme,
+            _ => Self::Normal,
+        }
+    }
+}
+
 /// 地图一帧交互结果。
 #[derive(Debug, Default, Clone)]
 pub struct MapUiResult {
@@ -60,6 +79,8 @@ pub struct MapViewport {
     pub user_camera_override: bool,
     /// 最近一帧视口短边（px），供跟焦时按波圈估 zoom
     pub last_viewport_min_px: f32,
+    /// 性能档对应的绘制抽稀
+    paint_quality: PaintQuality,
 }
 
 impl Default for MapViewport {
@@ -84,6 +105,7 @@ impl Default for MapViewport {
             post_flight_cooldown: 0.0,
             user_camera_override: false,
             last_viewport_min_px: 720.0,
+            paint_quality: PaintQuality::Normal,
         }
     }
 }
@@ -265,6 +287,11 @@ impl MapViewport {
         self.vector_style = style;
     }
 
+    /// 与性能档位同步的绘制抽稀（节能更狠）。
+    pub fn set_paint_quality(&mut self, q: PaintQuality) {
+        self.paint_quality = q;
+    }
+
     /// 绘制地图交互；若单击（非拖拽）则返回点击处经纬度。
     /// `wave_events`：仍在传播的多震；`eew_markers`：各源最新预警叉标；`active` 高亮选中。
     pub fn ui(
@@ -354,13 +381,14 @@ impl MapViewport {
                 /* fill_land */ false,
                 self.vector_style,
                 /* skip_world_stroke */ false,
+                self.paint_quality,
             );
         }
 
         // 活动断层：矢量轮廓之上、事件叠加之下；瓦片底图时也绘制
         if show_faults {
             let dark = self.ocean_fill.r() < 80;
-            self.faults.paint(ui, &view, dark);
+            self.faults.paint(ui, &view, dark, self.paint_quality);
         }
 
         // JMA 海啸：按沿岸预报区描边闪烁（不对中日外轮廓整圈描边）
@@ -385,7 +413,15 @@ impl MapViewport {
                     && !e.is_cancel
             });
             detect::paint_detect_boxes(ui, &view, detect_boxes);
-            overlay::paint_stations(ui, &view, stations, selected_station, icons, eew_active);
+            overlay::paint_stations(
+                ui,
+                &view,
+                stations,
+                selected_station,
+                icons,
+                eew_active,
+                self.paint_quality,
+            );
             overlay::paint_records(ui, &view, records, selected_record, icons);
             overlay::paint_volcanoes(ui, &view, volcanoes, selected_volcano);
             if !typhoons.is_empty() {
