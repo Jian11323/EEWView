@@ -101,6 +101,21 @@ fn install_cjk_fonts(ctx: &egui::Context) {
     tracing::info!(bytes = LXGW_WENKAI.len(), "embedded LXGW WenKai as CJK fallback");
 }
 
+fn window_title_for_lang(language: &str) -> String {
+    let monitor = match jian_config::normalize_ui_language(language).as_str() {
+        "zh-TW" => "地震視監器",
+        "ja" => "地震モニター",
+        "en" => "Quake Monitor",
+        _ => "地震视监器",
+    };
+    format!(
+        "{} \u{00b7} {}  [Beta] v{}",
+        jian_ui::APP_DISPLAY_NAME,
+        monitor,
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
 fn main() {
     if let Err(e) = run_app() {
         let msg = format!("{e:#}");
@@ -113,6 +128,9 @@ fn run_app() -> Result<()> {
     let root = resource_root();
     let media = media_root();
     let cfg = AppConfig::load_merged(root.join("config/default.toml"));
+    let mut cfg = cfg;
+    cfg.ui.language = jian_config::normalize_ui_language(&cfg.ui.language);
+    jian_ui::set_lang_from_config(&cfg.ui.language);
     let log_guard = logging::init_logging(&root, &cfg.log);
     tracing::info!(
         root = %root.display(),
@@ -247,11 +265,7 @@ fn run_app() -> Result<()> {
             win.width.clamp(640.0, 7680.0),
             win.height.clamp(480.0, 4320.0),
         ])
-        .with_title(format!(
-            "{} \u{00b7} 地震视监器  [Beta] v{}",
-            jian_ui::APP_DISPLAY_NAME,
-            env!("CARGO_PKG_VERSION")
-        ));
+        .with_title(window_title_for_lang(&cfg.ui.language));
     if let (Some(x), Some(y)) = (win.x, win.y) {
         viewport = viewport.with_position([x, y]);
     }
@@ -895,6 +909,9 @@ impl eframe::App for JianApp {
                                     egui::WindowLevel::Normal
                                 },
                             ));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Title(
+                                window_title_for_lang(&self.cfg.ui.language),
+                            ));
                             self.snap.show_wave_rings = self.cfg.ui.show_wave_rings;
                             let mut note = format!("已保存到 {}", path.display());
                             if renderer_changed {
@@ -1173,6 +1190,10 @@ impl JianApp {
     }
 
     fn apply_saved_config(&mut self, new_cfg: AppConfig) -> Result<(PathBuf, bool), String> {
+        let mut new_cfg = new_cfg;
+        new_cfg.ui.language = jian_config::normalize_ui_language(&new_cfg.ui.language);
+        jian_ui::set_lang_from_config(&new_cfg.ui.language);
+
         let sources_same = self.cfg.sources_runtime_equal(&new_cfg);
         let travel_same = self.cfg.travel.primary == new_cfg.travel.primary
             && self.cfg.travel.fallback == new_cfg.travel.fallback

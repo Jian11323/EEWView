@@ -73,6 +73,9 @@ impl Default for LogConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiConfig {
     pub theme: String,
+    /// 界面语言：`zh-CN` | `zh-TW` | `ja` | `en`
+    #[serde(default = "default_ui_language")]
+    pub language: String,
     pub show_nied_clock: bool,
     pub sidebar_default_tab: String,
     pub intensity_scale: String,
@@ -707,12 +710,27 @@ fn default_typhoon_poll() -> u64 {
 fn default_typhoon_forecast_agency() -> String {
     "中国".into()
 }
+fn default_ui_language() -> String {
+    "zh-CN".into()
+}
+
+/// 归一化界面语言配置值。
+pub fn normalize_ui_language(s: &str) -> String {
+    match s.trim() {
+        "zh-TW" | "zh_TW" | "zh-tw" | "zh_Hant" | "zh-Hant" => "zh-TW".into(),
+        "ja" | "ja-JP" | "jp" | "japanese" => "ja".into(),
+        "en" | "en-US" | "en-GB" | "english" => "en".into(),
+        "zh-CN" | "zh_CN" | "zh-cn" | "zh" | "zh_Hans" | "zh-Hans" => "zh-CN".into(),
+        _ => "zh-CN".into(),
+    }
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             ui: UiConfig {
                 theme: "dark".into(),
+                language: default_ui_language(),
                 show_nied_clock: false,
                 sidebar_default_tab: "eew".into(),
                 intensity_scale: "auto".into(),

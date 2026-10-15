@@ -166,7 +166,7 @@ pub fn draw_splash(
             painter.text(
                 c + Vec2::new(0.0, 56.0),
                 Align2::CENTER_CENTER,
-                format!("地震监视器  v{}", env!("CARGO_PKG_VERSION")),
+                format!("{}", crate::i18n::t("地震监视器  v{}").replace("{}", env!("CARGO_PKG_VERSION"))),
                 FontId::proportional(14.0),
                 with_alpha(p.text_muted, opacity),
             );
@@ -175,10 +175,10 @@ pub fn draw_splash(
                 status
             } else {
                 match load {
-                    BasemapLoadState::LoadingWorld => "正在加载世界底图…",
-                    BasemapLoadState::LoadingRegional => "正在加载区划…",
-                    BasemapLoadState::Failed => "底图加载失败",
-                    _ => "正在启动…",
+                    BasemapLoadState::LoadingWorld => crate::i18n::t("正在加载世界底图…"),
+                    BasemapLoadState::LoadingRegional => crate::i18n::t("正在加载区划…"),
+                    BasemapLoadState::Failed => crate::i18n::t("底图加载失败"),
+                    _ => crate::i18n::t("正在启动…"),
                 }
             };
             painter.text(

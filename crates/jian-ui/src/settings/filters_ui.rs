@@ -1,6 +1,7 @@
 //! 信息事件（速报）源开关与震级过滤。
 
 use super::{control_field_below, control_row, framed_edit, muted, row_divider, section, toggle};
+use crate::i18n::t;
 use egui::{RichText, Ui};
 use jian_config::AppConfig;
 use jian_core::{AgencyFamily, RECORD_FILTER_FAMILIES};
@@ -8,7 +9,7 @@ use jian_core::{AgencyFamily, RECORD_FILTER_FAMILIES};
 /// 各机构速报开关（挂在 Jian Project 区内，不再单独成块）。
 pub fn draw_record_source_switches(ui: &mut Ui, draft: &mut AppConfig) {
     ui.label(
-        RichText::new("各机构速报独立开关；关闭后该源整条丢弃。与下方震级阈值无关。")
+        RichText::new(t("各机构速报独立开关；关闭后该源整条丢弃。与下方震级阈值无关。"))
             .size(12.0)
             .color(muted()),
     );
@@ -22,7 +23,7 @@ pub fn draw_record_source_switches(ui: &mut Ui, draft: &mut AppConfig) {
         let key = fam.as_filter_key();
         let mut on = draft.filters.record_source_enabled(key);
         let subtitle = if *fam == AgencyFamily::Other {
-            "未登记机构的信息事件；默认关闭"
+            t("未登记机构的信息事件；默认关闭")
         } else {
             fam.as_filter_key()
         };
@@ -36,7 +37,7 @@ pub fn draw_record_source_switches(ui: &mut Ui, draft: &mut AppConfig) {
 pub fn draw_record_mag_filters(ui: &mut Ui, draft: &mut AppConfig) {
     section(ui, "信息事件震级过滤", "\u{25ce}", |ui| {
         ui.label(
-            RichText::new("手动填写最低震级；0=不过滤。白名单可绕过震级，不能绕过已关闭的源开关。")
+            RichText::new(t("手动填写最低震级；0=不过滤。白名单可绕过震级，不能绕过已关闭的源开关。"))
                 .size(12.0)
                 .color(muted()),
         );
@@ -50,9 +51,9 @@ pub fn draw_record_mag_filters(ui: &mut Ui, draft: &mut AppConfig) {
             let key = fam.as_filter_key();
             let mut val = draft.filters.record_mag_threshold(key);
             let subtitle = if *fam == AgencyFamily::Other {
-                "未登记机构；仅在上方开关打开时生效"
+                t("未登记机构；仅在上方开关打开时生效")
             } else {
-                "0=不过滤；低于阈值不显示"
+                t("0=不过滤；低于阈值不显示")
             };
             control_row(ui, fam.display_name(), subtitle, "\u{25ce}", |ui| {
                 ui.add(

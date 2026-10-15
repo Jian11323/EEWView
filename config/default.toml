@@ -11,6 +11,8 @@ enabled = true
 
 [ui]
 theme = "dark"
+# zh-CN | zh-TW | ja | en
+language = "zh-CN"
 show_nied_clock = false
 sidebar_default_tab = "eew"
 intensity_scale = "auto"

@@ -4,6 +4,7 @@
 use egui::{
     Color32, Frame, Margin, Pos2, Rect, RichText, ScrollArea, Sense, Stroke, Ui, Vec2,
 };
+use crate::i18n::{t, Lang};
 use jian_config::AppConfig;
 use jian_core::HealthStatus;
 use jian_net::{exchange_login_key, format_expire_date};
@@ -146,7 +147,7 @@ impl SettingsTab {
             Self::Sources => "接口开关、鉴权与连接状态",
             Self::General => "主题、底图、窗口与定位",
             Self::Audio => "音量与静音",
-            Self::Advanced => "走时表、缓存与配置·径",
+            Self::Advanced => "走时表、缓存与配置路径",
             Self::About => "版本、致谢与版权",
         }
     }
@@ -279,7 +280,7 @@ impl SettingsSession {
             draft.map.default_lon = lon;
             draft.map.default_lat = lat;
             draft.map.default_zoom = zoom;
-            self.save_note = Some("·用当前视野写入默认视口".into());
+            self.save_note = Some(t("已用当前视野写入默认视口").into());
         }
         self.capture_view = false;
     }
@@ -300,12 +301,12 @@ impl SettingsSession {
                 draft.map.default_lon = lon;
                 draft.map.default_lat = lat;
                 draft.map.default_zoom = zoom;
-                self.save_note = Some("·用地图选点写入默认视口".into());
+                self.save_note = Some(t("已用地图选点写入默认视口").into());
             }
             MapPickKind::LocalLocation => {
                 draft.local.longitude = Some(lon);
                 draft.local.latitude = Some(lat);
-                self.save_note = Some("·用地图选点写入本机位置".into());
+                self.save_note = Some(t("已用地图选点写入本机位置").into());
             }
         }
         self.map_pick = None;
@@ -334,6 +335,9 @@ impl SettingsSession {
         let mut close_requested = false;
 
         // 主窗口内嵌设置（勿再用独立 viewport：会抢焦点，表现为鼠标被隔离）
+        if let Some(d) = self.draft.as_ref() {
+            crate::i18n::set_lang_from_config(&d.ui.language);
+        }
         let theme_key = self
             .draft
             .as_ref()
@@ -419,7 +423,7 @@ impl SettingsSession {
             let (tx, rx) = mpsc::channel();
             self.auth_busy = true;
             self.auth_rx = Some(rx);
-            self.save_note = Some("正在换票…".into());
+            self.save_note = Some(t("正在换票…").into());
             std::thread::spawn(move || {
                 let _ = tx.send(
                     exchange_login_key(&key)
@@ -452,7 +456,7 @@ impl SettingsSession {
             Some(Ok(Err(e))) => {
                 self.auth_rx = None;
                 self.auth_busy = false;
-                self.save_note = Some(format!("鉴权失败：{e}"));
+                self.save_note = Some(format!("{}{e}", t("鉴权失败：")));
             }
             Some(Err(mpsc::TryRecvError::Empty)) => {
                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
@@ -460,7 +464,7 @@ impl SettingsSession {
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.auth_rx = None;
                 self.auth_busy = false;
-                self.save_note = Some("鉴权失败：换票线程中断".into());
+                self.save_note = Some(t("鉴权失败：换票线程中断").into());
             }
             None => {}
         }
@@ -474,7 +478,7 @@ impl SettingsSession {
             d.sources.jian.refresh_token = refresh;
             d.sources.jian.refresh_expire_at = refresh_exp;
             self.draft = Some(d);
-            self.save_note = Some("·恢复默认（令牌保留）；点「保存全部」写入".into());
+            self.save_note = Some(t("已恢复默认（令牌保留）；点「保存全部」写入").into());
         }
 
         if close_requested {
@@ -536,13 +540,13 @@ fn draw_shell(
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.label(
-                                RichText::new("设置中心")
+                                RichText::new(t("设置中心"))
                                     .strong()
                                     .size(22.0)
                                     .color(chrome().text),
                             );
                             ui.label(
-                                RichText::new("EEWView \u{00b7} ·侧分类与右侧内容合并为同一玻璃面板")
+                                RichText::new(t("EEWView · 左侧分类与右侧内容合并为同一玻璃面板"))
                                     .size(12.0)
                                     .color(chrome().muted),
                             );
@@ -599,7 +603,7 @@ fn draw_shell(
                         ui.add_space(8.0);
                         ui.checkbox(
                             &mut session.keep_open,
-                            RichText::new("保存后不关闭").size(12.0).color(chrome().text70),
+                            RichText::new(t("保存后不关闭")).size(12.0).color(chrome().text70),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let draft = session.draft.as_ref().unwrap();
@@ -642,7 +646,7 @@ fn draw_nav(ui: &mut Ui, session: &mut SettingsSession, body_h: f32) {
             ui.painter().text(
                 Pos2::new(head_rect.left() + 18.0, head_rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                "应用设置",
+                t("应用设置"),
                 egui::FontId::proportional(15.0),
                 chrome().text,
             );
@@ -650,9 +654,9 @@ fn draw_nav(ui: &mut Ui, session: &mut SettingsSession, body_h: f32) {
 
             ui.add_space(8.0);
 
-            for t in SettingsTab::ALL {
-                let selected = session.tab == t;
-                let accent = t.accent();
+            for tab in SettingsTab::ALL {
+                let selected = session.tab == tab;
+                let accent = tab.accent();
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
                     let (rect, resp) =
@@ -709,27 +713,27 @@ fn draw_nav(ui: &mut Ui, session: &mut SettingsSession, body_h: f32) {
                     ui.painter().text(
                         Pos2::new(rect.left() + 14.0, cy),
                         egui::Align2::LEFT_CENTER,
-                        t.glyph(),
+                        tab.glyph(),
                         egui::FontId::proportional(16.0),
                         icon_c,
                     );
                     ui.painter().text(
                         Pos2::new(rect.left() + 38.0, cy - 8.0),
                         egui::Align2::LEFT_CENTER,
-                        t.title(),
+                        crate::i18n::t(tab.title()),
                         egui::FontId::proportional(13.5),
                         title_c,
                     );
                     ui.painter().text(
                         Pos2::new(rect.left() + 38.0, cy + 9.0),
                         egui::Align2::LEFT_CENTER,
-                        t.subtitle(),
+                        crate::i18n::t(tab.subtitle()),
                         egui::FontId::proportional(10.5),
                         chrome().muted,
                     );
 
                     if resp.clicked() {
-                        session.tab = t;
+                        session.tab = tab;
                     }
                 });
                 ui.add_space(4.0);
@@ -883,6 +887,7 @@ fn draw_content(
 }
 
 pub(super) fn section(ui: &mut Ui, title: &str, glyph: &str, add: impl FnOnce(&mut Ui)) {
+    let title = t(title);
     ui.horizontal(|ui| {
         ui.label(RichText::new(glyph).size(16.0).color(chrome().accent));
         ui.label(RichText::new(title).strong().size(15.0).color(chrome().text));
@@ -908,6 +913,8 @@ pub(super) fn control_row(
     glyph: &str,
     right: impl FnOnce(&mut Ui),
 ) {
+    let title = t(title);
+    let subtitle = if subtitle.is_empty() { "" } else { t(subtitle) };
     ui.horizontal(|ui| {
         paint_row_icon(ui, glyph);
         ui.add_space(10.0);
@@ -954,6 +961,8 @@ pub(super) fn control_field_below(
     glyph: &str,
     edit: impl FnOnce(&mut Ui),
 ) {
+    let title = t(title);
+    let subtitle = if subtitle.is_empty() { "" } else { t(subtitle) };
     ui.horizontal(|ui| {
         paint_row_icon(ui, glyph);
         ui.add_space(10.0);
@@ -972,6 +981,7 @@ pub(super) fn control_field_below(
 }
 
 fn glass_btn(ui: &mut Ui, text: &str, emphasized: bool) -> egui::Response {
+    let text = t(text);
     let fill = if emphasized {
         Color32::from_rgba_unmultiplied(chrome().accent.r(), chrome().accent.g(), chrome().accent.b(), 90)
     } else {
@@ -1106,27 +1116,27 @@ fn draw_sources(
                 .map(|d| format!("（约至 {d}）"))
                 .unwrap_or_default();
             ui.label(
-                RichText::new(format!("长期 Token：{short}{exp}"))
+                RichText::new(format!("{}", t("长期 Token：{short}{exp}").replace("{short}", &short).replace("{exp}", &exp)))
                     .size(11.5)
                     .color(chrome().muted),
             );
         } else {
             ui.label(
-                RichText::new("尚未保存长期 Token。也可设环境变量 JIAN_REFRESH_TOKEN。")
+                RichText::new(t("尚未保存长期 Token。也可设环境变量 JIAN_REFRESH_TOKEN。"))
                     .size(11.5)
                     .color(chrome().muted),
             );
         }
         if draft.sources.jian.access_token.is_some() {
             ui.label(
-                RichText::new("短期 at_ 由 JIAN_ACCESS_TOKEN 注入（不写入文件）。")
+                RichText::new(t("短期 at_ 由 JIAN_ACCESS_TOKEN 注入（不写入文件）。"))
                     .size(11.5)
                     .color(chrome().muted),
             );
         }
         ui.add_space(10.0);
         ui.label(
-            RichText::new("速报（信息事件）源开关")
+            RichText::new(t("速报（信息事件）源开关"))
                 .strong()
                 .size(14.0)
                 .color(chrome().text),
@@ -1270,7 +1280,7 @@ fn draw_sources(
         });
         if draft.sources.stations.snet_enabled {
             row_divider(ui);
-            control_row(ui, "S-Net 源", "原版需 media/stations/pixels.csv", "\u{25ce}", |ui| {
+            control_row(ui, "S-Net 源", "原版需 MSIL 可达；否则回退 Jian", "\u{25ce}", |ui| {
                 egui::ComboBox::from_id_salt("set_snet_station_src")
                     .selected_text(snet_station_src_label(&draft.sources.stations.snet_source))
                     .width(200.0)
@@ -1326,12 +1336,12 @@ fn set_jian_eew_flag(draft: &mut AppConfig, fam: jian_core::AgencyFamily, on: bo
 
 fn status_row(ui: &mut Ui, name: &str, status: HealthStatus, enabled: bool) {
     let (color, label) = if !enabled {
-        (chrome().text70, "关闭")
+        (chrome().text70, t("关闭"))
     } else {
         match status {
-            HealthStatus::Normal => (chrome().status_ok, "正常"),
-            HealthStatus::Fluctuating => (chrome().status_warn, "波动"),
-            HealthStatus::Abnormal => (chrome().status_bad, "异常"),
+            HealthStatus::Normal => (chrome().status_ok, t("正常")),
+            HealthStatus::Fluctuating => (chrome().status_warn, t("波动")),
+            HealthStatus::Abnormal => (chrome().status_bad, t("异常")),
         }
     };
     ui.horizontal(|ui| {
@@ -1352,9 +1362,9 @@ fn is_projection_flat(draft: &AppConfig) -> bool {
 
 fn projection_label(draft: &AppConfig) -> &'static str {
     if draft.map.projection.eq_ignore_ascii_case("globe") {
-        "球体"
+        t("球体")
     } else {
-        "平面"
+        t("平面")
     }
 }
 
@@ -1364,26 +1374,26 @@ fn is_basemap_auto(draft: &AppConfig) -> bool {
 
 fn basemap_preset_label(draft: &AppConfig) -> String {
     match draft.map.basemap.trim().to_ascii_lowercase().as_str() {
-        "vector" => "矢量地图".into(),
-        "tiles" | "both" => "地形地图".into(),
-        _ => "·随主题（推荐）".into(),
+        "vector" => t("矢量地图").into(),
+        "tiles" | "both" => t("地形地图").into(),
+        _ => t("跟随主题（推荐）").into(),
     }
 }
 
 fn tab_display(s: &str) -> String {
-    match s.to_ascii_lowercase().as_str() {
-        "records" | "record" => "速报".into(),
-        "station" => "测站".into(),
-        "volcano" => "火山".into(),
-        _ => "预警".into(),
+    match s {
+        "records" => t("速报").into(),
+        "station" => t("测站").into(),
+        "volcano" => t("火山").into(),
+        _ => t("预警").into(),
     }
 }
 
 fn perf_device_label(v: &str) -> &'static str {
     if v.eq_ignore_ascii_case("cpu") {
-        "CPU 模式"
+        t("CPU 模式")
     } else {
-        "GPU 模式"
+        t("GPU 模式")
     }
 }
 
@@ -1397,25 +1407,25 @@ fn perf_gpu_api_label(v: &str) -> &'static str {
 
 fn perf_profile_label(v: &str) -> &'static str {
     match v.to_ascii_lowercase().as_str() {
-        "eco" | "节能" => "节能模式",
-        "extreme" | "极致" => "极致模式",
-        _ => "正常模式",
+        "eco" | "节能" => t("节能模式"),
+        "extreme" | "极致" => t("极致模式"),
+        _ => t("正常模式"),
     }
 }
 
 fn theme_display(s: &str) -> String {
     if s.eq_ignore_ascii_case("light") {
-        "亮色".into()
+        t("亮色").into()
     } else {
-        "暗色".into()
+        t("暗色").into()
     }
 }
 
 fn scale_display(s: &str) -> String {
     match s.to_ascii_lowercase().as_str() {
-        "jma" => "气象厅震度".into(),
-        "cn" => "中国烈度".into(),
-        _ => "自动".into(),
+        "jma" => t("气象厅震度").into(),
+        "cn" => t("中国烈度").into(),
+        _ => t("自动").into(),
     }
 }
 
@@ -1458,29 +1468,47 @@ fn draw_general(
     perf_diag: &mut Option<String>,
 ) {
     section(ui, "外观", "\u{25d0}", |ui| {
-        control_row(ui, "界面主题", "切换后设置页立即·随；保存后应用到主界面", "\u{25d0}", |ui| {
+        control_row(ui, "界面主题", "切换后设置页立即跟随；保存后应用到主界面", "\u{25d0}", |ui| {
             egui::ComboBox::from_id_salt("set_theme")
                 .selected_text(theme_display(&draft.ui.theme))
                 .width(120.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut draft.ui.theme, "dark".into(), "暗色");
-                    ui.selectable_value(&mut draft.ui.theme, "light".into(), "亮色");
+                    ui.selectable_value(&mut draft.ui.theme, "dark".into(), t("暗色"));
+                    ui.selectable_value(&mut draft.ui.theme, "light".into(), t("亮色"));
                 });
         });
         row_divider(ui);
-        control_row(ui, "地图底图", "·随主题，或固定矢量 / 地形地图", "\u{25a3}", |ui| {
+        control_row(ui, "界面语言", "切换后设置页立即跟随；保存后应用到主界面", "\u{25d0}", |ui| {
+            let cur = Lang::parse(&draft.ui.language);
+            egui::ComboBox::from_id_salt("set_ui_language")
+                .selected_text(cur.native_name())
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    for lang in Lang::ALL {
+                        if ui
+                            .selectable_label(cur == lang, lang.native_name())
+                            .clicked()
+                        {
+                            draft.ui.language = lang.as_config().into();
+                            crate::i18n::set_lang(lang);
+                        }
+                    }
+                });
+        });
+        row_divider(ui);
+        control_row(ui, "地图底图", "跟随主题，或固定矢量 / 地形地图", "\u{25a3}", |ui| {
             egui::ComboBox::from_id_salt("set_basemap_preset")
                 .selected_text(basemap_preset_label(draft))
                 .width(200.0)
                 .show_ui(ui, |ui| {
                     if ui
-                        .selectable_label(is_basemap_auto(draft), "·随主题（推荐）")
+                        .selectable_label(is_basemap_auto(draft), t("跟随主题（推荐）"))
                         .clicked()
                     {
                         draft.map.basemap = "auto".into();
                     }
                     if ui
-                        .selectable_label(draft.map.basemap == "vector", "矢量地图")
+                        .selectable_label(draft.map.basemap == "vector", t("矢量地图"))
                         .clicked()
                     {
                         draft.map.basemap = "vector".into();
@@ -1489,7 +1517,7 @@ fn draw_general(
                     if ui
                         .selectable_label(
                             draft.map.basemap == "tiles" || draft.map.basemap == "both",
-                            "地形地图",
+                            t("地形地图"),
                         )
                         .clicked()
                     {
@@ -1505,7 +1533,7 @@ fn draw_general(
                 .width(160.0)
                 .show_ui(ui, |ui| {
                     if ui
-                        .selectable_label(is_projection_flat(draft), "平面")
+                        .selectable_label(is_projection_flat(draft), t("平面"))
                         .clicked()
                     {
                         draft.map.projection = "flat".into();
@@ -1513,7 +1541,7 @@ fn draw_general(
                     if ui
                         .selectable_label(
                             draft.map.projection.eq_ignore_ascii_case("globe"),
-                            "球体",
+                            t("球体"),
                         )
                         .clicked()
                     {
@@ -1524,7 +1552,7 @@ fn draw_general(
         if draft.map.projection.eq_ignore_ascii_case("globe") {
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new("球体模式使用矢量底图（瓦片暂不贴球）")
+                egui::RichText::new(t("球体模式使用矢量底图（瓦片暂不贴球）"))
                     .small()
                     .color(egui::Color32::from_rgb(0x9C, 0xA3, 0xAF)),
             );
@@ -1538,7 +1566,7 @@ fn draw_general(
     });
 
     section(ui, "地图显示", "\u{25a3}", |ui| {
-        control_row(ui, "预警自动·焦", "新预警或报数更新时地图移到震中", "\u{25ce}", |ui| {
+        control_row(ui, "预警自动跟焦", "新预警或报数更新时地图移到震中", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.auto_follow_eew);
         });
         row_divider(ui);
@@ -1550,7 +1578,7 @@ fn draw_general(
             toggle(ui, &mut draft.ui.show_wave_rings);
         });
                 row_divider(ui);
-        control_row(ui, "烈度图例", "地图·下角显示烈度色标", "\u{25ce}", |ui| {
+        control_row(ui, "烈度图例", "地图左下角显示烈度色标", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_legend);
         });
         row_divider(ui);
@@ -1568,14 +1596,14 @@ fn draw_general(
         row_divider(ui);
         control_row(ui, "台风预报源", "地图预报路径所用机构", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("typhoon_fc_agency")
-                .selected_text(&draft.ui.typhoon_forecast_agency)
+                .selected_text(t(&draft.ui.typhoon_forecast_agency))
                 .width(120.0)
                 .show_ui(ui, |ui| {
                     for a in ["全部", "中国", "中国台湾", "日本", "美国", "中国香港"] {
                         ui.selectable_value(
                             &mut draft.ui.typhoon_forecast_agency,
                             a.to_string(),
-                            a,
+                            t(a),
                         );
                     }
                 });
@@ -1592,7 +1620,7 @@ fn draw_general(
                 .selected_text(tab_display(&draft.ui.sidebar_default_tab))
                 .width(120.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut draft.ui.sidebar_default_tab, "eew".into(), "预警");
+                    ui.selectable_value(&mut draft.ui.sidebar_default_tab, "eew".into(), t("预警"));
                     ui.selectable_value(
                         &mut draft.ui.sidebar_default_tab,
                         "records".into(),
@@ -1616,9 +1644,9 @@ fn draw_general(
                 .selected_text(scale_display(&draft.ui.intensity_scale))
                 .width(160.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut draft.ui.intensity_scale, "auto".into(), "自动");
-                    ui.selectable_value(&mut draft.ui.intensity_scale, "jma".into(), "气象厅震度");
-                    ui.selectable_value(&mut draft.ui.intensity_scale, "cn".into(), "中国烈度");
+                    ui.selectable_value(&mut draft.ui.intensity_scale, "auto".into(), t("自动"));
+                    ui.selectable_value(&mut draft.ui.intensity_scale, "jma".into(), t("气象厅震度"));
+                    ui.selectable_value(&mut draft.ui.intensity_scale, "cn".into(), t("中国烈度"));
                 });
         });
     });
@@ -1649,7 +1677,7 @@ fn draw_general(
         row_divider(ui);
         let picking = matches!(*map_pick, Some(MapPickKind::DefaultViewport));
         let sub = if picking {
-            "·点击主窗口地图选点，Esc 取消"
+            "点击主窗口地图选点，Esc 取消"
         } else {
             "在主地图单击选点，或采用当前视野中心"
         };
@@ -1671,8 +1699,8 @@ fn draw_general(
                 .selected_text(perf_device_label(&draft.performance.device))
                 .width(140.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut draft.performance.device, "cpu".into(), "CPU 模式");
-                    ui.selectable_value(&mut draft.performance.device, "gpu".into(), "GPU 模式");
+                    ui.selectable_value(&mut draft.performance.device, "cpu".into(), t("CPU 模式"));
+                    ui.selectable_value(&mut draft.performance.device, "gpu".into(), t("GPU 模式"));
                 });
         });
         if draft.performance.device.eq_ignore_ascii_case("gpu") {
@@ -1701,16 +1729,16 @@ fn draw_general(
                 .selected_text(perf_profile_label(&draft.performance.profile))
                 .width(140.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut draft.performance.profile, "eco".into(), "节能模式");
+                    ui.selectable_value(&mut draft.performance.profile, "eco".into(), t("节能模式"));
                     ui.selectable_value(
                         &mut draft.performance.profile,
                         "normal".into(),
-                        "正常模式",
+                        t("正常模式"),
                     );
                     ui.selectable_value(
                         &mut draft.performance.profile,
                         "extreme".into(),
-                        "极致模式",
+                        t("极致模式"),
                     );
                 });
         });
@@ -1782,7 +1810,7 @@ fn draw_general(
             row_divider(ui);
             let picking = matches!(*map_pick, Some(MapPickKind::LocalLocation));
             let sub = if picking {
-                "·点击主窗口地图选点，Esc 取消"
+                "点击主窗口地图选点，Esc 取消"
             } else {
                 "在主地图单击设置本机位置"
             };
@@ -1798,7 +1826,7 @@ fn draw_general(
 fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<SettingsAction>) {
     section(ui, "震级传播距离", "\u{25ce}", |ui| {
         ui.label(
-            RichText::new("自定义：最小震级、最大震级、传播距离(km)；留空用内置表。")
+            RichText::new(t("自定义：最小震级、最大震级、传播距离(km)；留空用内置表。"))
                 .size(12.0)
                 .color(chrome().muted),
         );
@@ -1808,7 +1836,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
             if i > 0 {
                 row_divider(ui);
             }
-            let title = format!("档位 {}", i + 1);
+            let title = format!("{} {}", t("档位"), i + 1);
             control_row(ui, &title, "最小震级 / 最大震级 / 传播距离", "\u{25ce}", |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
@@ -1862,7 +1890,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
     });
 
     section(ui, "走时表", "\u{25ce}", |ui| {
-        control_row(ui, "主表（近·）", "默认 JMA2001", "\u{25ce}", |ui| {
+        control_row(ui, "主表（近距）", "默认 JMA2001", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("adv_travel_primary")
                 .selected_text(draft.travel.primary.clone())
                 .width(140.0)
@@ -1872,7 +1900,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
                 });
         });
         row_divider(ui);
-        control_row(ui, "远·回退", "主表插值失败时使用", "\u{25ce}", |ui| {
+        control_row(ui, "远距回退", "主表插值失败时使用", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("adv_travel_fallback")
                 .selected_text(draft.travel.fallback.clone())
                 .width(140.0)
@@ -1934,7 +1962,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
         });
         ui.add_space(6.0);
         ui.label(
-            RichText::new("日志等级与目录保存后需重启才会应用到写入器；stderr 开关保存后立即生效。")
+            RichText::new(t("日志等级与目录保存后需重启才会应用到写入器；stderr 开关保存后立即生效。"))
                 .size(12.0)
                 .color(chrome().muted),
         );
@@ -1943,20 +1971,20 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
     section(ui, "配置文件", "\u{25ce}", |ui| {
         if let Some(path) = AppConfig::user_config_path() {
             ui.label(
-                RichText::new(format!("用户覆盖：{}", path.display()))
+                RichText::new(format!("{}", t("用户覆盖：{}").replace("{}", &path.display().to_string())))
                     .size(12.0)
                     .color(chrome().muted),
             );
         } else {
             ui.label(
-                RichText::new("未能解析用户配置目录。")
+                RichText::new(t("未能解析用户配置目录。"))
                     .size(12.0)
                     .color(chrome().muted),
             );
         }
         ui.add_space(6.0);
         ui.label(
-            RichText::new("WebSocket 等开发向端点·直接编辑配置文件；访问令牌不会写入覆盖文件。")
+            RichText::new(t("WebSocket 等开发向端点请直接编辑配置文件；访问令牌不会写入覆盖文件。"))
                 .size(12.0)
                 .color(chrome().muted),
         );
@@ -1986,93 +2014,87 @@ fn draw_about(ui: &mut Ui) {
     section(ui, "EEW View \u{00b7} 地震视监器", "\u{24d8}", |ui| {
         ui.label(
             RichText::new(format!(
-                "版本 Beta {}",
-                env!("CARGO_PKG_VERSION")
+                "{}",
+                t("版本 Beta {}").replace("{}", env!("CARGO_PKG_VERSION"))
             ))
-                .size(14.0)
-                .color(chrome().text),
+            .size(14.0)
+            .color(chrome().text),
         );
         ui.add_space(8.0);
         ui.label(
-            RichText::new(
-                "·平台地震预警与速报视监客·端。聚合多源实时情报，在地图上展示震中、\
-走时波圈与测站烈度，并提供本机倒计时与音效播报。",
-            )
+            RichText::new(t(
+                "跨平台地震预警与速报视监客户端。聚合多源实时情报，在地图上展示震中、走时波圈与测站烈度，并提供本机倒计时与音效播报。",
+            ))
             .size(13.0)
             .color(chrome().text),
         );
         ui.add_space(10.0);
         ui.label(
-            RichText::new("数据源")
+            RichText::new(t("数据源"))
                 .size(13.0)
                 .strong()
                 .color(chrome().text),
         );
         ui.label(
-            RichText::new(
-                "\u{00b7} Jian Project API（预警 / 速报 / 测站中转）\n\
-                \u{00b7} PancakesAPI（GQ + JMA-Atom）\n\
-\u{00b7} Wolfx（all_eew 预警与速报）\n\
-\u{00b7} P2PQuake（气象厅地震情报）\n\
-\u{00b7} 台风路径（sismotide /get/typhoon）\n\
-\u{00b7} NIED kmoni / lmoni 测站（可选）",
-            )
+            RichText::new(t(
+                "\u{00b7} Jian Project API（预警 / 速报 / 测站中转）\n\u{00b7} PancakesAPI（GQ + JMA-Atom）\n\u{00b7} Wolfx（all_eew 预警与速报）\n\u{00b7} P2PQuake（气象厅地震情报）\n\u{00b7} 台风路径（sismotide /get/typhoon）\n\u{00b7} NIED kmoni / lmoni 测站（可选）",
+            ))
             .size(12.0)
             .color(chrome().muted),
         );
         ui.add_space(10.0);
         ui.label(
-            RichText::new("致谢")
+            RichText::new(t("致谢"))
                 .size(13.0)
                 .strong()
                 .color(chrome().text),
         );
         ui.label(
-            RichText::new(
+            RichText::new(t(
                 "图标提供：平平无奇的4\n音效来源：SREV\n授权参考：悦琳雅韵☆Rhythm(Stille)\n图标提供：lxfly2000\n以及各位给与帮助的EEW爱好者",
-            )
+            ))
             .size(12.0)
             .color(chrome().muted),
         );
         ui.add_space(10.0);
         ui.label(
-            RichText::new("参考软件")
+            RichText::new(t("参考软件"))
                 .size(13.0)
                 .strong()
                 .color(chrome().text),
         );
         ui.label(
-            RichText::new(
+            RichText::new(t(
                 "\u{00b7} EEW CN\n\u{00b7} GlobalQuake 0.11\n\u{00b7} Kanameishi\n\u{00b7} RhythmQuake\n\u{00b7} Scratch-Realtime-Earthquake-Viewer-Page",
-            )
+            ))
             .size(12.0)
             .color(chrome().muted),
         );
         ui.add_space(10.0);
         ui.label(
-            RichText::new("版权声明")
+            RichText::new(t("版权声明"))
                 .size(13.0)
                 .strong()
                 .color(chrome().text),
         );
         ui.label(
-            RichText::new(
+            RichText::new(t(
                 "本项目参考以下软件的源代码。\n\u{00b7} RhythmQuake\n\u{00b7} Kanameishi\n\u{00b7} OPEN EEWCN\n\u{00b7} GlobalQuake 0.11",
-            )
+            ))
             .size(12.0)
             .color(chrome().muted),
         );
         ui.add_space(10.0);
         ui.label(
-            RichText::new("免责声明")
+            RichText::new(t("免责声明"))
                 .size(13.0)
                 .strong()
                 .color(chrome().text),
         );
         ui.label(
-            RichText::new(
-                "本软件仅供信息展示与学习研究，不构成官方预警渠道。·以各国气象/地震主管部门发布为准；紧急情况下·遵从当地防灾指引。开发者不保证数据的实时性、完整性与准确性。",
-            )
+            RichText::new(t(
+                "本软件仅供信息展示与学习研究，不构成官方预警渠道。请以各国气象/地震主管部门发布为准；紧急情况下请遵从当地防灾指引。开发者不保证数据的实时性、完整性与准确性。",
+            ))
             .size(12.0)
             .color(chrome().muted),
         );

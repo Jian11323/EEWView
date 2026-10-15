@@ -1,12 +1,14 @@
 //! 主界面分区：地图视口 + 浮层信息头 / 图例 / 倒计时 + 右栏列表。
 
 mod brand;
+mod i18n;
 mod intensity_icons;
 mod settings;
 mod splash;
 mod theme;
 
 pub use brand::{app_icon_data, logo_texture, APP_DISPLAY_NAME};
+pub use i18n::{set_lang_from_config, Lang};
 pub use splash::{draw_splash, SplashGate};
 
 use chrono::{FixedOffset, Local};
@@ -164,6 +166,7 @@ impl MainShell {
         travel: Option<&TravelEngine>,
         cfg: &jian_config::AppConfig,
     ) -> Option<SettingsAction> {
+        crate::i18n::set_lang_from_config(&cfg.ui.language);
         let ui_theme = UiTheme::from_config(&cfg.ui.theme);
         ui_theme.apply_egui(ctx);
         let p = ui_theme.palette();
@@ -487,8 +490,8 @@ fn round_zoom(v: f64) -> f64 {
 
 fn draw_map_pick_banner(ui: &mut Ui, p: &ThemePalette, kind: MapPickKind) {
     let text = match kind {
-        MapPickKind::DefaultViewport => "点击地图设置默认视口（Esc 取消）",
-        MapPickKind::LocalLocation => "点击地图设置本机位置（Esc 取消）",
+        MapPickKind::DefaultViewport => crate::i18n::t("点击地图设置默认视口（Esc 取消）"),
+        MapPickKind::LocalLocation => crate::i18n::t("点击地图设置本机位置（Esc 取消）"),
     };
     let pos = ui.max_rect().center_top() + Vec2::new(-140.0, 44.0);
     let rect = egui::Rect::from_min_size(pos, Vec2::new(280.0, 40.0));
@@ -593,14 +596,14 @@ fn draw_map_load_banner(ui: &mut Ui, p: &ThemePalette, state: BasemapLoadState, 
         BasemapLoadState::Ready => return,
         BasemapLoadState::LoadingWorld | BasemapLoadState::LoadingRegional => {
             if status.is_empty() {
-                "正在加载底图…"
+                crate::i18n::t("正在加载底图…")
             } else {
                 status
             }
         }
         BasemapLoadState::Failed => {
             if status.is_empty() {
-                "底图加载失败"
+                crate::i18n::t("底图加载失败")
             } else {
                 status
             }
@@ -720,7 +723,7 @@ fn draw_event_header(
                     };
                     let time_line = format_header_time(ev.origin_ms);
                     let mag_line = if ev.is_assumption && ev.magnitude <= 0.0 {
-                        "调查中".to_string()
+                        crate::i18n::t("调查中").to_string()
                     } else {
                         format!("M{:.1}", ev.magnitude)
                     };
@@ -837,10 +840,10 @@ fn draw_tsunami_banner(
         t.title.clone()
     };
     let desc = match t.grade.as_str() {
-        "MajorWarning" | "Major" => "大海啸警报：请立即撤离到高处或坚固建筑。",
-        "Warning" => "海啸警报：海岸附近请立即撤离。",
-        "Watch" => "海啸注意报：注意海面异常，远离海岸。",
-        _ => "海面可能发生些许变动，但无需采取特殊防灾措施。",
+        "MajorWarning" | "Major" => crate::i18n::t("大海啸警报：请立即撤离到高处或坚固建筑。"),
+        "Warning" => crate::i18n::t("海啸警报：海岸附近请立即撤离。"),
+        "Watch" => crate::i18n::t("海啸注意报：注意海面异常，远离海岸。"),
+        _ => crate::i18n::t("海面可能发生些许变动，但无需采取特殊防灾措施。"),
     };
     // 预报/注意报用深底+色框；警报级用官方色实底
     let (fill, border, title_c, body_c) = match t.grade.as_str() {
@@ -900,7 +903,7 @@ fn draw_tsunami_banner(
                                     .format("预计解除 %Y/%m/%d %H:%M")
                                     .to_string()
                             })
-                            .unwrap_or_else(|| "预计解除 —".into());
+                            .unwrap_or_else(|| crate::i18n::t("预计解除 —").into());
                         ui.label(RichText::new(exp).color(body_c).size(11.5));
                     }
                     ui.add_space(6.0);
@@ -1013,7 +1016,7 @@ fn draw_typhoon_detail_below_stations(
         )
     };
     let lines = [
-        format!("编号: {}", hit.id),
+        format!("{}", crate::i18n::t("编号: {}").replace("{}", &hit.id.to_string())),
         format!(
             "中心位置: ({:.1}\u{00b0}N, {:.1}\u{00b0}E)",
             hit.latitude, hit.longitude
@@ -1344,7 +1347,7 @@ fn draw_legend_bar(ui: &mut Ui, p: &ThemePalette) {
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
             ui.set_width(width);
             ui.label(
-                RichText::new("图例")
+                RichText::new(crate::i18n::t("图例"))
                     .color(p.text_muted)
                     .strong()
                     .size(15.0),
@@ -1439,9 +1442,9 @@ fn draw_countdown_hud(
         let mut y_bottom = r.bottom() - 2.0;
 
         // 自下而上：北京时间 →（可选）东京时间
-        y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, "北京时间", &clock);
+        y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, crate::i18n::t("北京时间"), &clock);
         if let Some(jst) = jst_clock.as_ref() {
-            y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, "东京时间", jst);
+            y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, crate::i18n::t("东京时间"), jst);
         }
 
         if let Some(sec) = snap.countdown_s {
@@ -1603,7 +1606,7 @@ fn draw_sidebar(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("地震情报实况")
+                    RichText::new(crate::i18n::t("地震情报实况"))
                         .color(p.text)
                         .strong()
                         .size(16.0),
@@ -1611,7 +1614,7 @@ fn draw_sidebar(
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add(
-                            egui::Button::new(RichText::new("设置").size(13.0).color(p.text_muted))
+                            egui::Button::new(RichText::new(crate::i18n::t("设置")).size(13.0).color(p.text_muted))
                                 .fill(p.tab_idle)
                                 .corner_radius(6.0)
                                 .min_size(Vec2::new(52.0, 26.0)),
@@ -1637,9 +1640,9 @@ fn draw_sidebar(
                 {
                     let on = source_enabled[i];
                     let tip = if on {
-                        format!("{name}\u{00b7}{}", st.as_zh())
+                        format!("{name}\u{00b7}{}", crate::i18n::t(st.as_zh()))
                     } else {
-                        format!("{name}\u{00b7}关闭")
+                        format!("{}", crate::i18n::t("{name}·关闭").replace("{name}", name))
                     };
                     let dot = if on {
                         health_dot(p, st)
@@ -1670,8 +1673,8 @@ fn draw_sidebar(
                     empty_hint(
                         ui,
                         p,
-                        "暂无测站",
-                        "启用 Jian 测站 /kmoni 后，实时震度点将显示于此。",
+                        crate::i18n::t("暂无测站"),
+                        crate::i18n::t("启用 Jian 测站 /kmoni 后，实时震度点将显示于此。"),
                     );
                 } else {
                     // 顶层虚拟列表（勿套进外层 ScrollArea，否则 available_height 无效）
@@ -1743,8 +1746,8 @@ fn draw_sidebar(
                                     empty_hint(
                                         ui,
                                         p,
-                                        "暂无速报",
-                                        "已启用数据源时将自动填入；也可在设置中检查连接状态。",
+                                        crate::i18n::t("暂无速报"),
+                                        crate::i18n::t("已启用数据源时将自动填入；也可在设置中检查连接状态。"),
                                     );
                                 }
                                 for (i, r) in snap.records.iter().enumerate() {
@@ -1796,8 +1799,8 @@ fn draw_sidebar(
                                     empty_hint(
                                         ui,
                                         p,
-                                        "暂无预警",
-                                        "连接正常后，紧急地震速报会出现在此列表。",
+                                        crate::i18n::t("暂无预警"),
+                                        crate::i18n::t("连接正常后，紧急地震速报会出现在此列表。"),
                                     );
                                 }
                                 for (real_i, e) in sidebar {
@@ -1848,8 +1851,8 @@ fn draw_sidebar(
                                     empty_hint(
                                         ui,
                                         p,
-                                        "暂无火山情报",
-                                        "启用 Pancakes JMA-Atom 后，降灰预报等会出现在此列表。",
+                                        crate::i18n::t("暂无火山情报"),
+                                        crate::i18n::t("启用 Pancakes JMA-Atom 后，降灰预报等会出现在此列表。"),
                                     );
                                 }
                                 for (i, v) in snap.volcanoes.iter().enumerate() {
@@ -1858,13 +1861,20 @@ fn draw_sidebar(
                                             tab: SidebarTab::Volcano,
                                             index: i,
                                         });
-                                    let place = place_with_agency(&v.name, &v.agency.0);
+                                    // 首行：火山名 + 情报类型；次行发布时间；末行描述
+                                    let headline = volcano_list_headline(&v.name, &v.title);
+                                    let place = place_with_agency(&headline, &v.agency.0);
+                                    let desc = if v.title.is_empty() {
+                                        v.name.as_str()
+                                    } else {
+                                        v.title.as_str()
+                                    };
                                     if volcano_list_row(
                                         ui,
                                         p,
                                         &place,
                                         &v.time_text,
-                                        &v.title,
+                                        desc,
                                         selected,
                                         show_volcano_icons,
                                         egui::Id::new(("vol", i)),
@@ -1897,10 +1907,10 @@ fn empty_hint(ui: &mut Ui, p: &ThemePalette, title: &str, detail: &str) {
 fn draw_side_tabs(ui: &mut Ui, p: &ThemePalette, cur: &mut SidebarTab) {
     ui.horizontal(|ui| {
         for (tab, label) in [
-            (SidebarTab::Records, "速报"),
-            (SidebarTab::Eew, "预警"),
-            (SidebarTab::Station, "测站"),
-            (SidebarTab::Volcano, "火山"),
+            (SidebarTab::Records, crate::i18n::t("速报")),
+            (SidebarTab::Eew, crate::i18n::t("预警")),
+            (SidebarTab::Station, crate::i18n::t("测站")),
+            (SidebarTab::Volcano, crate::i18n::t("火山")),
         ] {
             let selected = *cur == tab;
             let text = if selected {
@@ -1932,6 +1942,28 @@ fn draw_side_tabs(ui: &mut Ui, p: &ThemePalette, cur: &mut SidebarTab) {
             }
         }
     });
+}
+
+/// 火山列表首行：优先完整标题；若 name/title 分立则拼成「名　类型」。
+fn volcano_list_headline(name: &str, title: &str) -> String {
+    let name = name.trim();
+    let title = title.trim();
+    if name.is_empty() {
+        return title.to_string();
+    }
+    if title.is_empty() {
+        return name.to_string();
+    }
+    if title == name || title.starts_with(name) || name.starts_with(title) || name.contains(title)
+    {
+        if title.len() >= name.len() {
+            title.to_string()
+        } else {
+            name.to_string()
+        }
+    } else {
+        format!("{name}\u{3000}{title}")
+    }
 }
 
 fn volcano_list_row(
