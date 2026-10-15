@@ -272,13 +272,13 @@ impl MapViewport {
         self.flight.is_some() || self.post_flight_active()
     }
 
-    /// 预警期跟 S 波：只线性缩小（zoom 减小），不放大、不停顿跳级。
-    /// `rate` 为约 30fps 下一帧靠近比例；内部按 `dt` 换成时间常数，与帧率无关。
+    /// 预警期跟 S 波：按恒定速率线性缩小（zoom 减小），不放大。
+    /// `zoom_out_per_sec`：每秒降低的缩放级数（与帧率无关）。
     /// 镜头始终对准震中经纬（不做球体构图偏置），避免加勒比等区域震中被顶到右侧栏。
     pub fn apply_linear_zoom_out(
         &mut self,
         target_zoom: f64,
-        rate: f64,
+        zoom_out_per_sec: f64,
         dt: f64,
         focus_lon: Option<f64>,
         focus_lat: Option<f64>,
@@ -290,11 +290,10 @@ impl MapViewport {
         if target >= self.zoom - 0.02 && focus_lon.is_none() {
             return;
         }
-        // 将「每帧 rate」换算为时间推进：30fps 下与旧行为接近
-        let r = rate.clamp(0.02, 0.35);
-        let k = (1.0 - (1.0 - r).powf(dt.clamp(1e-4, 0.25) * 30.0)).clamp(0.0, 1.0);
+        let dt = dt.clamp(1e-4, 0.25);
         if target < self.zoom - 0.02 {
-            self.zoom = (self.zoom + (target - self.zoom) * k).clamp(ZOOM_MIN, ZOOM_MAX);
+            let step = zoom_out_per_sec.clamp(0.05, 2.0) * dt;
+            self.zoom = (self.zoom - step).max(target).clamp(ZOOM_MIN, ZOOM_MAX);
         }
         if let (Some(flon), Some(flat)) = (focus_lon, focus_lat) {
             let tlon = projection::normalize_lon(flon);
@@ -309,7 +308,8 @@ impl MapViewport {
             };
             let dlat = tlat - self.center_lat;
             if dlon.abs() > 0.05 || dlat.abs() > 0.05 {
-                let kb = (k * 0.85).clamp(0.0, 1.0);
+                // 中心跟焦略快于缩放，避免波圈偏到一侧
+                let kb = (1.0 - (1.0 - 0.18_f64).powf(dt * 30.0)).clamp(0.0, 1.0);
                 self.center_lon = projection::normalize_lon(self.center_lon + dlon * kb);
                 self.center_lat = self.clamp_view_lat(self.center_lat + dlat * kb);
             }

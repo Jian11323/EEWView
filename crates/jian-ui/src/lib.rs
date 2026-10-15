@@ -16,9 +16,10 @@ use egui::{Color32, FontFamily, FontId, Frame, Margin, RichText, Sense, Stroke, 
 use intensity_icons::IntensityIcons;
 use jian_core::palette::color_for;
 use jian_core::{
-    agency_bracket, eew_sidebar_entries, eew_wave_active_spread,
-    is_wave_candidate, max_s_spread_km, place_with_agency, prefer_intensity_scale, AppSnapshot,
-    EewReport, IntensityKind, ListSelection, OverlayMode, SidebarTab,
+    agency_bracket, dedupe_same_eew_events, eew_sidebar_entries, eew_sidebar_group_key,
+    eew_wave_active_spread, is_wave_candidate, max_s_spread_km, place_with_agency,
+    prefer_intensity_scale, same_eew_event, AppSnapshot, EewReport, IntensityKind, ListSelection,
+    OverlayMode, SidebarTab,
 };
 use jian_core::palette::{cn_intensity_rgb, instrumental_band_rgb};
 use jian_map::{
@@ -258,11 +259,8 @@ impl MainShell {
                 } else {
                     &[]
                 };
-                let typhoons_for_map = if cfg.ui.show_typhoons && cfg.sources.typhoon.enabled {
-                    snap.typhoons.as_slice()
-                } else {
-                    &[]
-                };
+                let show_typhoons_map =
+                    cfg.ui.show_typhoons && cfg.sources.typhoon.enabled;
                 map_ui = self.map.ui(
                     ui,
                     snap.active.as_ref(),
@@ -275,7 +273,11 @@ impl MainShell {
                     &snap.records,
                     volcanoes_for_map,
                     selected_volcano,
-                    typhoons_for_map,
+                    if show_typhoons_map {
+                        snap.typhoons.as_slice()
+                    } else {
+                        &[]
+                    },
                     &cfg.ui.typhoon_forecast_agency,
                     home,
                     snap.tsunami.as_ref(),
@@ -306,23 +308,20 @@ impl MainShell {
                         let r = s_km
                             .min(max_s_wave_spread_km(ev.magnitude))
                             .max(8.0);
-                        // 勿设 9.0 地板：大波圈需要 zoom<9，否则 S 波出屏却不缩小
+                        // 目标：S 半径约占视口短边 46%（直径≈92%，留边不裁切）
+                        // 区间 [7, 11]：落地 Z11 起只缩小，地板 z7 禁止砸到半球远景
                         let z = zoom_to_fit_radius_km(
                             ev.latitude,
                             r,
                             map_rect.width().min(map_rect.height()),
-                            0.42,
+                            0.46,
                         )
-                        .clamp(3.0, 12.0);
-                        let rate = if z < self.map.zoom - 0.8 {
-                            0.22
-                        } else {
-                            0.12
-                        };
+                        .clamp(7.0, 11.0);
                         let dt = ctx.input(|i| i.unstable_dt as f64).clamp(1e-4, 0.25);
+                        // ~0.28 级/秒：Z11→Z7 约 14 秒，缓慢线性
                         self.map.apply_linear_zoom_out(
                             z,
-                            rate,
+                            0.28,
                             dt,
                             Some(ev.longitude),
                             Some(ev.latitude),
@@ -336,14 +335,24 @@ impl MainShell {
                 if let Some(kind) = self.settings.map_pick {
                     draw_map_pick_banner(ui, &p, kind);
                 }
-                draw_event_header(ui, &p, snap, scale.as_str(), &self.intensity_icons, travel);
+                if let Some((lon, lat, z)) =
+                    draw_event_header(ui, &p, snap, scale.as_str(), &self.intensity_icons, travel)
+                {
+                    // 左上框点切换多震：跟焦并解除拖拽锁，便于 cinema 继续轮播
+                    self.map.fly_to(lon, lat, Some(z), 0.9);
+                    self.map.user_camera_override = false;
+                }
                 draw_tsunami_banner(ui, &p, snap, travel);
                 let station_card_bottom = draw_realtime_intensity_card(ui, &p, snap);
                 draw_typhoon_detail_below_stations(
                     ui,
                     &p,
                     map_ui.typhoon_hover.as_ref(),
-                    typhoons_for_map,
+                    if show_typhoons_map {
+                        snap.typhoons.as_slice()
+                    } else {
+                        &[]
+                    },
                     station_card_bottom.bottom_y,
                 );
                 if let Some(net) = station_card_bottom.clicked {
@@ -631,27 +640,39 @@ fn draw_map_load_banner(ui: &mut Ui, p: &ThemePalette, state: BasemapLoadState, 
 /// 左上预警框与右上实时震度卡共用顶边。
 const OVERLAY_TOP_Y: f32 = 12.0;
 
-/// 左上预警条：每个侧栏源槽只留一条（与列表一致）；GQ 优先当前焦点。
+/// 左上堆叠顺序：各源槽彼此独立，固定源序（不因焦点把某源顶到最上）。
+fn header_source_rank(agency: &str) -> u8 {
+    match eew_sidebar_group_key(agency).as_str() {
+        "jma" => 0,
+        "cea" => 1,
+        "cea-pr" => 2,
+        "cwa" => 3,
+        "kma" => 4,
+        "sa" => 5,
+        "early_est" => 6,
+        "gq" => 7,
+        _ => 20,
+    }
+}
+
+/// 左上预警条：每源一框（JMA/CN/CWA/GQ…各自独立）；同槽多震 `n/N` + 点击/cinema 轮切。
 fn header_live_eews<'a>(
     snap: &'a AppSnapshot,
     travel: Option<&TravelEngine>,
 ) -> Vec<&'a EewReport> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let live = live_wave_eews_travel(&snap.eew_list, now_ms, &snap.wave_spread_km, travel);
+    let unique = dedupe_same_eew_events(&live);
     let mut best: Vec<&EewReport> = Vec::new();
-    for e in live {
-        let key = jian_core::eew_sidebar_group_key(&e.agency.0);
+    for e in unique {
+        let key = eew_sidebar_group_key(&e.agency.0);
         if let Some(pos) = best
             .iter()
-            .position(|b| jian_core::eew_sidebar_group_key(&b.agency.0) == key)
+            .position(|b| eew_sidebar_group_key(&b.agency.0) == key)
         {
             let cur = best[pos];
-            let prefer_focus = snap.active.as_ref().is_some_and(|a| {
-                a.agency.0 == e.agency.0 && a.event_id == e.event_id
-            });
-            let cur_focus = snap.active.as_ref().is_some_and(|a| {
-                a.agency.0 == cur.agency.0 && a.event_id == cur.event_id
-            });
+            let prefer_focus = snap.active.as_ref().is_some_and(|a| same_eew_event(a, e));
+            let cur_focus = snap.active.as_ref().is_some_and(|a| same_eew_event(a, cur));
             if prefer_focus
                 || (!cur_focus
                     && (e.origin_ms > cur.origin_ms
@@ -663,13 +684,28 @@ fn header_live_eews<'a>(
             best.push(e);
         }
     }
-    // GQ 槽若有焦点则置顶，其余按发震新→旧
     best.sort_by(|a, b| {
-        let a_gq = jian_core::agency_family(&a.agency.0) == jian_core::AgencyFamily::Gq;
-        let b_gq = jian_core::agency_family(&b.agency.0) == jian_core::AgencyFamily::Gq;
-        b_gq.cmp(&a_gq).then_with(|| b.origin_ms.cmp(&a.origin_ms))
+        header_source_rank(&a.agency.0)
+            .cmp(&header_source_rank(&b.agency.0))
+            .then_with(|| a.origin_ms.cmp(&b.origin_ms))
     });
     best
+}
+
+/// 同侧栏源槽内、仍在传播的独立地震（发震旧→新，与 cinema 队列一致）。
+fn header_slot_peers<'a>(
+    snap: &'a AppSnapshot,
+    travel: Option<&TravelEngine>,
+    agency: &str,
+) -> Vec<&'a EewReport> {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let live = live_wave_eews_travel(&snap.eew_list, now_ms, &snap.wave_spread_km, travel);
+    let key = eew_sidebar_group_key(agency);
+    let raw: Vec<&EewReport> = live
+        .into_iter()
+        .filter(|e| eew_sidebar_group_key(&e.agency.0) == key)
+        .collect();
+    dedupe_same_eew_events(&raw)
 }
 
 /// 左上角预警条总高度（海啸条避让）。
@@ -682,18 +718,36 @@ fn eew_header_stack_height(snap: &AppSnapshot, travel: Option<&TravelEngine>) ->
     96.0 * n as f32 + 6.0 * (n.saturating_sub(1) as f32)
 }
 
+/// 绘制左上预警条。同源多震时一框显示 `n/N`，点击切到下一条并返回跟焦目标。
 fn draw_event_header(
     ui: &mut Ui,
     _p: &ThemePalette,
-    snap: &AppSnapshot,
+    snap: &mut AppSnapshot,
     scale: &str,
     icons: &IntensityIcons,
     travel: Option<&TravelEngine>,
-) {
-    let live = header_live_eews(snap, travel);
-    if live.is_empty() {
-        return;
+) -> Option<(f64, f64, f64)> {
+    // 提前 clone，避免 overlay 闭包与 snap 可变借用冲突
+    let cards: Vec<EewReport> = header_live_eews(snap, travel)
+        .into_iter()
+        .cloned()
+        .collect();
+    if cards.is_empty() {
+        return None;
     }
+    let peer_lists: Vec<Vec<EewReport>> = cards
+        .iter()
+        .map(|ev| {
+            header_slot_peers(snap, travel, &ev.agency.0)
+                .into_iter()
+                .cloned()
+                .collect()
+        })
+        .collect();
+    let focused_flags: Vec<bool> = cards
+        .iter()
+        .map(|ev| snap.active.as_ref().is_some_and(|a| same_eew_event(a, ev)))
+        .collect();
 
     const LEFT_PANEL_X: f32 = 12.0;
     const LEFT_PANEL_W: f32 = 340.0;
@@ -703,100 +757,127 @@ fn draw_event_header(
         pos,
         Vec2::new(LEFT_PANEL_W + 24.0, ui.max_rect().height().max(120.0)),
     );
+    let mut cycle_to: Option<EewReport> = None;
     overlay_child(ui, "event_header", rect, |ui| {
-            ui.spacing_mut().item_spacing.y = ROW_GAP;
-            ui.vertical(|ui| {
-                for (i, ev) in live.iter().enumerate() {
-                    let agency = agency_bracket(&ev.agency.0);
-                    let idx_mark = if live.len() > 1 {
-                        format!("{} ", circled_index(i + 1))
-                    } else {
-                        String::new()
-                    };
-                    // 报数挂在机构后：`地名 (JMA)  #终`
-                    let title = if ev.is_cancel {
-                        format!("{idx_mark}{} ({agency}) \u{00b7} 取消", ev.place)
-                    } else if let Some(mark) = ev.serial_mark() {
-                        format!("{idx_mark}{} ({agency})  {mark}", ev.place)
-                    } else {
-                        format!("{idx_mark}{} ({agency})", ev.place)
-                    };
-                    let time_line = format_header_time(ev.origin_ms);
-                    let mag_line = if ev.is_assumption && ev.magnitude <= 0.0 {
-                        crate::i18n::t("调查中").to_string()
-                    } else {
-                        format!("M{:.1}", ev.magnitude)
-                    };
-                    let depth_line = ev.depth_label();
-                    let focused = snap.active.as_ref().is_some_and(|a| {
-                        a.agency.0 == ev.agency.0 && a.event_id == ev.event_id
-                    });
-                    let stroke = if focused {
-                        Stroke::new(1.5_f32, Color32::from_rgb(0x7D, 0xF9, 0xFF))
-                    } else {
-                        Stroke::new(1.0_f32, Color32::from_rgb(0x55, 0x55, 0x66))
-                    };
-                    Frame::NONE
-                        .fill(Color32::from_rgba_unmultiplied(28, 28, 32, 230))
-                        .stroke(stroke)
-                        .inner_margin(Margin::symmetric(10, 8))
-                        .corner_radius(6.0)
-                        .show(ui, |ui| {
-                            ui.set_width(LEFT_PANEL_W);
-                            ui.horizontal(|ui| {
-                                paint_intensity(
-                                    ui,
-                                    icons,
-                                    ev.intensity_kind,
-                                    ev.intensity_level,
-                                    &ev.max_intensity_text,
-                                    scale,
-                                    72.0,
-                                    false,
+        ui.spacing_mut().item_spacing.y = ROW_GAP;
+        ui.vertical(|ui| {
+            for (i, ev) in cards.iter().enumerate() {
+                let agency = agency_bracket(&ev.agency.0);
+                let peers = &peer_lists[i];
+                let peer_i = peers
+                    .iter()
+                    .position(|p| same_eew_event(p, ev))
+                    .unwrap_or(0);
+                // 同源多震：GQ 式 `2/3`；跨源堆叠仍用 ①②③
+                let idx_mark = if peers.len() > 1 {
+                    format!("{}/{} ", peer_i + 1, peers.len())
+                } else if cards.len() > 1 {
+                    format!("{} ", circled_index(i + 1))
+                } else {
+                    String::new()
+                };
+                // 报数挂在机构后：`地名 (JMA)  #终`
+                let title = if ev.is_cancel {
+                    format!("{idx_mark}{} ({agency}) \u{00b7} 取消", ev.place)
+                } else if let Some(mark) = ev.serial_mark() {
+                    format!("{idx_mark}{} ({agency})  {mark}", ev.place)
+                } else {
+                    format!("{idx_mark}{} ({agency})", ev.place)
+                };
+                let time_line = format_header_time(ev.origin_ms);
+                let mag_line = if ev.is_assumption && ev.magnitude <= 0.0 {
+                    crate::i18n::t("调查中").to_string()
+                } else {
+                    format!("M{:.1}", ev.magnitude)
+                };
+                let depth_line = ev.depth_label();
+                let stroke = if focused_flags[i] {
+                    Stroke::new(1.5_f32, Color32::from_rgb(0x7D, 0xF9, 0xFF))
+                } else {
+                    Stroke::new(1.0_f32, Color32::from_rgb(0x55, 0x55, 0x66))
+                };
+                let can_cycle = peers.len() > 1;
+                let inner = Frame::NONE
+                    .fill(Color32::from_rgba_unmultiplied(28, 28, 32, 230))
+                    .stroke(stroke)
+                    .inner_margin(Margin::symmetric(10, 8))
+                    .corner_radius(6.0)
+                    .show(ui, |ui| {
+                        ui.set_width(LEFT_PANEL_W);
+                        ui.horizontal(|ui| {
+                            paint_intensity(
+                                ui,
+                                icons,
+                                ev.intensity_kind,
+                                ev.intensity_level,
+                                &ev.max_intensity_text,
+                                scale,
+                                72.0,
+                                false,
+                            );
+                            ui.add_space(10.0);
+                            ui.vertical(|ui| {
+                                ui.set_min_width(180.0);
+                                ui.label(
+                                    RichText::new(title)
+                                        .color(Color32::WHITE)
+                                        .strong()
+                                        .size(16.0),
                                 );
-                                ui.add_space(10.0);
-                                ui.vertical(|ui| {
-                                    ui.set_min_width(180.0);
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new(time_line)
+                                        .color(Color32::WHITE)
+                                        .size(14.0)
+                                        .monospace(),
+                                );
+                                ui.add_space(2.0);
+                                ui.horizontal(|ui| {
                                     ui.label(
-                                        RichText::new(title)
+                                        RichText::new(mag_line)
                                             .color(Color32::WHITE)
                                             .strong()
-                                            .size(16.0),
+                                            .size(15.0),
                                     );
-                                    ui.add_space(2.0);
-                                    ui.label(
-                                        RichText::new(time_line)
-                                            .color(Color32::WHITE)
-                                            .size(14.0)
-                                            .monospace(),
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new(depth_line)
+                                                    .color(Color32::from_rgb(0xDD, 0xDD, 0xEE))
+                                                    .size(14.0),
+                                            );
+                                        },
                                     );
-                                    ui.add_space(2.0);
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            RichText::new(mag_line)
-                                                .color(Color32::WHITE)
-                                                .strong()
-                                                .size(15.0),
-                                        );
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                ui.label(
-                                                    RichText::new(depth_line)
-                                                        .color(Color32::from_rgb(
-                                                            0xDD, 0xDD, 0xEE,
-                                                        ))
-                                                        .size(14.0),
-                                                );
-                                            },
-                                        );
-                                    });
                                 });
                             });
                         });
+                    });
+                if can_cycle {
+                    let resp = ui.interact(
+                        inner.response.rect,
+                        ui.id().with(("eew_hdr_cycle", i)),
+                        Sense::click(),
+                    );
+                    if resp.clicked() {
+                        cycle_to = Some(peers[(peer_i + 1) % peers.len()].clone());
+                    }
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
                 }
-            });
+            }
         });
+    });
+    if let Some(next) = cycle_to {
+        let fly = (next.longitude, next.latitude, 11.0);
+        snap.active = Some(next);
+        snap.tab = SidebarTab::Eew;
+        snap.overlay_mode = OverlayMode::Wave;
+        Some(fly)
+    } else {
+        None
+    }
 }
 
 /// ①②③… 序号（多震堆叠，对齐 EEWCN）。

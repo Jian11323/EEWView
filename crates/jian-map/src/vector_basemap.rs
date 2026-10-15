@@ -1,7 +1,7 @@
 //! 行政区矢量底图（暗色矢量 / 亮色浅填）。
 //!
 //! 世界层：`geodata/kanameishi/medium.global.modified.topo.json`（精细，本身不含中日国界）。
-//! 区划层：`globalquake/` 中日省级（含藏南），缺失时回退要石；并由省级溶解出国级外轮廓。
+//! 区划层：中国优先 GQ（含藏南），日本优先要石/JMA（含北方四岛）；并由省级溶解出国级外轮廓。
 //! 低于 zoom 7.5 只画中日国级；达到后叠省级。平面 / 球体按投影分别加载。
 //! 加载在后台线程分两阶段（世界 → 区划），主线程 `poll` 合并。
 
@@ -1936,54 +1936,60 @@ fn load_regional_rings(dir: &Path) -> (Vec<RingSet>, usize, usize) {
     (regional_fine, files, skipped)
 }
 
-/// 远距 national 溶解源：GQ/要石一级区划（省 / 都道府县）。
+/// 远距 national 溶解源：中国优先 GQ（含藏南），日本优先要石/JMA（含北方四岛）。
 fn load_coarse_admin_for_dissolve(dir: &Path) -> Vec<RingSet> {
     let mut out = Vec::new();
     let mut files = 0usize;
     let mut skipped = 0usize;
     let gq = globalquake_dir(dir);
-    for name in ["cn-prefectures.geojson", "jp-prefectures.geojson"] {
-        if let Some(rings) = try_load_rings(
-            &gq.join(name),
-            &mut files,
-            &mut skipped,
-            "coarse dissolve admin",
-        ) {
-            out.extend(rings);
-        }
-    }
-    if !out.is_empty() {
-        return out;
-    }
     let kdir = kanameishi_dir(dir);
-    for names in [
-        [
+
+    if let Some(rings) = try_load_rings(
+        &gq.join("cn-prefectures.geojson"),
+        &mut files,
+        &mut skipped,
+        "coarse dissolve cn",
+    ) {
+        out.extend(rings);
+    } else if let Some(path) = first_existing(
+        &kdir,
+        &[
             "cn.province.topo.json",
             "cn_province.geo.json",
             "cn_province.geojson",
         ],
-        ["jp.pref.topo.json", "jp_pref.geo.json", "jp_pref.geojson"],
-    ] {
-        if let Some(path) = first_existing(&kdir, &names[..]) {
-            if let Ok(rings) = load_any_map(&path) {
-                out.extend(rings);
-            }
+    ) {
+        if let Ok(rings) = load_any_map(&path) {
+            out.extend(rings);
         }
     }
+
+    // 与 load_jp_pref_rings 同序：要石含国後/択捉/色丹，GQ 日本包没有
+    out.extend(load_jp_pref_rings(dir, &mut files, &mut skipped));
     out
 }
 
-/// 日本都道府县：GQ → `日本/` → 要石。加载后剥除钓鱼岛范围小岛环。
+/// 日本都道府县：要石/JMA → `日本/` → GQ。加载后剥除钓鱼岛范围小岛环。
+/// 要石优先：含北方四岛；GQ `jp-prefectures` 缺国後/択捉/色丹，作回退。
 fn load_jp_pref_rings(dir: &Path, files: &mut usize, skipped: &mut usize) -> Vec<RingSet> {
     let mut out = Vec::new();
-    let gq_jp = globalquake_dir(dir).join("jp-prefectures.geojson");
-    if let Some(rings) = try_load_rings(
-        &gq_jp,
-        files,
-        skipped,
-        "loaded GlobalQuake jp-prefectures",
-    ) {
-        return strip_jp_diaoyu_rings(rings);
+
+    let kdir = kanameishi_dir(dir);
+    if let Some(path) =
+        first_existing(&kdir, &["jp.pref.topo.json", "jp_pref.geo.json", "jp_pref.geojson"])
+    {
+        *files += 1;
+        match load_any_map(&path) {
+            Ok(rings) => {
+                let rings = strip_jp_diaoyu_rings(rings);
+                info!(path = %path.display(), rings = rings.len(), "loaded kanameishi jp pref");
+                return rings;
+            }
+            Err(e) => {
+                *skipped += 1;
+                warn!(path = %path.display(), error = %e, "要石日本区划加载失败");
+            }
+        }
     }
 
     let jp_dir = dir.join("日本");
@@ -2005,22 +2011,14 @@ fn load_jp_pref_rings(dir: &Path, files: &mut usize, skipped: &mut usize) -> Vec
         }
     }
 
-    let kdir = kanameishi_dir(dir);
-    if let Some(path) =
-        first_existing(&kdir, &["jp.pref.topo.json", "jp_pref.geo.json", "jp_pref.geojson"])
-    {
-        *files += 1;
-        match load_any_map(&path) {
-            Ok(rings) => {
-                let rings = strip_jp_diaoyu_rings(rings);
-                info!(path = %path.display(), rings = rings.len(), "loaded kanameishi jp pref");
-                return rings;
-            }
-            Err(e) => {
-                *skipped += 1;
-                warn!(path = %path.display(), error = %e, "要石日本区划加载失败");
-            }
-        }
+    let gq_jp = globalquake_dir(dir).join("jp-prefectures.geojson");
+    if let Some(rings) = try_load_rings(
+        &gq_jp,
+        files,
+        skipped,
+        "loaded GlobalQuake jp-prefectures (fallback)",
+    ) {
+        return strip_jp_diaoyu_rings(rings);
     }
     out
 }

@@ -18,9 +18,10 @@
 
 | 路径 | 内容 |
 |------|------|
-| `globalquake/cn-prefectures.geojson` | 中国省级（含藏南） |
-| `globalquake/jp-prefectures.geojson` | 日本都道府县（加载时剔除钓鱼岛小岛环） |
-| 要石 `cn_province` / `jp_pref` | 上述缺失时回退 |
+| `globalquake/cn-prefectures.geojson` | 中国省级（含藏南；优先） |
+| `kanameishi/jp.pref.topo.json` | 日本都道府县（JMA；优先，含北方四岛） |
+| `globalquake/jp-prefectures.geojson` | 日本都道府县回退（无北方四岛） |
+| 要石 `cn.province` | 中国省级回退 |
 
 
 钓鱼岛由中国台湾省界与内置点状表达；日本区划中落入该范围的小岛环在加载时剥除。

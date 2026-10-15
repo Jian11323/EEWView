@@ -5,7 +5,7 @@
 
 pkgs.stdenv.mkDerivation rec {
   pname = "eew-view";
-  version = "1.3.0";
+  version = "1.4.1";
 
   # 将 CI / pack_linux 产物放到同目录并改名，或改下面 src
   src = ./EEWView_Beta_${version}_linux_x86_64.tar.gz;

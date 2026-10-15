@@ -1660,6 +1660,45 @@ fn prefer_eew_report(old: &EewReport, new: &EewReport) -> bool {
     eew_feed_priority(&new.agency.0) >= eew_feed_priority(&old.agency.0)
 }
 
+/// 同事件镜像合并为一条；**不同** `event_id` 均保留（供 cinema / 多震跟焦）。
+/// 与 [`latest_eew_per_source`] 不同：同源多震不会被压成一条。
+///
+/// 排序稳定、按序轮播：发震旧→新 → 源槽 → `event_id`（一源多震与多源多震同一队列）。
+pub fn dedupe_same_eew_events<'a>(list: &[&'a EewReport]) -> Vec<&'a EewReport> {
+    let mut best: Vec<&EewReport> = Vec::new();
+    for &e in list {
+        if e.is_cancel
+            || e.event_id.starts_with("station:")
+            || e.event_id.starts_with("record:")
+            || (e.latitude.abs() <= 0.01 && e.longitude.abs() <= 0.01)
+        {
+            continue;
+        }
+        if let Some(pos) = best.iter().position(|b| same_eew_event(b, e)) {
+            if prefer_eew_report(best[pos], e) {
+                best[pos] = e;
+            }
+        } else {
+            best.push(e);
+        }
+    }
+    best.sort_by(|a, b| {
+        recency_ms(a.origin_ms)
+            .cmp(&recency_ms(b.origin_ms))
+            .then(
+                eew_sidebar_group_key(&a.agency.0).cmp(&eew_sidebar_group_key(&b.agency.0)),
+            )
+            .then(a.event_id.cmp(&b.event_id))
+            .then(a.serial.cmp(&b.serial))
+    });
+    best
+}
+
+/// cinema / 左上框用的稳定事件键（源槽 + event_id，不受镜像 agency 字符串影响）。
+pub fn cinema_event_key(e: &EewReport) -> String {
+    format!("{}|{}", eew_sidebar_group_key(&e.agency.0), e.event_id)
+}
+
 fn recency_ms(origin_ms: i64) -> i64 {
     if origin_ms <= 0 {
         i64::MIN / 4

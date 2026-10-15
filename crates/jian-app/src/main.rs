@@ -11,15 +11,14 @@ use jian_audio::{speak_async, AudioCue, AudioEngine, TsunamiCueKind};
 use jian_config::AppConfig;
 use jian_core::{
     agency_family, build_eew_tts_script, build_record_tts_script, eew_sidebar_entries,
-    eew_sidebar_group_key, eew_wave_active_spread, is_wave_candidate, latest_eew_per_source,
-    max_s_spread_km, origin_is_stale, same_eew_event, should_play_eew_tts, AgencyFamily,
+    cinema_event_key, dedupe_same_eew_events, eew_sidebar_group_key, eew_wave_active_spread,
+    is_wave_candidate, max_s_spread_km, origin_is_stale, same_eew_event, should_play_eew_tts,
+    AgencyFamily,
     AppSnapshot, EewReport, HealthStatus, IntensityKind,
 };
 use std::collections::HashMap;
 use jian_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
-use jian_travel::{
-    max_s_wave_spread_km, s_wave_still_spreading_to, TravelEngine, Wave,
-};
+use jian_travel::{s_wave_still_spreading_to, TravelEngine};
 use jian_map::{zoom_to_fit_radius_km, BasemapMode, ProjectionMode};
 use jian_ui::{draw_splash, MainShell, SettingsAction, SplashGate, AppUiTheme};
 use std::path::{Path, PathBuf};
@@ -647,14 +646,8 @@ impl eframe::App for JianApp {
             let elapsed = self.started.elapsed().as_secs_f64();
             if elapsed >= 1.2 {
                 if let Some((lon, lat, _zoom)) = self.snap.focus_latest_event() {
-                    let z = if let Some(ev) = &self.snap.active {
-                        let now = chrono::Utc::now().timestamp_millis();
-                        gq_jump_zoom(
-                            ev,
-                            now,
-                            self.travel.as_ref(),
-                            self.shell.map.last_viewport_min_px,
-                        )
+                    let z = if self.snap.active.is_some() {
+                        gq_jump_zoom()
                     } else {
                         8.5
                     };
@@ -690,20 +683,26 @@ impl eframe::App for JianApp {
             let hold_record_pick =
                 browsing_record && self.shell.map.user_camera_override;
             let now = chrono::Utc::now().timestamp_millis();
-            // 跟焦/轮播只认侧栏源槽最新一条（与列表、TTS 一致；多 GQ 不再各自乱跳）
-            let live: Vec<&EewReport> = latest_eew_per_source(&self.snap.eew_list)
-                .into_iter()
-                .filter(|e| {
-                    eew_wave_live(e, now, &self.snap.wave_spread_km, self.travel.as_ref())
-                })
-                .collect();
+            // 跟焦/轮播：传播中独立地震全进同一队列（一源多震 + 多源多震），按发震旧→新顺序轮切
+            // 左上框仍每源一框；仅合并同事件镜像
+            let live: Vec<&EewReport> = {
+                let raw: Vec<&EewReport> = self
+                    .snap
+                    .eew_list
+                    .iter()
+                    .filter(|e| {
+                        eew_wave_live(e, now, &self.snap.wave_spread_km, self.travel.as_ref())
+                    })
+                    .collect();
+                dedupe_same_eew_events(&raw)
+            };
             // 新预警必须打断测站浏览；仅轮播停留时保留测站锁定
             let allow_follow = !browsing_station || !live.is_empty();
             if allow_follow {
                 let live = live;
                 let seen_key = live
                     .iter()
-                    .map(|e| format!("{}|{}", e.agency.0, e.event_id))
+                    .map(|e| cinema_event_key(e))
                     .collect::<Vec<_>>()
                     .join(";");
                 if live.is_empty() {
@@ -721,12 +720,7 @@ impl eframe::App for JianApp {
                     });
                     if is_new_event {
                         // 新预警：强制飞跃（无视用户拖拽锁定）
-                        let z = gq_jump_zoom(
-                            ev,
-                            now,
-                            self.travel.as_ref(),
-                            self.shell.map.last_viewport_min_px,
-                        );
+                        let z = gq_jump_zoom();
                         self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 0.9);
                         self.shell.map.user_camera_override = false;
                         self.last_follow_key = Some(key);
@@ -757,8 +751,9 @@ impl eframe::App for JianApp {
                             .split(';')
                             .filter(|s| !s.is_empty())
                             .collect();
+                        // 新震：按队列顺序取最早出现的新项（与旧→新排序一致）
                         for (i, e) in live.iter().enumerate() {
-                            let id = format!("{}|{}", e.agency.0, e.event_id);
+                            let id = cinema_event_key(e);
                             if !old.contains(id.as_str()) {
                                 jump_idx = Some(i);
                                 is_new_arrival = true;
@@ -766,31 +761,43 @@ impl eframe::App for JianApp {
                             }
                         }
                         if jump_idx.is_none() {
-                            // 集合变化（有震结束）时夹紧索引，不立刻重飞除非当前项已消失
-                            let idx = self.cinema_idx.min(live.len() - 1);
-                            let cur_id = format!("{}|{}", live[idx].agency.0, live[idx].event_id);
-                            if self.cinema_seen_key.is_empty() || !seen_key.contains(&cur_id) {
+                            // 集合变化（有震结束）：尽量钉住当前事件，再按序继续
+                            let cur_key = self
+                                .snap
+                                .active
+                                .as_ref()
+                                .map(cinema_event_key)
+                                .or_else(|| {
+                                    self.last_follow_key.as_ref().map(|(id, _)| {
+                                        // 回退：用 event_id 在 live 里找
+                                        live.iter()
+                                            .find(|e| e.event_id == *id)
+                                            .map(|e| cinema_event_key(e))
+                                            .unwrap_or_default()
+                                    })
+                                })
+                                .unwrap_or_default();
+                            if let Some(i) =
+                                live.iter().position(|e| cinema_event_key(e) == cur_key)
+                            {
+                                self.cinema_idx = i;
+                            } else {
+                                let idx = self.cinema_idx.min(live.len() - 1);
                                 jump_idx = Some(idx);
                                 is_new_arrival = true;
-                            } else {
-                                self.cinema_idx = idx;
                             }
                         }
                         self.cinema_seen_key = seen_key;
                     } else if !self.shell.map.user_camera_override
                         && Instant::now() >= self.cinema_next_at
                     {
+                        // 按队列顺序 +1 轮播（跨源、同源同一圈）
                         jump_idx = Some((self.cinema_idx + 1) % live.len());
                     }
                     if let Some(idx) = jump_idx {
                         if is_new_arrival || !self.shell.map.user_camera_override {
                             let ev = live[idx];
-                            let z = gq_jump_zoom(
-                                ev,
-                                now,
-                                self.travel.as_ref(),
-                                self.shell.map.last_viewport_min_px,
-                            );
+                            let z = gq_jump_zoom();
                             self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 0.9);
                             if is_new_arrival {
                                 self.shell.map.user_camera_override = false;
@@ -805,6 +812,16 @@ impl eframe::App for JianApp {
                             self.snap.overlay_mode = jian_core::OverlayMode::Wave;
                         }
                     } else if !hold_record_pick {
+                        // 左上框点选 / 侧栏选中某条 live 时，跟齐 cinema 索引并重置停留
+                        if let Some(a) = self.snap.active.as_ref() {
+                            if let Some(i) = live.iter().position(|e| same_eew_event(e, a)) {
+                                if i != self.cinema_idx {
+                                    self.cinema_idx = i;
+                                    self.cinema_next_at = Instant::now()
+                                        + std::time::Duration::from_secs_f64(10.0);
+                                }
+                            }
+                        }
                         // 停留中：同步当前震中最新报文，绝不因 serial 重置计时或跳转
                         let idx = self.cinema_idx.min(live.len() - 1);
                         let ev = live[idx];
@@ -1277,36 +1294,9 @@ impl JianApp {
 
 
 
-/// GQ cinema 跳转缩放：按发震年龄估视野，并用当前 S 半径夹一层，只在跳转瞬间用一次。
-fn gq_jump_zoom(
-    ev: &jian_core::EewReport,
-    now_ms: i64,
-    travel: Option<&TravelEngine>,
-    viewport_min_px: f32,
-) -> f64 {
-    let elapsed = if ev.origin_ms > 0 {
-        ((now_ms - ev.origin_ms) as f64 / 1000.0).max(0.0)
-    } else {
-        0.0
-    };
-    let s_km = if let Some(eng) = travel {
-        eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, elapsed)
-    } else {
-        elapsed * 5.0
-    };
-    // 落地要近（高 zoom），中途抛物线才能「先缩小再放大」；波圈撑满由落地后 auto_zoom 跟。
-    let r = s_km
-        .min(max_s_wave_spread_km(ev.magnitude))
-        .max(8.0);
-    let fit_s = zoom_to_fit_radius_km(ev.latitude, r, viewport_min_px, 0.34);
-    let age_min = if ev.origin_ms > 0 {
-        ((now_ms - ev.origin_ms) as f64 / 60_000.0).max(0.0)
-    } else {
-        0.0
-    };
-    let scroll = (age_min / 5.0).clamp(0.05, 1.2);
-    let prefer = (14.5 - scroll * 1.4).clamp(9.2, 12.0);
-    prefer.min(fit_s).clamp(9.0, 12.0)
+/// 预警跟焦落地固定 Z11；落地后由 auto_zoom 从 Z11 缓慢线性跟 S 波缩小。
+fn gq_jump_zoom() -> f64 {
+    11.0
 }
 
 fn tsunami_audio_grade(grade: &str) -> u8 {
