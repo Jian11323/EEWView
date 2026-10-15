@@ -268,37 +268,38 @@ pub fn paint_stations(
     let painter = ui.painter_at(rect);
     let pad = 16.0_f32;
     let _ = eew_active;
-    // 低缩放隐藏静默点；中缩放抽稀；节能档更狠
-    let (quiet_zoom_min, quiet_stride, quiet_cap) = match quality {
-        crate::PaintQuality::Eco => (
-            5.2_f64,
-            if view.zoom < 6.0 {
-                8usize
-            } else if view.zoom < 7.0 {
-                4
-            } else {
-                2
-            },
-            350usize,
-        ),
-        crate::PaintQuality::Normal => (
-            4.5,
-            if view.zoom < 5.5 {
-                4usize
+    // 低缩放用地理网格抽稀（避免按序号跳点造成「加载不全」空洞）；节能档格更大
+    let (grid_deg, quiet_cap) = match quality {
+        crate::PaintQuality::Eco => {
+            let g = if view.zoom < 4.5 {
+                0.85_f64
+            } else if view.zoom < 5.5 {
+                0.55
             } else if view.zoom < 6.5 {
-                2
+                0.32
             } else {
-                1
-            },
-            800,
-        ),
-        crate::PaintQuality::Extreme => (4.0, 1usize, 2000),
+                0.0
+            };
+            (g, 450usize)
+        }
+        crate::PaintQuality::Normal => {
+            let g = if view.zoom < 4.0 {
+                0.65_f64
+            } else if view.zoom < 5.0 {
+                0.40
+            } else if view.zoom < 6.0 {
+                0.22
+            } else {
+                0.0
+            };
+            (g, 1200)
+        }
+        crate::PaintQuality::Extreme => (0.0, 2500),
     };
-    let show_quiet = view.zoom >= quiet_zoom_min;
 
-    // 两遍绘制：静默点不排序；有感点数量少，再按震度升序，避免全表 sort
-    let mut quiet_i = 0usize;
+    // 两遍绘制：静默点地理网格；有感点数量少，再按震度升序
     let mut quiet_drawn = 0usize;
+    let mut occupied: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
     let mut felt_idx: Vec<usize> = Vec::new();
     for (idx, s) in stations.iter().enumerate() {
         let felt = match s.intensity_kind {
@@ -312,16 +313,16 @@ pub fn paint_stations(
             continue;
         }
         let selected = selected_id == Some(s.id.as_str());
-        if !show_quiet && !selected {
-            continue;
-        }
         if !selected {
-            quiet_i += 1;
-            if quiet_stride > 1 && (quiet_i % quiet_stride) != 0 {
-                continue;
-            }
             if quiet_drawn >= quiet_cap {
                 continue;
+            }
+            if grid_deg > 0.0 {
+                let gx = (s.longitude / grid_deg).floor() as i32;
+                let gy = (s.latitude / grid_deg).floor() as i32;
+                if !occupied.insert((gx, gy)) {
+                    continue;
+                }
             }
         }
         let Some(p) = view.project(s.longitude, s.latitude) else {
@@ -334,7 +335,9 @@ pub fn paint_stations(
         {
             continue;
         }
-        quiet_drawn += 1;
+        if !selected {
+            quiet_drawn += 1;
+        }
         paint_station_dot(&painter, view, icons, s, p, selected, true);
     }
 

@@ -2,12 +2,20 @@
 
 use std::time::Instant;
 
-use crate::projection::{self, clamp_lat, normalize_lon};
+use crate::projection::{self, clamp_lat, clamp_lat_globe, normalize_lon};
+
+fn clamp_flight_lat(lat: f64, globe: bool) -> f64 {
+    if globe {
+        clamp_lat_globe(lat)
+    } else {
+        clamp_lat(lat)
+    }
+}
 
 const ZOOM_MIN: f64 = 2.0;
 const ZOOM_MAX: f64 = 12.0;
 
-/// 抛物线镜头飞跃（中途略拉远，两端落在震中）。
+/// 抛物线镜头飞跃（中途拉远、两端落在震中）。
 /// 进度只认墙钟秒，与目标帧率 / 每帧 `dt` / 重绘间隔无关：
 /// 30/60/120fps 下同一段跳转墙钟时长一致（高帧率只更密采样，不会更快或更慢）。
 #[derive(Debug, Clone)]
@@ -18,6 +26,8 @@ pub struct CameraFlight {
     end_lon: f64,
     end_lat: f64,
     end_zoom: f64,
+    /// 球体模式：中途对齐 GQ，拉到能看见完整地球。
+    globe: bool,
     started: Instant,
     duration: f64,
 }
@@ -27,16 +37,18 @@ impl CameraFlight {
         from: (f64, f64, f64),
         to: (f64, f64, f64),
         duration_s: f64,
+        globe: bool,
     ) -> Self {
         let (start_lon, start_lat, start_zoom) = from;
         let (end_lon, end_lat, end_zoom) = to;
         Self {
             start_lon: normalize_lon(start_lon),
-            start_lat: clamp_lat(start_lat),
+            start_lat: clamp_flight_lat(start_lat, globe),
             start_zoom: start_zoom.clamp(ZOOM_MIN, ZOOM_MAX),
             end_lon: normalize_lon(end_lon),
-            end_lat: clamp_lat(end_lat),
+            end_lat: clamp_flight_lat(end_lat, globe),
             end_zoom: end_zoom.clamp(ZOOM_MIN, ZOOM_MAX),
+            globe,
             started: Instant::now(),
             duration: duration_s.max(0.05),
         }
@@ -48,7 +60,7 @@ impl CameraFlight {
     }
 
     /// 按墙钟推进；`_dt` 保留签名但不参与进度（禁止用帧间隔累加）。
-    /// 位移：GQ 余弦缓动；缩放：线性时间抛物线（对齐 eewcn），中途拉远有上限，不贴 ZOOM_MIN。
+    /// 位移：GQ 余弦缓动；缩放：线性时间抛物线（对齐 eewcn / GQ 中途全球视角）。
     pub fn tick(&mut self, _dt: f64) -> (f64, f64, f64, bool) {
         let t = (self.started.elapsed().as_secs_f64() / self.duration).clamp(0.0, 1.0);
         // GQ: t1 = -cos(t*PI)*0.5+0.5
@@ -63,7 +75,7 @@ impl CameraFlight {
         );
         let z0 = self.start_zoom;
         let z1 = self.end_zoom;
-        let y_m = mid_flight_zoom(z0, z1, dist_km);
+        let y_m = mid_flight_zoom(z0, z1, dist_km, self.globe);
         // eewcn: D=2*yM-avg; a=yA+yB-2D; b=yB-yA-a; zoom=a*t^2+b*t+yA（t 线性）
         let avg = (z0 + z1) * 0.5;
         let d = 2.0 * y_m - avg;
@@ -83,7 +95,7 @@ impl CameraFlight {
             if t >= 1.0 - 1e-9 {
                 self.end_lat
             } else {
-                clamp_lat(lat)
+                clamp_flight_lat(lat, self.globe)
             },
             zoom,
             t >= 1.0 - 1e-9,
@@ -95,19 +107,37 @@ impl CameraFlight {
     }
 }
 
-/// 中途拉远目标 zoom：近距轻拉，远距适中，避免「先砸到地球再拉回」的顿挫感。
-fn mid_flight_zoom(z0: f64, z1: f64, dist_km: f64) -> f64 {
+/// 球体远距中途拉远目标（再低易缩成小点）。
+const GLOBE_FILL_ZOOM: f64 = 7.0;
+
+/// 中途目标 zoom。球体：近距轻拉、远距拉到整球占满窗口；平面适度拉远。
+fn mid_flight_zoom(z0: f64, z1: f64, dist_km: f64, globe: bool) -> f64 {
     let avg = (z0 + z1) * 0.5;
     let lo = z0.min(z1);
+    if globe {
+        let ym = if dist_km < 350.0 {
+            // 近距：略抬高，不贴全球地板
+            (avg - 0.55).min(lo - 0.3).max(7.8)
+        } else if dist_km < 1800.0 {
+            // 中距：区域 → 略抬，不到远距地板
+            let t = ((dist_km - 350.0) / 1450.0).clamp(0.0, 1.0);
+            let target = 8.0 - t * (8.0 - (GLOBE_FILL_ZOOM + 0.25));
+            target.min(lo - 0.55)
+        } else {
+            // 远距：整球占满窗口
+            GLOBE_FILL_ZOOM.min(lo - 0.8)
+        };
+        return ym.clamp(GLOBE_FILL_ZOOM, ZOOM_MAX);
+    }
     let pull = if dist_km < 400.0 {
-        0.35
+        0.4
     } else if dist_km < 1500.0 {
-        0.35 + (dist_km - 400.0) / 1100.0 * 0.45
+        0.4 + (dist_km - 400.0) / 1100.0 * 0.7
     } else {
-        0.85 + (dist_km / 14000.0).clamp(0.0, 1.0) * 0.65
+        1.1 + (dist_km / 14000.0).clamp(0.0, 1.0) * 0.9
     };
-    let ym = (avg - pull).min(lo - 0.15);
-    ym.clamp(4.5, ZOOM_MAX)
+    let ym = (avg - pull).min(lo - 0.35);
+    ym.clamp(3.8, ZOOM_MAX)
 }
 
 fn haversine_km(lat0: f64, lon0: f64, lat1: f64, lon1: f64) -> f64 {
@@ -144,7 +174,7 @@ fn lerp_lon(a: f64, b: f64, t: f64) -> f64 {
 /// （否则闲时跟焦堪察加速报会被偏到日界线，看起来像「默认北太平洋」）。
 pub fn globe_framed_center(lon: f64, lat: f64, zoom: f64) -> (f64, f64) {
     let lon = normalize_lon(lon);
-    let lat = clamp_lat(lat);
+    let lat = clamp_lat_globe(lat);
     if zoom >= 11.0 {
         return (lon, lat);
     }
@@ -296,8 +326,8 @@ mod flight_timing_tests {
     fn flight_progress_is_wall_clock_not_tick_count() {
         // 同一墙钟时长：tick 2 次与 tick 20 次都应接近同一进度（与「帧率」无关）
         let dur = 0.20_f64;
-        let mut sparse = CameraFlight::new((0.0, 0.0, 6.0), (10.0, 5.0, 8.0), dur);
-        let mut dense = CameraFlight::new((0.0, 0.0, 6.0), (10.0, 5.0, 8.0), dur);
+        let mut sparse = CameraFlight::new((0.0, 0.0, 6.0), (10.0, 5.0, 8.0), dur, true);
+        let mut dense = CameraFlight::new((0.0, 0.0, 6.0), (10.0, 5.0, 8.0), dur, true);
         thread::sleep(Duration::from_millis(100));
         let (_, _, _, _) = sparse.tick(1.0 / 30.0);
         let (lon_s, lat_s, z_s, _) = sparse.tick(1.0 / 30.0);
@@ -309,6 +339,17 @@ mod flight_timing_tests {
         assert!((lat_s - lat_d).abs() < 0.25, "lat {lat_s} vs {lat_d}");
         assert!((z_s - z_d).abs() < 0.35, "zoom {z_s} vs {z_d}");
         assert!((sparse.duration_s() - dur).abs() < 1e-9);
+    }
+
+    #[test]
+    fn globe_mid_flight_near_vs_far() {
+        // 远距：整球占满窗口，不得缩成小点
+        let far = super::mid_flight_zoom(9.5, 10.0, 9000.0, true);
+        assert!((far - super::GLOBE_FILL_ZOOM).abs() < 0.15, "far={far}");
+        // 近距：保持较近，不进全球地板
+        let near = super::mid_flight_zoom(9.0, 9.5, 180.0, true);
+        assert!(near >= 7.8, "near={near}");
+        assert!(near > far + 0.5, "near={near} far={far}");
     }
 }
 

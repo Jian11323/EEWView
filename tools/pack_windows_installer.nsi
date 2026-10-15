@@ -12,7 +12,7 @@ RequestExecutionLevel admin
   !define OUT_FILE "..\dist\EEWView_Beta_${VERSION}_setup.exe"
 !endif
 !ifndef SPLASH_BMP
-  !define SPLASH_BMP "${DIST_DIR}\assets\brand\splash_installer.bmp"
+  !define SPLASH_BMP "${DIST_DIR}\icon\brand\splash_installer.bmp"
 !endif
 
 Name "EEW View"
@@ -24,8 +24,8 @@ SetCompressor /SOLID lzma
 !include "MUI2.nsh"
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "${DIST_DIR}\assets\brand\app.ico"
-!define MUI_UNICON "${DIST_DIR}\assets\brand\app.ico"
+!define MUI_ICON "${DIST_DIR}\icon\brand\app.ico"
+!define MUI_UNICON "${DIST_DIR}\icon\brand\app.ico"
 
 ; Welcome/finish sidebar bitmap (generated from splash_bg.png at pack time)
 !define MUI_WELCOMEFINISHPAGE_BITMAP "${SPLASH_BMP}"
@@ -61,8 +61,8 @@ Section "EEW View" SecMain
     "NoRepair" 1
 
   CreateDirectory "$SMPROGRAMS\EEW View"
-  CreateShortCut "$SMPROGRAMS\EEW View\EEW View.lnk" "$INSTDIR\eewview.exe" "" "$INSTDIR\assets\brand\app.ico" 0 SW_SHOWNORMAL "" "$INSTDIR"
-  CreateShortCut "$DESKTOP\EEW View.lnk" "$INSTDIR\eewview.exe" "" "$INSTDIR\assets\brand\app.ico" 0 SW_SHOWNORMAL "" "$INSTDIR"
+  CreateShortCut "$SMPROGRAMS\EEW View\EEW View.lnk" "$INSTDIR\eewview.exe" "" "$INSTDIR\icon\brand\app.ico" 0 SW_SHOWNORMAL "" "$INSTDIR"
+  CreateShortCut "$DESKTOP\EEW View.lnk" "$INSTDIR\eewview.exe" "" "$INSTDIR\icon\brand\app.ico" 0 SW_SHOWNORMAL "" "$INSTDIR"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 SectionEnd
 

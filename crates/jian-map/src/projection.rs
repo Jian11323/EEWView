@@ -40,6 +40,11 @@ pub fn clamp_lat(lat: f64) -> f64 {
     lat.clamp(-85.05112878, 85.05112878)
 }
 
+/// 球体镜头中心纬度：可接近极点，但避开精确 ±90°（方位角/经度奇点）。
+pub fn clamp_lat_globe(lat: f64) -> f64 {
+    lat.clamp(-89.9, 89.9)
+}
+
 /// 经度归一到 (-180, 180]，对应 Leaflet `worldCopyJump` 后的中心经度。
 pub fn normalize_lon(lon: f64) -> f64 {
     let mut x = (lon + 180.0).rem_euclid(360.0) - 180.0;

@@ -141,30 +141,24 @@ def main():
     draw = ImageDraw.Draw(img)
 
     gq = GEODATA / "globalquake"
-    world = None
+    ka_world = GEODATA / "kanameishi" / "medium.global.modified.topo.json"
+    world_geo = None
     for name in (
-        "countriesHD.json",
-        "countriesMD.json",
-        "countriesUHD.json",
+        "medium.global.modified.geo.json",
+        "medium.global.modified.geojson",
     ):
-        p = gq / name
+        p = GEODATA / name
         if p.is_file():
-            world = p
+            world_geo = p
             break
-    if world is None:
-        for name in (
-            "medium.global.modified.geo.json",
-            "Globalmap.geo.json",
-        ):
-            p = GEODATA / name
-            if p.is_file():
-                world = p
-                break
-    if world is None:
-        raise SystemExit("no world geojson")
-
-    print("world", world)
-    print("world polys", paint_polys(draw, iter_geojson_polygons(world), LAND))
+    if world_geo is not None:
+        print("world", world_geo)
+        print("world polys", paint_polys(draw, iter_geojson_polygons(world_geo), LAND))
+    elif ka_world.is_file():
+        print("world", ka_world)
+        print("world polys", paint_polys(draw, decode_topo_region(ka_world), LAND))
+    else:
+        raise SystemExit("no fine world map (need kanameishi/medium.global.modified.topo.json)")
 
     cn_gq = gq / "cn-prefectures.geojson"
     jp_gq = gq / "jp-prefectures.geojson"

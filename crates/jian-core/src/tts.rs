@@ -259,6 +259,8 @@ pub fn build_record_tts_script(rec: &EqRecord) -> String {
     };
     if rec.hypocenter_unknown {
         body.push_str("，震源调查中");
+    } else if agency_family(&rec.agency.0) == AgencyFamily::Jma && rec.depth_km.abs() < 1e-9 {
+        body.push_str("，震源极浅");
     } else if rec.depth_km >= 0.0 {
         body.push_str(&format!("，震源深度{:.0}千米", rec.depth_km));
     }

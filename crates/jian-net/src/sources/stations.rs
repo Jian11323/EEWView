@@ -167,16 +167,45 @@ fn spawn_snet_original(
     };
     info!(n = points.len(), "stations: spawn original MSIL S-Net");
     tokio::spawn(async move {
-        emit_health(&tx, "snet", jian_core::HealthStatus::Normal);
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(12))
+            .user_agent(concat!(
+                "EEWView/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://github.com/Jian11323/EEWView)"
+            ))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
+        // MSIL 在部分网络下会 403/超时；探测失败则回退 Jian /s-net
+        if fetch_snet_latest_time(&client).await.is_none() {
+            warn!("stations: MSIL S-Net 不可达，回退 Jian 中转");
+            let mut state = KmoniState::default();
+            run_ws_loop(
+                tx,
+                WsLoopOpts {
+                    source: "s-net",
+                    url: fallback_jian_ws,
+                    resolve_url: None,
+                    on_open_texts: Vec::new(),
+                    periodic_texts: Vec::new(),
+                    periodic_secs: 0,
+                    backoff_max_secs: 60,
+                    stale_secs: 15,
+                },
+                move |tx, text| ingest_snet_frame(&mut state, tx, text),
+            )
+            .await;
+            return;
+        }
+
+        emit_health(&tx, "snet", jian_core::HealthStatus::Normal);
         let mut last_key = String::new();
+        let mut fail_streak = 0u32;
         loop {
             let latest = fetch_snet_latest_time(&client).await;
             if let Some(key) = latest {
+                fail_streak = 0;
                 if key != last_key {
                     match sample_snet_tiles(&client, &key, &points).await {
                         Some(list) => {
@@ -188,12 +217,34 @@ fn spawn_snet_original(
                             emit_health(&tx, "snet", jian_core::HealthStatus::Normal);
                         }
                         None => {
+                            fail_streak = fail_streak.saturating_add(1);
                             emit_health(&tx, "snet", jian_core::HealthStatus::Fluctuating);
                         }
                     }
                 }
             } else {
+                fail_streak = fail_streak.saturating_add(1);
                 emit_health(&tx, "snet", jian_core::HealthStatus::Fluctuating);
+            }
+            if fail_streak >= 3 {
+                warn!("stations: MSIL S-Net 连续失败，回退 Jian 中转");
+                let mut state = KmoniState::default();
+                run_ws_loop(
+                    tx,
+                    WsLoopOpts {
+                        source: "s-net",
+                        url: fallback_jian_ws,
+                        resolve_url: None,
+                        on_open_texts: Vec::new(),
+                        periodic_texts: Vec::new(),
+                        periodic_secs: 0,
+                        backoff_max_secs: 60,
+                        stale_secs: 15,
+                    },
+                    move |tx, text| ingest_snet_frame(&mut state, tx, text),
+                )
+                .await;
+                return;
             }
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }

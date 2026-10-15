@@ -1,8 +1,8 @@
 //! 行政区矢量底图（暗色矢量 / 亮色浅填）。
 //!
 //! 世界层：`geodata/kanameishi/medium.global.modified.topo.json`（精细，本身不含中日国界）。
-//! 区划层：`globalquake/` 中日省级（含藏南），缺失时回退要石。
-//! 平面 / 球体按投影分别加载，互不常驻。
+//! 区划层：`globalquake/` 中日省级（含藏南），缺失时回退要石；并由省级溶解出国级外轮廓。
+//! 低于 zoom 7.5 只画中日国级；达到后叠省级。平面 / 球体按投影分别加载。
 //! 加载在后台线程分两阶段（世界 → 区划），主线程 `poll` 合并。
 
 use crate::globe::zoom_to_scroll;
@@ -63,11 +63,10 @@ impl Default for VectorStyle {
     }
 }
 
-/// 近距叠中国地市/区县 + 日本都道府县（世界远景 MD 已含中日国界；中景用 GQ 一级区划补）。
-/// 区县描边起始缩放；过大时（且 LOD 未简化）会拖死主线程。
-const ZOOM_REGIONAL: f64 = 5.8;
-const ZOOM_REGIONAL_MED: f64 = 7.2;
-const ZOOM_REGIONAL_FINE: f64 = 8.5;
+/// 中日省级描边起始缩放：低于此只画国级外轮廓，达到后叠省级。
+const ZOOM_REGIONAL: f64 = 7.5;
+const ZOOM_REGIONAL_MED: f64 = 8.2;
+const ZOOM_REGIONAL_FINE: f64 = 9.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BasemapMode {
@@ -399,17 +398,24 @@ impl VectorBasemap {
                     return;
                 }
 
-                // 平面/球体都加载中日省级（世界层不再携 GQ MD）
+                // 平面/球体：省级 + 由省级溶解的中日国级外轮廓（始终常驻）
                 let (mut regional_fine, r_files, r_skip) = load_regional_rings(&dir);
-                regional_fine.extend(builtin_diaoyu_patches());
+                let diaoyu = builtin_diaoyu_patches();
+                let mut national_fine = dissolve_national_outlines(&regional_fine);
+                national_fine.extend(diaoyu.iter().cloned());
+                regional_fine.extend(diaoyu);
                 let regional_n = regional_fine.len();
-                // 省级份量小：coarse/fine 共用一份，各 zoom pick 都能命中
+                // 份量不大：coarse/fine 共用一份，各 zoom pick 都能命中
                 let regional_lods = LayerLods {
                     coarse: regional_fine.clone(),
                     medium: Vec::new(),
                     fine: regional_fine,
                 };
-                let national_lods = empty_lods();
+                let national_lods = LayerLods {
+                    coarse: national_fine.clone(),
+                    medium: Vec::new(),
+                    fine: national_fine,
+                };
 
                 let _ = tx.send((
                     gen,
@@ -514,6 +520,7 @@ impl VectorBasemap {
         changed
     }
 
+    /// `lite`：拖拽/滚轮轻量绘制；飞跃应传 `false`，否则会只剩粗国界像「没加载地图」。
     pub fn paint(
         &mut self,
         ui: &mut Ui,
@@ -522,7 +529,7 @@ impl VectorBasemap {
         style: VectorStyle,
         skip_world_stroke: bool,
         quality: PaintQuality,
-        interacting: bool,
+        lite: bool,
     ) {
         if !self.world_ready && !self.regional_ready {
             return;
@@ -532,6 +539,7 @@ impl VectorBasemap {
         let zoom = view.zoom;
         let painter = ui.painter_at(rect);
         let ppp = ui.ctx().pixels_per_point();
+        let interacting = lite;
         let q = if interacting {
             quality.while_interacting()
         } else {
@@ -612,7 +620,7 @@ impl VectorBasemap {
         };
 
         if view.mode.is_globe() {
-            // 飞跃/拖拽：只画远景粗轮廓并抽点，避免每帧投影省级/近景把高帧率拖成「跳得慢」
+            // 仅拖拽/滚轮用粗轮廓抽稀；飞跃走完整 GQ 分层，避免跳转时像没底图
             if interacting {
                 paint_globe_fly_lite(&mut shapes, self, view, style);
             } else {
@@ -669,6 +677,7 @@ impl VectorBasemap {
                     0.8_f32 * seg_bias
                 };
                 let stroke = Stroke::new(0.9_f32, style.world_border);
+                // 世界层不画藏南/麦克马洪线一带，缺口由中国国级/省级补上
                 paint_rings(
                     &mut shapes,
                     rings,
@@ -684,78 +693,30 @@ impl VectorBasemap {
                     false,
                     style.land_fill,
                     lon_shift,
+                    true,
                 );
             }
 
-            // 不画 national 溶解粗外轮廓（易与国界叠成双层）。对齐 GQ：
-            // 中景 HD/UHD 已去中日 → 补一级区划；近景再叠地市/都道府县。交互中跳过区划以免飞跃卡顿。
-            if !interacting {
-                let stroke_admin = Stroke::new(0.85_f32, style.admin_border);
-                if zoom >= regional_zoom
-                    && (!self.regional.coarse.is_empty()
-                        || !self.regional.medium.is_empty()
-                        || !self.regional.fine.is_empty())
-                {
-                    let rings = self
-                        .regional
-                        .pick(zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
-                    let min_seg = if zoom < ZOOM_REGIONAL_MED {
-                        2.0_f32 * seg_bias
-                    } else if zoom < ZOOM_REGIONAL_FINE {
-                        1.4_f32 * seg_bias
-                    } else {
-                        1.0_f32 * seg_bias
-                    };
-                    let stroke = Stroke::new(
-                        if zoom < ZOOM_REGIONAL_MED {
-                            0.7_f32
-                        } else {
-                            0.95_f32
-                        },
-                        style.admin_border,
-                    );
-                    paint_rings(
-                        &mut shapes,
-                        rings,
-                        view,
-                        min_lon + lon_shift,
-                        min_lat,
-                        max_lon + lon_shift,
-                        max_lat,
-                        min_seg,
-                        max_jump_px,
-                        stroke,
-                        fill_land,
-                        q != PaintQuality::Eco && zoom >= ZOOM_REGIONAL_FINE,
-                        style.land_fill,
-                        lon_shift,
-                    );
-                } else if zoom >= z_world_med {
-                    if let Some(gq) = self.gq.as_ref() {
-                        for rings in [gq.cn.as_slice(), gq.jp.as_slice()] {
-                            if rings.is_empty() {
-                                continue;
-                            }
-                            paint_rings(
-                                &mut shapes,
-                                rings,
-                                view,
-                                min_lon + lon_shift,
-                                min_lat,
-                                max_lon + lon_shift,
-                                max_lat,
-                                1.6_f32 * seg_bias,
-                                max_jump_px,
-                                stroke_admin,
-                                fill_land,
-                                false,
-                                style.land_fill,
-                                lon_shift,
-                            );
-                        }
-                    }
-                }
-            }
+            // 要石世界层无中日国界：
+            // zoom < 7.5 → 只画国级外轮廓；zoom ≥ 7.5 → 叠省级（外轮廓由省界承担，避免双描）。
+            paint_cn_jp_admin_flat(
+                &mut shapes,
+                self,
+                view,
+                zoom,
+                regional_zoom,
+                interacting,
+                seg_bias,
+                q,
+                fill_land,
+                style,
+                min_lon + lon_shift,
+                min_lat,
+                max_lon + lon_shift,
+                max_lat,
+                max_jump_px,
+                lon_shift,
+            );
         }
 
         let mesh = if interacting {
@@ -950,7 +911,189 @@ fn bake_shapes_mesh_opts(
 }
 
 
-/// 对齐 GQ `GlobePanel`：scroll 分档绘制国界与区划（含藏南修复国界 / 中国一级行政区）。
+fn layer_has_rings(lods: &LayerLods) -> bool {
+    !lods.coarse.is_empty() || !lods.medium.is_empty() || !lods.fine.is_empty()
+}
+
+/// 平面：中日国级始终补画（填世界层藏南缺口）；省级仅 zoom ≥ regional_zoom。
+fn paint_cn_jp_admin_flat(
+    shapes: &mut Vec<egui::Shape>,
+    basemap: &VectorBasemap,
+    view: &ViewCtx,
+    zoom: f64,
+    regional_zoom: f64,
+    interacting: bool,
+    seg_bias: f32,
+    q: PaintQuality,
+    fill_land: bool,
+    style: VectorStyle,
+    min_lon: f64,
+    min_lat: f64,
+    max_lon: f64,
+    max_lat: f64,
+    max_jump_px: f32,
+    lon_shift: f64,
+) {
+    // 国级始终画：世界层跳过麦克马洪线后，靠它补藏南中国主张边界
+    if layer_has_rings(&basemap.national) {
+        let rings = basemap.national.pick(zoom, 4.0, 6.0);
+        let min_seg = if interacting {
+            2.8_f32 * seg_bias
+        } else {
+            1.4_f32 * seg_bias
+        };
+        paint_rings(
+            shapes,
+            rings,
+            view,
+            min_lon,
+            min_lat,
+            max_lon,
+            max_lat,
+            min_seg,
+            max_jump_px,
+            Stroke::new(0.9_f32, style.world_border),
+            fill_land,
+            false,
+            style.land_fill,
+            lon_shift,
+            false,
+        );
+    } else if let Some(gq) = basemap.gq.as_ref() {
+        let stroke_admin = Stroke::new(0.85_f32, style.admin_border);
+        for rings in [gq.cn.as_slice(), gq.jp.as_slice()] {
+            if rings.is_empty() {
+                continue;
+            }
+            paint_rings(
+                shapes,
+                rings,
+                view,
+                min_lon,
+                min_lat,
+                max_lon,
+                max_lat,
+                1.6_f32 * seg_bias,
+                max_jump_px,
+                stroke_admin,
+                fill_land,
+                false,
+                style.land_fill,
+                lon_shift,
+                false,
+            );
+        }
+    }
+
+    let show_provincial = zoom >= regional_zoom && layer_has_rings(&basemap.regional);
+    if !show_provincial {
+        return;
+    }
+    let rings = basemap
+        .regional
+        .pick(zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
+    let min_seg = if interacting {
+        3.2_f32 * seg_bias
+    } else if zoom < ZOOM_REGIONAL_MED {
+        2.0_f32 * seg_bias
+    } else if zoom < ZOOM_REGIONAL_FINE {
+        1.4_f32 * seg_bias
+    } else {
+        1.0_f32 * seg_bias
+    };
+    let stroke = Stroke::new(
+        if interacting || zoom < ZOOM_REGIONAL_MED {
+            0.7_f32
+        } else {
+            0.95_f32
+        },
+        style.admin_border,
+    );
+    paint_rings(
+        shapes,
+        rings,
+        view,
+        min_lon,
+        min_lat,
+        max_lon,
+        max_lat,
+        min_seg,
+        max_jump_px,
+        stroke,
+        fill_land,
+        !interacting && q != PaintQuality::Eco && zoom >= ZOOM_REGIONAL_FINE,
+        style.land_fill,
+        lon_shift,
+        false,
+    );
+}
+
+/// 球体：中日国级始终补藏南；省级仅 zoom ≥ ZOOM_REGIONAL。
+fn paint_cn_jp_admin_globe(
+    shapes: &mut Vec<egui::Shape>,
+    basemap: &VectorBasemap,
+    view: &ViewCtx,
+    style: VectorStyle,
+    stride: usize,
+) {
+    let (min_lon, min_lat, max_lon, max_lat) = (-180.0, -90.0, 180.0, 90.0);
+    let stroke_admin = Stroke::new(0.85_f32, style.admin_border);
+    let stroke_nation = Stroke::new(0.9_f32, style.world_border);
+
+    if layer_has_rings(&basemap.national) {
+        let rings = basemap.national.pick(view.zoom, 4.0, 6.0);
+        paint_rings_globe(
+            shapes,
+            rings,
+            view,
+            min_lon,
+            min_lat,
+            max_lon,
+            max_lat,
+            stroke_nation,
+            stride,
+            false,
+        );
+    } else if let Some(gq) = basemap.gq.as_ref() {
+        for rings in [&gq.cn, &gq.jp] {
+            if rings.is_empty() {
+                continue;
+            }
+            paint_rings_globe(
+                shapes,
+                rings,
+                view,
+                min_lon,
+                min_lat,
+                max_lon,
+                max_lat,
+                stroke_admin,
+                stride,
+                false,
+            );
+        }
+    }
+
+    if view.zoom >= ZOOM_REGIONAL && layer_has_rings(&basemap.regional) {
+        let rings = basemap
+            .regional
+            .pick(view.zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
+        paint_rings_globe(
+            shapes,
+            rings,
+            view,
+            min_lon,
+            min_lat,
+            max_lon,
+            max_lat,
+            stroke_admin,
+            stride,
+            false,
+        );
+    }
+}
+
+/// 对齐 GQ `GlobePanel`：世界轮廓 + 中日国级/省级分档。
 fn paint_globe_gq_style(
     shapes: &mut Vec<egui::Shape>,
     basemap: &VectorBasemap,
@@ -961,11 +1104,10 @@ fn paint_globe_gq_style(
     // 球体固定只描轮廓（不做陆地填色 / 地平线弓弧），避免穿海弦线
     let (min_lon, min_lat, max_lon, max_lat) = (-180.0, -90.0, 180.0, 90.0);
     let stroke_w = Stroke::new(0.9_f32, style.world_border);
-    let stroke_admin = Stroke::new(0.85_f32, style.admin_border);
     let scroll = zoom_to_scroll(view.zoom);
 
     if let Some(gq) = basemap.gq.as_ref() {
-        // 远景完整 MD；近景用去掉中日的 MD + 省级，避免双层粗国界
+        // 远景完整 MD；近景用去掉中日的 MD + 本侧国级/省级
         if scroll >= 0.5 {
             paint_rings_globe(
                 shapes,
@@ -977,6 +1119,7 @@ fn paint_globe_gq_style(
                 max_lat,
                 stroke_w,
                 1,
+                true,
             );
         } else {
             let world = if !gq.md_near.is_empty() {
@@ -994,23 +1137,9 @@ fn paint_globe_gq_style(
                 max_lat,
                 stroke_w,
                 1,
+                true,
             );
-            for rings in [&gq.cn, &gq.jp] {
-                if rings.is_empty() {
-                    continue;
-                }
-                paint_rings_globe(
-                    shapes,
-                    rings,
-                    view,
-                    min_lon,
-                    min_lat,
-                    max_lon,
-                    max_lat,
-                    stroke_admin,
-                    1,
-                );
-            }
+            paint_cn_jp_admin_globe(shapes, basemap, view, style, 1);
         }
         return;
     }
@@ -1026,30 +1155,12 @@ fn paint_globe_gq_style(
         max_lat,
         stroke_w,
         1,
+        true,
     );
-    if view.zoom >= ZOOM_REGIONAL
-        && (!basemap.regional.coarse.is_empty()
-            || !basemap.regional.medium.is_empty()
-            || !basemap.regional.fine.is_empty())
-    {
-        let rings = basemap
-            .regional
-            .pick(view.zoom, ZOOM_REGIONAL_MED, ZOOM_REGIONAL_FINE);
-        paint_rings_globe(
-            shapes,
-            rings,
-            view,
-            min_lon,
-            min_lat,
-            max_lon,
-            max_lat,
-            stroke_admin,
-            1,
-        );
-    }
+    paint_cn_jp_admin_globe(shapes, basemap, view, style, 1);
 }
 
-/// 球体飞跃/拖拽：仅远景粗国界 + 顶点抽稀，保证高帧率下墙钟跳转仍跟得上。
+/// 球体飞跃/拖拽：世界粗轮廓 + 中日国级（省级仅近景），抽稀保帧率。
 fn paint_globe_fly_lite(
     shapes: &mut Vec<egui::Shape>,
     basemap: &VectorBasemap,
@@ -1080,7 +1191,14 @@ fn paint_globe_fly_lite(
         max_lat,
         stroke_w,
         3,
+        true,
     );
+    // 要石世界层不含中日；GQ 远景 md 已含完整国界时不再叠，以免双描
+    let gq_far_md = basemap.gq.as_ref().is_some_and(|g| !g.md.is_empty())
+        && zoom_to_scroll(view.zoom) >= 0.5;
+    if !gq_far_md {
+        paint_cn_jp_admin_globe(shapes, basemap, view, style, 3);
+    }
 }
 
 /// 球体：只描可见轮廓段（穿地平线断开，不闭合、不填色、不加弓弧）。
@@ -1094,13 +1212,14 @@ fn paint_rings_globe(
     max_lat: f64,
     stroke: Stroke,
     stride: usize,
+    omit_zangnan: bool,
 ) {
     let stride = stride.max(1);
     for ring in rings {
         if !ring_visible(ring, min_lon, min_lat, max_lon, max_lat) {
             continue;
         }
-        for seg in project_globe_outline_segments(&ring.exterior, view, stride) {
+        for seg in project_globe_outline_segments(&ring.exterior, view, stride, omit_zangnan) {
             if seg.len() < 2 {
                 continue;
             }
@@ -1122,6 +1241,7 @@ fn project_globe_outline_segments(
     exterior: &[[f32; 2]],
     view: &ViewCtx,
     stride: usize,
+    omit_zangnan: bool,
 ) -> Vec<Vec<Pos2>> {
     if exterior.len() < 2 || !view.mode.is_globe() {
         return Vec::new();
@@ -1135,13 +1255,48 @@ fn project_globe_outline_segments(
     let n = exterior.len();
     let mut segs: Vec<Vec<Pos2>> = Vec::new();
     let mut cur: Vec<Pos2> = Vec::new();
+    let mut prev_ll: Option<[f32; 2]> = None;
 
-    // 多走一圈起点，闭合环在可见侧的连续段也能收齐；stride>1 时仍保证回到起点
+    // 仅当首尾很近（真闭合环）时才绕回起点；开折线绕回会拉出「神秘直线」
+    let close_dist = {
+        let a = exterior[0];
+        let b = exterior[n - 1];
+        ((a[0] - b[0]).hypot(a[1] - b[1])) as f64
+    };
+    let do_close = close_dist < 0.35;
     let steps = (n + stride - 1) / stride;
-    for k in 0..=steps {
-        let i = if k == steps { 0 } else { (k * stride) % n };
-        let lon = exterior[i][0] as f64;
-        let lat = exterior[i][1] as f64;
+    let k_end = if do_close { steps } else { steps.saturating_sub(1) };
+
+    for k in 0..=k_end {
+        let i = if do_close && k == steps {
+            0
+        } else {
+            (k * stride) % n
+        };
+        let ll = exterior[i];
+        if omit_zangnan {
+            // 带内顶点整点跳过，避免断头残段；长弦穿越则只拆段
+            if in_zangnan_omit_box(ll) {
+                if cur.len() >= 2 {
+                    segs.push(std::mem::take(&mut cur));
+                } else {
+                    cur.clear();
+                }
+                prev_ll = None;
+                continue;
+            }
+            if let Some(prev) = prev_ll {
+                if edge_hits_zangnan(prev, ll) {
+                    if cur.len() >= 2 {
+                        segs.push(std::mem::take(&mut cur));
+                    } else {
+                        cur.clear();
+                    }
+                }
+            }
+        }
+        let lon = ll[0] as f64;
+        let lat = ll[1] as f64;
         match view.project(lon, lat) {
             Some(sp) => {
                 if let Some(prev) = cur.last().copied() {
@@ -1156,6 +1311,7 @@ fn project_globe_outline_segments(
                 if cur.last().map(|p| (*p - sp).length() > 0.35).unwrap_or(true) {
                     cur.push(sp);
                 }
+                prev_ll = Some(ll);
             }
             None => {
                 if cur.len() >= 2 {
@@ -1163,6 +1319,7 @@ fn project_globe_outline_segments(
                 } else {
                     cur.clear();
                 }
+                prev_ll = Some(ll);
             }
         }
     }
@@ -1187,6 +1344,7 @@ fn paint_rings(
     draw_holes: bool,
     land_fill: Color32,
     lon_shift: f64,
+    omit_zangnan: bool,
 ) {
     // 先填后描。平面 / 球体均用屏幕 Path 实心填色（对齐 GQ）。
     if fill {
@@ -1236,6 +1394,7 @@ fn paint_rings(
             min_seg_px,
             max_jump_px,
             lon_shift,
+            omit_zangnan,
         );
         for pts in segments {
             if pts.len() < 2 {
@@ -1260,6 +1419,7 @@ fn paint_rings(
                     min_seg_px,
                     max_jump_px,
                     lon_shift,
+                    false,
                 );
                 for hpts in hsegs {
                     if hpts.len() < 2 {
@@ -1494,6 +1654,7 @@ fn load_world_rings_fallback(dir: &Path) -> (Vec<RingSet>, usize, usize) {
                 );
                 world_fine.extend(rings);
                 append_cn_boundary_patches(dir, &mut world_fine, &mut files, &mut skipped);
+                world_fine = strip_zangnan_corridor_from_world(world_fine);
                 return (world_fine, files, skipped);
             }
             Err(e) => {
@@ -1526,6 +1687,7 @@ fn load_world_rings_fallback(dir: &Path) -> (Vec<RingSet>, usize, usize) {
                 );
                 world_fine.extend(rings);
                 append_cn_boundary_patches(dir, &mut world_fine, &mut files, &mut skipped);
+                world_fine = strip_zangnan_corridor_from_world(world_fine);
                 return (world_fine, files, skipped);
             }
             Err(e) => {
@@ -1536,11 +1698,12 @@ fn load_world_rings_fallback(dir: &Path) -> (Vec<RingSet>, usize, usize) {
     }
 
     world_fine.extend(builtin_diaoyu_patches());
+    world_fine = strip_zangnan_corridor_from_world(world_fine);
 
     (world_fine, files, skipped)
 }
 
-/// 世界层只叠钓鱼岛（点状）。藏南不另描边，由中国省界 / GQ 国界表达。
+/// 世界层只叠钓鱼岛（点状）。藏南不画世界层边，由中国省界/国级补上。
 fn append_cn_boundary_patches(
     dir: &Path,
     world_fine: &mut Vec<RingSet>,
@@ -1555,6 +1718,168 @@ fn append_cn_boundary_patches(
     }
     *files += 1;
     world_fine.extend(diaoyu);
+}
+
+/// 仅麦克马洪线山脊一带（偏北）。过宽会切断不丹/尼泊尔边，并留下断头残段。
+const ZANGNAN_OMIT_LON0: f32 = 91.4;
+const ZANGNAN_OMIT_LON1: f32 = 97.3;
+const ZANGNAN_OMIT_LAT0: f32 = 27.55;
+const ZANGNAN_OMIT_LAT1: f32 = 29.35;
+
+#[inline]
+fn in_zangnan_omit_box(p: [f32; 2]) -> bool {
+    p[0] >= ZANGNAN_OMIT_LON0
+        && p[0] <= ZANGNAN_OMIT_LON1
+        && p[1] >= ZANGNAN_OMIT_LAT0
+        && p[1] <= ZANGNAN_OMIT_LAT1
+}
+
+/// Liang-Barsky：线段与矩形是否有重叠区间（端点均在盒外时用）。
+fn segment_crosses_rect(
+    a: [f32; 2],
+    b: [f32; 2],
+    x0: f32,
+    x1: f32,
+    y0: f32,
+    y1: f32,
+) -> bool {
+    let mut t0 = 0.0_f32;
+    let mut t1 = 1.0_f32;
+    let dx = b[0] - a[0];
+    let dy = b[1] - a[1];
+    let mut clip = |p: f32, q: f32| -> bool {
+        if p == 0.0 {
+            return q >= 0.0;
+        }
+        let r = q / p;
+        if p < 0.0 {
+            if r > t1 {
+                return false;
+            }
+            if r > t0 {
+                t0 = r;
+            }
+        } else {
+            if r < t0 {
+                return false;
+            }
+            if r < t1 {
+                t1 = r;
+            }
+        }
+        true
+    };
+    clip(-dx, a[0] - x0)
+        && clip(dx, x1 - a[0])
+        && clip(-dy, a[1] - y0)
+        && clip(dy, y1 - a[1])
+        && t1 > t0
+}
+
+/// 世界层应跳过的边：端点落入或线段真正穿越麦克马洪盒（不用 AABB+长度误伤邻边）。
+fn edge_hits_zangnan(a: [f32; 2], b: [f32; 2]) -> bool {
+    if in_zangnan_omit_box(a) || in_zangnan_omit_box(b) {
+        return true;
+    }
+    segment_crosses_rect(
+        a,
+        b,
+        ZANGNAN_OMIT_LON0,
+        ZANGNAN_OMIT_LON1,
+        ZANGNAN_OMIT_LAT0,
+        ZANGNAN_OMIT_LAT1,
+    )
+}
+
+/// 加载时剥掉世界层麦克马洪走廊边；短残段直接丢弃，缺口由中国国级/省级补。
+fn strip_zangnan_corridor_from_world(rings: Vec<RingSet>) -> Vec<RingSet> {
+    let mut out = Vec::with_capacity(rings.len());
+    let mut cut_rings = 0usize;
+    for ring in rings {
+        let parts = split_ring_omitting_zangnan(&ring.exterior);
+        let unchanged = parts.len() == 1 && parts[0].len() == ring.exterior.len();
+        if unchanged {
+            out.push(ring);
+            continue;
+        }
+        cut_rings += 1;
+        for part in parts {
+            if let Some(r) = RingSet::from_parts(part, Vec::new()) {
+                out.push(r);
+            }
+        }
+    }
+    if cut_rings > 0 {
+        info!(
+            cut_rings,
+            out = out.len(),
+            "stripped zangnan/McMahon corridor from world basemap"
+        );
+    }
+    out
+}
+
+fn split_ring_omitting_zangnan(ring: &[[f32; 2]]) -> Vec<Vec<[f32; 2]>> {
+    if ring.len() < 2 {
+        return Vec::new();
+    }
+    let n = ring.len();
+    let closed = {
+        let a = ring[0];
+        let b = ring[n - 1];
+        (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5
+    };
+    let pts: &[[f32; 2]] = if closed && n >= 2 {
+        &ring[..n - 1]
+    } else {
+        ring
+    };
+    if pts.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut parts: Vec<Vec<[f32; 2]>> = Vec::new();
+    let mut cur: Vec<[f32; 2]> = Vec::new();
+
+    let push_pt = |cur: &mut Vec<[f32; 2]>, p: [f32; 2]| {
+        if cur
+            .last()
+            .map(|q| (q[0] - p[0]).abs() > 1e-7 || (q[1] - p[1]).abs() > 1e-7)
+            .unwrap_or(true)
+        {
+            cur.push(p);
+        }
+    };
+    // 断头残段（线头）：少于 3 点不保
+    let flush = |parts: &mut Vec<Vec<[f32; 2]>>, cur: &mut Vec<[f32; 2]>| {
+        if cur.len() >= 3 {
+            parts.push(std::mem::take(cur));
+        } else {
+            cur.clear();
+        }
+    };
+
+    let edge_count = if closed { pts.len() } else { pts.len() - 1 };
+    for i in 0..edge_count {
+        let a = pts[i];
+        let b = pts[(i + 1) % pts.len()];
+        if in_zangnan_omit_box(a) {
+            flush(&mut parts, &mut cur);
+            continue;
+        }
+        push_pt(&mut cur, a);
+        if edge_hits_zangnan(a, b) {
+            flush(&mut parts, &mut cur);
+        }
+    }
+    if !closed {
+        let last = pts[pts.len() - 1];
+        if !in_zangnan_omit_box(last) {
+            push_pt(&mut cur, last);
+        }
+    }
+    flush(&mut parts, &mut cur);
+    parts
 }
 
 /// 区划层：仅中日省级（GQ → 要石回退）。
@@ -1648,7 +1973,7 @@ fn load_coarse_admin_for_dissolve(dir: &Path) -> Vec<RingSet> {
     out
 }
 
-/// 日本都道府县：GQ → `日本/` → 要石。
+/// 日本都道府县：GQ → `日本/` → 要石。加载后剥除钓鱼岛范围小岛环。
 fn load_jp_pref_rings(dir: &Path, files: &mut usize, skipped: &mut usize) -> Vec<RingSet> {
     let mut out = Vec::new();
     let gq_jp = globalquake_dir(dir).join("jp-prefectures.geojson");
@@ -1658,7 +1983,7 @@ fn load_jp_pref_rings(dir: &Path, files: &mut usize, skipped: &mut usize) -> Vec
         skipped,
         "loaded GlobalQuake jp-prefectures",
     ) {
-        return rings;
+        return strip_jp_diaoyu_rings(rings);
     }
 
     let jp_dir = dir.join("日本");
@@ -1674,6 +1999,7 @@ fn load_jp_pref_rings(dir: &Path, files: &mut usize, skipped: &mut usize) -> Vec
             }
         }
         if !out.is_empty() {
+            let out = strip_jp_diaoyu_rings(out);
             info!(rings = out.len(), "loaded jp prefs from 日本/");
             return out;
         }
@@ -1686,6 +2012,7 @@ fn load_jp_pref_rings(dir: &Path, files: &mut usize, skipped: &mut usize) -> Vec
         *files += 1;
         match load_any_map(&path) {
             Ok(rings) => {
+                let rings = strip_jp_diaoyu_rings(rings);
                 info!(path = %path.display(), rings = rings.len(), "loaded kanameishi jp pref");
                 return rings;
             }
@@ -1694,6 +2021,30 @@ fn load_jp_pref_rings(dir: &Path, files: &mut usize, skipped: &mut usize) -> Vec
                 warn!(path = %path.display(), error = %e, "要石日本区划加载失败");
             }
         }
+    }
+    out
+}
+
+/// 剔除日本区划中落在钓鱼岛附近的小岛环（由中国台湾省界 + 内置点状表达）。
+fn strip_jp_diaoyu_rings(rings: Vec<RingSet>) -> Vec<RingSet> {
+    // 约 123.2–124.8°E、25.5–26.1°N；只删跨度很小的岛环，不动冲绳本岛等大轮廓
+    const LON0: f32 = 123.2;
+    const LON1: f32 = 124.8;
+    const LAT0: f32 = 25.5;
+    const LAT1: f32 = 26.1;
+    let before = rings.len();
+    let out: Vec<RingSet> = rings
+        .into_iter()
+        .filter(|r| {
+            let cx = (r.min_lon + r.max_lon) * 0.5;
+            let cy = (r.min_lat + r.max_lat) * 0.5;
+            let small = (r.max_lon - r.min_lon) < 0.5 && (r.max_lat - r.min_lat) < 0.5;
+            !(small && cx >= LON0 && cx <= LON1 && cy >= LAT0 && cy <= LAT1)
+        })
+        .collect();
+    let removed = before.saturating_sub(out.len());
+    if removed > 0 {
+        info!(removed, "stripped Diaoyu islets from Japan prefecture rings");
     }
     out
 }
@@ -2223,47 +2574,63 @@ fn viewport_bounds(center_lon: f64, center_lat: f64, zoom: f64, rect: Rect) -> (
 
 /// 相对视口中心连续解缠后投影；经度或屏幕跳变时拆段，禁止跨日界连线。
 /// `lon_shift`：世界副本偏移（±360°…），用于低缩放横向铺满；球体忽略。
+/// `omit_zangnan`：世界层跳过藏南/麦克马洪线走廊，由中国轮廓补画。
 fn project_segments(
     ring: &[[f32; 2]],
     view: &ViewCtx,
     min_seg_px: f32,
     max_jump_px: f32,
     lon_shift: f64,
+    omit_zangnan: bool,
 ) -> Vec<Vec<Pos2>> {
     let min2 = min_seg_px * min_seg_px;
     let jump2 = max_jump_px * max_jump_px;
     let mut segments: Vec<Vec<Pos2>> = Vec::new();
     let mut cur: Vec<Pos2> = Vec::with_capacity(ring.len().min(256));
+    let mut prev_ll: Option<[f32; 2]> = None;
+
+    let flush = |segments: &mut Vec<Vec<Pos2>>, cur: &mut Vec<Pos2>| {
+        if cur.len() >= 2 {
+            segments.push(std::mem::take(cur));
+        } else {
+            cur.clear();
+        }
+    };
 
     if view.mode.is_globe() {
-        for p in ring {
-            let lon = p[0] as f64;
-            let lat = p[1] as f64;
-            match view.project(lon, lat) {
+        for &p in ring {
+            if omit_zangnan {
+                if in_zangnan_omit_box(p) {
+                    flush(&mut segments, &mut cur);
+                    prev_ll = None;
+                    continue;
+                }
+                if let Some(prev) = prev_ll {
+                    if edge_hits_zangnan(prev, p) {
+                        flush(&mut segments, &mut cur);
+                    }
+                }
+            }
+            match view.project(p[0] as f64, p[1] as f64) {
                 Some(sp) => {
                     if let Some(last) = cur.last() {
                         let dx = sp.x - last.x;
                         let dy = sp.y - last.y;
                         let d2 = dx * dx + dy * dy;
                         if d2 < min2 {
+                            prev_ll = Some(p);
                             continue;
                         }
                         if d2 > jump2 {
-                            if cur.len() >= 2 {
-                                segments.push(std::mem::take(&mut cur));
-                            } else {
-                                cur.clear();
-                            }
+                            flush(&mut segments, &mut cur);
                         }
                     }
                     cur.push(sp);
+                    prev_ll = Some(p);
                 }
                 None => {
-                    if cur.len() >= 2 {
-                        segments.push(std::mem::take(&mut cur));
-                    } else {
-                        cur.clear();
-                    }
+                    flush(&mut segments, &mut cur);
+                    prev_ll = Some(p);
                 }
             }
         }
@@ -2280,7 +2647,21 @@ fn project_segments(
     let (cx, cy) = projection::lonlat_to_world(center_lon, center_lat, zoom);
     let mut prev_lon: Option<f64> = None;
 
-    for p in ring {
+    for &p in ring {
+        if omit_zangnan {
+            if in_zangnan_omit_box(p) {
+                flush(&mut segments, &mut cur);
+                prev_ll = None;
+                prev_lon = None;
+                continue;
+            }
+            if let Some(prev) = prev_ll {
+                if edge_hits_zangnan(prev, p) {
+                    flush(&mut segments, &mut cur);
+                    prev_lon = None;
+                }
+            }
+        }
         let lat = p[1] as f64;
         let mut lon = projection::wrap_lon_near(p[0] as f64, center_lon) + lon_shift;
         if let Some(prev) = prev_lon {
@@ -2291,11 +2672,7 @@ fn project_segments(
                 lon += 360.0;
             }
             if (lon - prev).abs() > 180.0 {
-                if cur.len() >= 2 {
-                    segments.push(std::mem::take(&mut cur));
-                } else {
-                    cur.clear();
-                }
+                flush(&mut segments, &mut cur);
                 lon = projection::wrap_lon_near(p[0] as f64, center_lon) + lon_shift;
             }
         }
@@ -2310,18 +2687,16 @@ fn project_segments(
             let d2 = dx * dx + dy * dy;
             if d2 < min2 {
                 prev_lon = Some(lon);
+                prev_ll = Some(p);
                 continue;
             }
             if d2 > jump2 {
-                if cur.len() >= 2 {
-                    segments.push(std::mem::take(&mut cur));
-                } else {
-                    cur.clear();
-                }
+                flush(&mut segments, &mut cur);
             }
         }
         cur.push(sp);
         prev_lon = Some(lon);
+        prev_ll = Some(p);
     }
     if cur.len() >= 2 {
         segments.push(cur);
@@ -2498,6 +2873,67 @@ mod tests {
     fn basemap_mode_parse() {
         assert_eq!(BasemapMode::parse("vector"), BasemapMode::Vector);
         assert_eq!(BasemapMode::parse("TILES"), BasemapMode::Tiles);
+    }
+
+    #[test]
+    fn zangnan_omit_detects_corridor_and_long_chord() {
+        assert!(in_zangnan_omit_box([94.0, 28.0]));
+        assert!(!in_zangnan_omit_box([90.0, 28.0]));
+        // 中国主张南界附近不应整带省略
+        assert!(!in_zangnan_omit_box([93.0, 26.9]));
+        assert!(edge_hits_zangnan([91.5, 27.6], [97.0, 29.0]));
+        assert!(edge_hits_zangnan([90.5, 27.0], [98.5, 29.5]));
+        // 走廊南侧的长边不应被 AABB 误伤
+        assert!(!edge_hits_zangnan([91.0, 26.5], [97.0, 26.8]));
+        assert!(!edge_hits_zangnan([120.0, 30.0], [121.0, 31.0]));
+    }
+
+    #[test]
+    fn strip_zangnan_drops_corridor_and_stubs() {
+        let ring = [
+            [90.0, 28.0],
+            [91.0, 28.0],
+            [92.0, 28.2], // in corridor
+            [94.0, 28.5], // in corridor
+            [96.0, 28.0], // in corridor
+            [98.0, 28.0],
+            [98.0, 30.0],
+            [90.0, 30.0],
+            [90.0, 28.0],
+        ];
+        let parts = split_ring_omitting_zangnan(&ring);
+        assert!(!parts.is_empty());
+        for p in &parts {
+            assert!(p.iter().all(|pt| !in_zangnan_omit_box(*pt)));
+            assert!(p.len() >= 3);
+        }
+    }
+
+    #[test]
+    fn strip_jp_diaoyu_removes_small_islet_keeps_okinawa() {
+        let diaoyu = RingSet::from_parts(
+            vec![
+                [123.46, 25.73],
+                [123.48, 25.73],
+                [123.48, 25.75],
+                [123.46, 25.75],
+            ],
+            Vec::new(),
+        )
+        .expect("diaoyu");
+        let okinawa = RingSet::from_parts(
+            vec![
+                [127.5, 26.0],
+                [128.5, 26.0],
+                [128.5, 27.0],
+                [127.5, 27.0],
+            ],
+            Vec::new(),
+        )
+        .expect("okinawa");
+        let out = strip_jp_diaoyu_rings(vec![diaoyu, okinawa]);
+        assert_eq!(out.len(), 1);
+        assert!((out[0].min_lon - 127.5).abs() < 0.01);
     }
 
     #[test]

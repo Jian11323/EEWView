@@ -32,6 +32,8 @@ pub struct GlobeCamera {
 
 impl GlobeCamera {
     pub fn new(center_lon: f64, center_lat: f64, zoom: f64, rect: Rect) -> Self {
+        let center_lon = crate::projection::normalize_lon(center_lon);
+        let center_lat = crate::projection::clamp_lat_globe(center_lat);
         let scroll = zoom_to_scroll(zoom);
         let camera_altitude_km = EARTH_RADIUS_KM * scroll;
         let yaw = -center_lon.to_radians();
@@ -71,15 +73,21 @@ impl GlobeCamera {
         let (hx, hy, hz) = lonlat_to_ecef(h_lon, h_lat, 0.0);
         cam.max_distance = dist3(cam.camera_x, cam.camera_y, cam.camera_z, hx, hy, hz);
 
-        let (m_lon, m_lat) = move_on_globe(center_lon, center_lat, deg_to_km(1.0), 0.0);
+        // 1° 弧长采样：朝最近极的反方向，避免贴极/Mercator 钳位把步长压成 0
+        // （否则 one_deg_px→0 → px_to_km 爆炸，波圈/贴面标记瞬间放大）。
+        let bearing = if center_lat >= 0.0 { 180.0 } else { 0.0 };
+        let (m_lon, m_lat) = move_on_globe(center_lon, center_lat, deg_to_km(1.0), bearing);
         let p0 = cam.project_lonlat_raw(center_lon, center_lat);
         let p1 = cam.project_lonlat_raw(m_lon, m_lat);
-        cam.one_deg_px = ((p0.0 - p1.0).hypot(p0.1 - p1.1)).max(1e-6);
+        let measured = (p0.0 - p1.0).hypot(p0.1 - p1.1);
 
         let (hx_s, hy_s) = cam.project_xyz(hx, hy, hz);
         let cx = cam.width * 0.5;
         let cy = cam.height * 0.5;
         cam.horizon_dist = (hx_s - cx).hypot(hy_s - cy).max(1.0);
+        // 地平线约 90° 弧；用其兜底，防止测量失败时比例尺塌缩
+        let floor = (cam.horizon_dist / 120.0).max(1e-3);
+        cam.one_deg_px = measured.max(floor);
         cam
     }
 
@@ -157,7 +165,7 @@ impl GlobeCamera {
         let dlon = -(dx_px as f64) / self.one_deg_px;
         let dlat = (dy_px as f64) / self.one_deg_px;
         let lon = crate::projection::normalize_lon(self.center_lon + dlon);
-        let lat = crate::projection::clamp_lat(self.center_lat + dlat);
+        let lat = crate::projection::clamp_lat_globe(self.center_lat + dlat);
         (lon, lat)
     }
 
@@ -168,7 +176,7 @@ impl GlobeCamera {
         let dlat = -dy / self.one_deg_px;
         (
             crate::projection::normalize_lon(self.center_lon + dlon),
-            crate::projection::clamp_lat(self.center_lat + dlat),
+            crate::projection::clamp_lat_globe(self.center_lat + dlat),
         )
     }
 }
@@ -193,6 +201,7 @@ fn deg_to_km(deg: f64) -> f64 {
 }
 
 /// 从 (lon,lat) 沿方位角 `bearing_deg`（0=北）移动 `distance_km`。
+/// 纬度按地理 ±90° 钳位（勿用 Web Mercator 的 ±85°，否则极区波圈被压扁）。
 pub fn move_on_globe(lon: f64, lat: f64, distance_km: f64, bearing_deg: f64) -> (f64, f64) {
     let ang = distance_km / EARTH_RADIUS_KM;
     let br = bearing_deg.to_radians();
@@ -207,7 +216,7 @@ pub fn move_on_globe(lon: f64, lat: f64, distance_km: f64, bearing_deg: f64) -> 
         lon1 + (br.sin() * sin_ang * cos_lat1).atan2(cos_ang - sin_lat1 * lat2.sin());
     (
         crate::projection::normalize_lon(lon2.to_degrees()),
-        crate::projection::clamp_lat(lat2.to_degrees()),
+        lat2.to_degrees().clamp(-90.0, 90.0),
     )
 }
 
@@ -259,4 +268,48 @@ pub fn project_polyline_km(
         segments.push(cur);
     }
     segments
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::Rect;
+
+    #[test]
+    fn move_on_globe_can_reach_near_pole() {
+        let (_lon, lat) = move_on_globe(160.0, 52.0, 4200.0, 0.0);
+        assert!(
+            lat > 85.1,
+            "geographic poleward move must not be stuck at Mercator 85°, got {lat}"
+        );
+    }
+
+    #[test]
+    fn one_deg_px_stable_near_north_clamp() {
+        let rect = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(900.0, 800.0));
+        // 旧逻辑贴 Mercator 上限朝北采样会把 one_deg 压成 ~0
+        let cam = GlobeCamera::new(160.0, 85.05112878, 7.0, rect);
+        assert!(
+            cam.one_deg_px > 1.0,
+            "one_deg_px must stay usable at polar view, got {}",
+            cam.one_deg_px
+        );
+        let cam2 = GlobeCamera::new(160.0, 89.9, 7.0, rect);
+        assert!(
+            cam2.one_deg_px > 1.0,
+            "one_deg_px must stay usable at 89.9N, got {}",
+            cam2.one_deg_px
+        );
+    }
+
+    #[test]
+    fn px_to_km_not_exploding_at_pole() {
+        let rect = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(900.0, 800.0));
+        let cam = GlobeCamera::new(0.0, 85.05112878, 7.0, rect);
+        let km = cam.px_to_km(26.0);
+        assert!(
+            km < 5000.0,
+            "26px must not map to planetary km at pole, got {km}"
+        );
+    }
 }

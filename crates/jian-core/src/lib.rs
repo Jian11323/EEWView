@@ -71,6 +71,42 @@ pub struct EewReport {
     pub final_at_ms: i64,
 }
 
+/// JMA：`depth=0` 与「极浅」/「ごく浅い」同义；展示为「极浅」，不写成 `0km`。
+pub fn format_depth_label(agency: &str, depth_km: f64, hypocenter_unknown: bool) -> String {
+    if hypocenter_unknown {
+        return "调查中".into();
+    }
+    if agency_family(agency) == AgencyFamily::Jma && depth_km.abs() < 1e-9 {
+        return "极浅".into();
+    }
+    format!("{:.0}km", depth_km)
+}
+
+impl EewReport {
+    /// Header / TTS 用深度文案。
+    pub fn depth_label(&self) -> String {
+        let hypo_unknown = self.is_assumption
+            && self.latitude.abs() < 0.01
+            && self.longitude.abs() < 0.01;
+        format_depth_label(&self.agency.0, self.depth_km, hypo_unknown)
+    }
+
+    /// 侧栏/Header 报数标记：挂在机构括号后。JMA 最终报为 `#终`，否则 `#N`。
+    pub fn serial_mark(&self) -> Option<String> {
+        if self.is_cancel {
+            return None;
+        }
+        if self.is_final && agency_family(&self.agency.0) == AgencyFamily::Jma {
+            return Some("#\u{7ec8}".into());
+        }
+        if self.serial > 0 && self.serial < 10_000 {
+            Some(format!("#{}", self.serial))
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EqRecord {
     pub agency: AgencyId,
@@ -105,6 +141,11 @@ impl EqRecord {
         } else {
             format!("M{:.1}", self.magnitude)
         }
+    }
+
+    /// 侧栏 / Header 用深度文案。JMA `depth=0` / 「极浅」原文→「极浅」，不显 `0km`。
+    pub fn depth_label(&self) -> String {
+        format_depth_label(&self.agency.0, self.depth_km, self.hypocenter_unknown)
     }
 
     /// 是否有可投影的震中坐标。
@@ -483,9 +524,9 @@ pub fn typhoon_focus_lonlat_radius(list: &[TyphoonInfo]) -> Option<(f64, f64, f6
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolcanoNotice {
     pub agency: AgencyId,
-    /// 火山名
+    /// 火山名（或含情报类型的短标题；不含上游「火山名」字段标签）
     pub name: String,
-    /// 标题，如「降灰予報（定時）」
+    /// 描述/标题，如「十勝岳　降灰予報（定時）」或「降灰予報（定時）」
     pub title: String,
     pub time_text: String,
     pub issued_ms: i64,
@@ -1201,7 +1242,8 @@ impl AppSnapshot {
             "{}|{}|{}|{:.2}",
             rec.agency.0, rec.place, rec.origin_ms, rec.magnitude
         );
-        Some((rec.longitude, rec.latitude, 7.5, key))
+        // 略近于默认视口，闲时对准列表第一条震中
+        Some((rec.longitude, rec.latitude, 8.5, key))
     }
 
     /// 启动超时无预警时：选中最新速报并返回镜头目标。
@@ -1761,6 +1803,17 @@ mod eew_dedup_tests {
             is_warn: false,
             final_at_ms: 0,
         }
+    }
+
+    #[test]
+    fn serial_mark_jma_final_is_zhong() {
+        let mut ev = sample("jma-eew", "1", 4);
+        assert_eq!(ev.serial_mark().as_deref(), Some("#4"));
+        ev.is_final = true;
+        assert_eq!(ev.serial_mark().as_deref(), Some("#\u{7ec8}"));
+        let mut gq = sample("gq", "2", 5);
+        gq.is_final = true;
+        assert_eq!(gq.serial_mark().as_deref(), Some("#5"));
     }
 
     #[test]

@@ -54,6 +54,45 @@ fn field_f64(data: &Value, keys: &[&str]) -> Option<f64> {
     None
 }
 
+/// JMA：「极浅」/「ごく浅い」等文案（与 depth=0 同义）；展示统一走 depth_label→「极浅」。
+fn is_very_shallow_depth_text(s: &str) -> bool {
+    let t = s
+        .trim()
+        .trim_end_matches("km")
+        .trim_end_matches("KM")
+        .trim()
+        .replace('　', "")
+        .replace(' ', "");
+    if t.eq_ignore_ascii_case("veryshallow") {
+        return true;
+    }
+    // 含日文原文或中文「极浅/極浅」均视为极浅，禁止把原文直接展示出去
+    t == "极浅"
+        || t == "極浅"
+        || t.contains("ごく浅い")
+        || t.contains("ごく浅")
+        || t.contains("極浅い")
+        || t.contains("極浅")
+        || t.contains("极浅")
+}
+
+/// 深度字段：数字，或 JMA 「极浅」文案→ `0.0`（展示仍用 `depth_label` 显「极浅」）。
+fn field_depth_km(data: &Value, keys: &[&str]) -> Option<f64> {
+    for k in keys {
+        if let Some(v) = data.get(*k) {
+            if let Value::String(s) = v {
+                if is_very_shallow_depth_text(s) {
+                    return Some(0.0);
+                }
+            }
+            if let Some(f) = json_f64(v) {
+                return Some(f);
+            }
+        }
+    }
+    None
+}
+
 /// 上游「调查中 / 不明」文案（JMA 震度速报等）。
 fn is_investigating_text(s: &str) -> bool {
     let t = s.trim();
@@ -80,6 +119,7 @@ fn field_looks_unknown(data: &Value, keys: &[&str]) -> bool {
         if let Some(v) = data.get(*k) {
             match v {
                 Value::String(s) if is_investigating_text(s) => return true,
+                Value::String(s) if is_very_shallow_depth_text(s) => {}
                 Value::String(s) => {
                     let s = s.trim().trim_end_matches("km").trim_end_matches("KM").trim();
                     if !s.is_empty() && json_f64(v).is_none() {
@@ -856,7 +896,7 @@ fn parse_jian_eew(agency: &str, data: &Value) -> Option<EewReport> {
         None if is_cancel => 0.0,
         None => return None,
     };
-    let depth_km = match field_f64(data, &["depth", "Depth"]) {
+    let depth_km = match field_depth_km(data, &["depth", "Depth"]) {
         Some(v) => v,
         None if is_cancel => 0.0,
         None => return None,
@@ -1045,7 +1085,7 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
         _ if hypo_unknown => 0.0,
         _ => return None,
     };
-    let depth_km = match field_f64(data, &["depth", "Depth"]) {
+    let depth_km = match field_depth_km(data, &["depth", "Depth"]) {
         Some(v) if v >= 0.0 && !hypo_unknown => v,
         _ if hypo_unknown => 0.0,
         Some(v) => v,
@@ -1199,7 +1239,7 @@ fn emit_wolfx_eew(tx: &NetTx, v: &Value, agency: &str) {
     let Some(magnitude) = field_f64(v, &["Magnitude", "magnitude", "Magunitude"]) else {
         return;
     };
-    let Some(depth_km) = field_f64(v, &["Depth", "depth"]) else {
+    let Some(depth_km) = field_depth_km(v, &["Depth", "depth"]) else {
         return;
     };
     let Some(latitude) = field_f64(v, &["Latitude", "latitude"]) else {
@@ -1317,7 +1357,7 @@ fn ingest_wolfx_cenc_eqlist_value(tx: &NetTx, v: &Value) {
         let Some(longitude) = field_f64(item, &["longitude", "Longitude"]) else {
             continue;
         };
-        let Some(depth_km) = field_f64(item, &["depth", "Depth"]) else {
+        let Some(depth_km) = field_depth_km(item, &["depth", "Depth"]) else {
             continue;
         };
         let origin_ms = item
@@ -1395,7 +1435,7 @@ fn ingest_wolfx_jma_eqlist_value(tx: &NetTx, v: &Value) {
             _ if hypo_unknown => 0.0,
             _ => continue,
         };
-        let depth_km = match field_f64(item, &["depth", "Depth"]) {
+        let depth_km = match field_depth_km(item, &["depth", "Depth"]) {
             Some(v) if v >= 0.0 && !hypo_unknown => v,
             _ if hypo_unknown => 0.0,
             Some(v) => v,
@@ -1491,7 +1531,7 @@ pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
         let lat_raw = field_f64(hypo, &["latitude", "Latitude"]).unwrap_or(-200.0);
         let lon_raw = field_f64(hypo, &["longitude", "Longitude"]).unwrap_or(-200.0);
         let mag_raw = field_f64(hypo, &["magnitude", "Magnitude"]).unwrap_or(-1.0);
-        let depth_raw = field_f64(hypo, &["depth", "Depth"]).unwrap_or(-1.0);
+        let depth_raw = field_depth_km(hypo, &["depth", "Depth"]).unwrap_or(-1.0);
         let hypo_unknown = lat_raw <= -180.0 || lon_raw <= -180.0;
         let mag_unknown = mag_raw < 0.0;
         let depth_unknown = depth_raw < 0.0;
@@ -1738,7 +1778,7 @@ fn ingest_pancakes_gq(tx: &NetTx, action: &str, payload: &Value, min_mag: f64) {
     let Some(longitude) = field_f64(payload, &["longitude"]) else {
         return;
     };
-    let Some(depth_km) = field_f64(payload, &["depth", "depthKm"]) else {
+    let Some(depth_km) = field_depth_km(payload, &["depth", "depthKm"]) else {
         return;
     };
     let place = payload
@@ -1792,12 +1832,13 @@ fn ingest_pancakes_gq(tx: &NetTx, action: &str, payload: &Value, min_mag: f64) {
 }
 
 fn ingest_pancakes_volcano(tx: &NetTx, payload: &Value) {
-    let title = payload
-        .get("title")
-        .or_else(|| payload.get("headline"))
-        .and_then(|x| x.as_str())
-        .unwrap_or("\u{706b}\u{5c71}\u{60c5}\u{62a5}")
-        .to_string();
+    let title = strip_jma_volcano_name_label(
+        payload
+            .get("title")
+            .or_else(|| payload.get("headline"))
+            .and_then(|x| x.as_str())
+            .unwrap_or("\u{706b}\u{5c71}\u{60c5}\u{62a5}"),
+    );
     let issued_ms = payload
         .get("announcedTime")
         .or_else(|| payload.get("issuedAt"))
@@ -1808,7 +1849,7 @@ fn ingest_pancakes_volcano(tx: &NetTx, payload: &Value) {
         .get("volcanoName")
         .or_else(|| payload.get("name"))
         .and_then(|x| x.as_str())
-        .map(|s| s.to_string())
+        .map(strip_jma_volcano_name_label)
         .or_else(|| {
             payload
                 .get("areas")
@@ -1816,7 +1857,7 @@ fn ingest_pancakes_volcano(tx: &NetTx, payload: &Value) {
                 .and_then(|arr| arr.first())
                 .and_then(|a| a.get("name"))
                 .and_then(|x| x.as_str())
-                .map(|s| s.to_string())
+                .map(strip_jma_volcano_name_label)
         })
         .unwrap_or_else(|| title.clone());
     let mut latitude = field_f64(payload, &["latitude", "Latitude", "lat"]).unwrap_or(0.0);
@@ -1849,6 +1890,27 @@ fn ingest_pancakes_volcano(tx: &NetTx, payload: &Value) {
         latitude,
         longitude,
     }));
+}
+
+/// JMA Atom 标题常带字段标签「火山名」；列表只展示火山名与情报类型。
+fn strip_jma_volcano_name_label(s: &str) -> String {
+    let t = s.trim();
+    // 「火山名」
+    const LABEL: &str = "\u{706b}\u{5c71}\u{540d}";
+    let rest = match t.strip_prefix(LABEL) {
+        Some(r) => r,
+        None => return t.to_string(),
+    };
+    rest.trim_start_matches(|c: char| {
+        c.is_whitespace()
+            || c == '\u{3000}'
+            || c == '\u{00a0}'
+            || c == '\u{ff1a}'
+            || c == ':'
+            || c == '\u{30fb}'
+            || c == '\u{00b7}'
+    })
+    .to_string()
 }
 
 fn jma_volcano_coords(name: &str) -> Option<(f64, f64)> {
@@ -1891,6 +1953,18 @@ fn jma_volcano_coords(name: &str) -> Option<(f64, f64)> {
 mod tests {
     use super::*;
     use crate::bus::channel;
+
+    #[test]
+    fn strip_jma_volcano_name_label_removes_field_prefix() {
+        assert_eq!(
+            strip_jma_volcano_name_label("\u{706b}\u{5c71}\u{540d}\u{3000}\u{5341}\u{52dd}\u{5cb3}\u{3000}\u{964d}\u{7070}\u{4e88}\u{5831}\u{ff08}\u{5b9a}\u{65f6}\u{ff09}"),
+            "\u{5341}\u{52dd}\u{5cb3}\u{3000}\u{964d}\u{7070}\u{4e88}\u{5831}\u{ff08}\u{5b9a}\u{65f6}\u{ff09}"
+        );
+        assert_eq!(
+            strip_jma_volcano_name_label("\u{685c}\u{5cf6}\u{3000}\u{63a8}\u{5b9a}\u{5674}\u{7159}\u{6d41}\u{5411}\u{5831}"),
+            "\u{685c}\u{5cf6}\u{3000}\u{63a8}\u{5b9a}\u{5674}\u{7159}\u{6d41}\u{5411}\u{5831}"
+        );
+    }
 
     #[test]
     fn list_response_agency_keeps_early_est() {
@@ -2200,6 +2274,84 @@ mod tests {
         assert_eq!(rec.intensity_level, 4);
         assert_eq!(rec.place, "调查中");
         assert_eq!(rec.magnitude_label(), "调查中");
+    }
+
+    #[test]
+    fn jma_depth_jishen_string_keeps_zero_and_label() {
+        let body = r#"{
+            "type": "jma",
+            "Data": {
+                "id": "20261015080000",
+                "originTime": "2026-10-15T08:00:00+09:00",
+                "latitude": 35.0,
+                "longitude": 139.0,
+                "depth": "极浅",
+                "magnitude": 3.2,
+                "placeName": "横浜湾",
+                "intensity": "2",
+                "infoType": "発表"
+            }
+        }"#;
+        let (tx, mut rx) = channel();
+        ingest_jian_frame(&tx, body, None);
+        let NetEvent::Record(rec) = rx.try_recv().expect("record") else {
+            panic!("expected Record");
+        };
+        assert!((rec.depth_km - 0.0).abs() < 1e-9);
+        assert_eq!(rec.depth_label(), "极浅");
+        assert!(!rec.hypocenter_unknown);
+    }
+
+    #[test]
+    fn jma_depth_goku_asai_japanese_normalizes_to_jishen() {
+        let body = r#"{
+            "type": "jma",
+            "Data": {
+                "id": "20261015080100",
+                "originTime": "2026-10-15T08:01:00+09:00",
+                "latitude": 35.0,
+                "longitude": 139.0,
+                "depth": "ごく浅い",
+                "magnitude": 2.8,
+                "placeName": "横浜湾",
+                "intensity": "1",
+                "infoType": "発表"
+            }
+        }"#;
+        let (tx, mut rx) = channel();
+        ingest_jian_frame(&tx, body, None);
+        let NetEvent::Record(rec) = rx.try_recv().expect("record") else {
+            panic!("expected Record");
+        };
+        assert!((rec.depth_km - 0.0).abs() < 1e-9);
+        assert_eq!(rec.depth_label(), "极浅");
+        assert!(!rec.depth_label().contains("ごく"));
+    }
+
+    #[test]
+    fn p2p_depth_zero_is_jishen_not_unknown() {
+        let body = r#"[{
+            "code": 551,
+            "earthquake": {
+                "time": "2026/10/15 08:00:00",
+                "maxScale": 20,
+                "hypocenter": {
+                    "name": "熊本県熊本地方",
+                    "latitude": 32.5,
+                    "longitude": 130.6,
+                    "depth": 0,
+                    "magnitude": 2.6
+                }
+            }
+        }]"#;
+        let (tx, mut rx) = channel();
+        ingest_p2p_items(&tx, body);
+        let NetEvent::Record(rec) = rx.try_recv().expect("record") else {
+            panic!("expected Record");
+        };
+        assert!(!rec.hypocenter_unknown);
+        assert!((rec.depth_km - 0.0).abs() < 1e-9);
+        assert_eq!(rec.depth_label(), "极浅");
     }
 
     #[test]

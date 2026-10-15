@@ -15,7 +15,9 @@ pub use camera::{
     cluster_for_fit, fit_events, globe_framed_center, zoom_to_fit_radius_km, CameraFlight,
 };
 pub use overlay::TyphoonHoverHit;
-pub use projection::{clamp_lat, km_to_pixels, lonlat_to_screen, normalize_lon, ProjectionMode};
+pub use projection::{
+    clamp_lat, clamp_lat_globe, km_to_pixels, lonlat_to_screen, normalize_lon, ProjectionMode,
+};
 pub use tile_cache::TileCache;
 pub use vector_basemap::{BasemapLoadState, BasemapMode, VectorBasemap, VectorStyle, OCEAN};
 
@@ -159,13 +161,21 @@ impl MapViewport {
         self.cache.clear();
     }
 
+    fn clamp_view_lat(&self, lat: f64) -> f64 {
+        if self.projection_mode.is_globe() {
+            projection::clamp_lat_globe(lat)
+        } else {
+            projection::clamp_lat(lat)
+        }
+    }
+
     /// 列表/图例联动：瞬时居中到经纬，可选改缩放
     pub fn center_on(&mut self, lon: f64, lat: f64, zoom: Option<f64>) {
         self.flight = None;
         self.post_flight_until =
             Some(std::time::Instant::now() + std::time::Duration::from_secs_f64(1.2));
         self.center_lon = projection::normalize_lon(lon);
-        self.center_lat = projection::clamp_lat(lat);
+        self.center_lat = self.clamp_view_lat(lat);
         if let Some(z) = zoom {
             self.zoom = z.clamp(ZOOM_MIN, ZOOM_MAX);
         }
@@ -202,13 +212,19 @@ impl MapViewport {
             self.center_on(lon, lat, Some(end_zoom));
             return;
         }
-        // 墙钟秒（与目标帧率无关）：基准尊重调用方，远距略加时；高帧率只更密采样。
+        // 墙钟秒（与目标帧率无关）。球体远距略加时，给 GQ 式「整球中转」留出观感。
         let km = dist * 111.0;
-        let dur = (duration_s.max(0.55) + km / 12000.0).clamp(0.55, 2.4);
+        let globe = self.projection_mode.is_globe();
+        let dur = if globe {
+            (duration_s.max(0.85) + km / 9000.0).clamp(0.85, 3.2)
+        } else {
+            (duration_s.max(0.55) + km / 12000.0).clamp(0.55, 2.4)
+        };
         self.flight = Some(CameraFlight::new(
             (self.center_lon, self.center_lat, self.zoom),
             (lon, lat, end_zoom),
             dur,
+            globe,
         ));
         self.post_flight_until = None;
         // 不在此清 user_camera_override：列表点选会在 fly 后立刻锁镜头；
@@ -282,7 +298,7 @@ impl MapViewport {
         }
         if let (Some(flon), Some(flat)) = (focus_lon, focus_lat) {
             let tlon = projection::normalize_lon(flon);
-            let tlat = projection::clamp_lat(flat);
+            let tlat = self.clamp_view_lat(flat);
             let dlon = projection::normalize_lon(tlon - self.center_lon);
             let dlon = if dlon > 180.0 {
                 dlon - 360.0
@@ -295,7 +311,7 @@ impl MapViewport {
             if dlon.abs() > 0.05 || dlat.abs() > 0.05 {
                 let kb = (k * 0.85).clamp(0.0, 1.0);
                 self.center_lon = projection::normalize_lon(self.center_lon + dlon * kb);
-                self.center_lat = projection::clamp_lat(self.center_lat + dlat * kb);
+                self.center_lat = self.clamp_view_lat(self.center_lat + dlat * kb);
             }
         }
     }
@@ -392,9 +408,10 @@ impl MapViewport {
         }
 
         let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
-        let interacting = resp.dragged()
-            || self.flight.is_some()
-            || (resp.hovered() && scroll_y.abs() > 0.0);
+        let dragging = resp.dragged() || (resp.hovered() && scroll_y.abs() > 0.0);
+        let flying = self.flight.is_some();
+        // 手动拖/滚轮保持完整底图与测站（lite 会变粗线、丢小岛并闪烁）；仅飞跃降质
+        let interacting = dragging || flying;
 
         // 暗色矢量 / 球体：只描轮廓，不填陆地（对齐旧版纯黑轮廓图）
         if globe || self.basemap.show_vector() {
@@ -405,15 +422,20 @@ impl MapViewport {
                 self.vector_style,
                 /* skip_world_stroke */ false,
                 self.paint_quality,
-                interacting,
+                /* lite */ false,
             );
         }
 
         // 活动断层：矢量轮廓之上、事件叠加之下；瓦片底图时也绘制
         if show_faults {
             let dark = self.ocean_fill.r() < 80;
+            let fault_q = if flying {
+                self.paint_quality.while_interacting()
+            } else {
+                self.paint_quality
+            };
             self.faults
-                .paint(ui, &view, dark, self.paint_quality, interacting);
+                .paint(ui, &view, dark, fault_q, interacting);
         }
 
         // JMA 海啸：按沿岸预报区描边闪烁（不对中日外轮廓整圈描边）
@@ -437,9 +459,9 @@ impl MapViewport {
                     && !e.event_id.starts_with("record:")
                     && !e.is_cancel
             });
-            // 测站/速报飞跃中仍画（按档抽稀）；火山/台风飞跃中可跳过减负
+            // 测站：仅飞跃降质抽稀；手动拖图保持满档，避免 NIED 点闪烁
             let flying = self.flight.is_some();
-            let station_q = if interacting {
+            let station_q = if flying {
                 self.paint_quality.while_interacting()
             } else {
                 self.paint_quality
@@ -565,7 +587,7 @@ impl MapViewport {
                             let (nlon, nlat) =
                                 projection::world_to_lonlat(wx - dx, wy - dy, after);
                             self.center_lon = projection::normalize_lon(nlon);
-                            self.center_lat = projection::clamp_lat(nlat);
+                            self.center_lat = self.clamp_view_lat(nlat);
                         }
                     } else {
                         self.zoom = after;
@@ -580,7 +602,7 @@ impl MapViewport {
                 let (lon, lat) = view.screen_to_lonlat(pos);
                 click = Some((
                     projection::normalize_lon(lon),
-                    projection::clamp_lat(lat),
+                    self.clamp_view_lat(lat),
                 ));
             }
         }
