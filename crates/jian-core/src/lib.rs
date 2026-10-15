@@ -1329,7 +1329,7 @@ impl AppSnapshot {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
 
-        // S-Net 上游约每分钟一帧：計測未变则不刷新时间戳，避免右上角像每秒在跳
+        // S-Net 资料约每分钟一变；中转对时帧已在 net 层过滤。此处再防計測未变时刷时钟
         let snet_unchanged = network == "snet" && {
             let mut old: Vec<(String, i32)> = self
                 .stations

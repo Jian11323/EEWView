@@ -1280,7 +1280,7 @@ fn draw_sources(
         });
         if draft.sources.stations.snet_enabled {
             row_divider(ui);
-            control_row(ui, "S-Net 源", "原版需 MSIL 可达；否则回退 Jian", "\u{25ce}", |ui| {
+            control_row(ui, "S-Net 源", "资料约每分钟；Jian 中转另有秒级对时帧（原版无）", "\u{25ce}", |ui| {
                 egui::ComboBox::from_id_salt("set_snet_station_src")
                     .selected_text(snet_station_src_label(&draft.sources.stations.snet_source))
                     .width(200.0)

@@ -148,6 +148,9 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "S-Net 源"), "S-Net 源");
         m.insert((Lang::Ja, "S-Net 源"), "S-Net ソース");
         m.insert((Lang::En, "S-Net 源"), "S-Net source");
+        m.insert((Lang::ZhTw, "资料约每分钟；Jian 中转另有秒级对时帧（原版无）"), "資料約每分鐘；Jian 中轉另有秒級對時幀（原版無）");
+        m.insert((Lang::Ja, "资料约每分钟；Jian 中转另有秒级对时帧（原版无）"), "資料は約1分毎；Jian中継は秒単位の時刻合わせ（従来版なし）");
+        m.insert((Lang::En, "资料约每分钟；Jian 中转另有秒级对时帧（原版无）"), "Data ~1/min; Jian relay adds 1Hz time sync (original has none)");
         m.insert((Lang::ZhTw, "S波即将到达"), "S波即將到達");
         m.insert((Lang::Ja, "S波即将到达"), "S波まもなく到達");
         m.insert((Lang::En, "S波即将到达"), "S-wave imminent");

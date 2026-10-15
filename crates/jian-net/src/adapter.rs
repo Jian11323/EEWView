@@ -175,6 +175,8 @@ fn fill_record_intensity(
 #[derive(Debug, Clone, Default)]
 pub struct KmoniState {
     meta: Vec<KmoniMeta>,
+    /// S-Net：上次已上送的资料指纹（`time` + int[]）。中转每秒对时帧指纹不变则不上送。
+    last_snet_data_fp: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -264,10 +266,15 @@ pub fn ingest_kmoni_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
     });
 }
 
-/// Jian `/s-net`：首包 `stations[]`；其后约每秒一帧 `time`+`timestamp`（对时）+ `int[]`。
-/// `time` 为资料时刻（常按分钟对齐），`timestamp` 每秒递增，用于保活/对时，勿当僵死。
+/// Jian `/s-net`：首包 `stations[]`；其后中转约每秒重推（steady_push）。
+///
+/// - 上游 S-Net **资料**约每分钟更新一次（`time` 按分钟对齐，`int[]` 随资料变）
+/// - 中转每秒只刷新信封 `timestamp` 作对时/保活；`time`/`int` 不变
+/// - 原版 MSIL 无对时帧，仅在 validTime 变化时取色
+///
+/// 对时帧不上送 `NetEvent::Stations`（WS 看门狗仍因收包保活）；资料变化才上送。
 pub fn ingest_snet_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
-    ingest_int_station_frame(state, tx, text, "s-net", "snet", true);
+    ingest_snet_int_frame(state, tx, text);
 }
 
 /// Jian `/kma-station`：`stations` + `mmi[]`（韩国烈度，映射为 CN 档展示）。
@@ -350,14 +357,7 @@ fn load_station_meta(state: &mut KmoniState, arr: &[Value]) {
     }
 }
 
-fn ingest_int_station_frame(
-    state: &mut KmoniState,
-    tx: &NetTx,
-    text: &str,
-    expect_type: &str,
-    network: &'static str,
-    jma_scale: bool,
-) {
+fn ingest_snet_int_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
     let Ok(v) = serde_json::from_str::<Value>(text) else {
         return;
     };
@@ -365,12 +365,12 @@ fn ingest_int_station_frame(
     if typ == "heartbeat" || typ == "pong" || typ == "error" {
         return;
     }
-    if typ != expect_type && v.get("int").is_none() && v.get("stations").is_none() {
+    if typ != "s-net" && v.get("int").is_none() && v.get("stations").is_none() {
         return;
     }
     if let Some(arr) = v.get("stations").and_then(|s| s.as_array()) {
         load_station_meta(state, arr);
-        debug!(n = state.meta.len(), %network, "stations meta");
+        debug!(n = state.meta.len(), "snet stations meta");
     }
     let Some(ints) = v.get("int").and_then(|i| i.as_array()) else {
         return;
@@ -378,6 +378,14 @@ fn ingest_int_station_frame(
     if state.meta.is_empty() {
         return;
     }
+
+    // 资料指纹：业务 time（分钟级）+ int[]；忽略每秒刷新的 timestamp
+    let data_fp = snet_data_fingerprint(&v, ints);
+    if state.last_snet_data_fp != 0 && state.last_snet_data_fp == data_fp {
+        // 对时重推：不上送，避免 UI/地图当「每秒新资料」
+        return;
+    }
+
     let mut out = Vec::new();
     let n = ints.len().min(state.meta.len());
     for i in 0..n {
@@ -389,35 +397,43 @@ fn ingest_int_station_frame(
         if m.lat.abs() < 1e-6 && m.lon.abs() < 1e-6 {
             continue;
         }
-        let (kind, level, text) = if jma_scale {
-            let (level, _) = jma_from_instrumental(raw);
-            (
-                IntensityKind::JmaShindo,
-                level,
-                instrumental_display_text(raw),
-            )
-        } else if raw < 1.0 {
-            (IntensityKind::CnIntensity, 0_u8, "—".into())
-        } else {
-            let level = (raw.round() as u8).clamp(1, 12);
-            (
-                IntensityKind::CnIntensity,
-                level,
-                cn_intensity_text(level).to_string(),
-            )
-        };
+        let (level, _) = jma_from_instrumental(raw);
         out.push(StationSample {
             id: m.code.clone(),
             name: m.name.clone(),
             latitude: m.lat,
             longitude: m.lon,
-            intensity_text: text,
-            intensity_kind: kind,
+            intensity_text: instrumental_display_text(raw),
+            intensity_kind: IntensityKind::JmaShindo,
             intensity_level: level,
             instrumental: raw,
         });
     }
-    let _ = tx.send(NetEvent::Stations { network, list: out });
+    state.last_snet_data_fp = data_fp;
+    let _ = tx.send(NetEvent::Stations {
+        network: "snet",
+        list: out,
+    });
+}
+
+fn snet_data_fingerprint(v: &Value, ints: &[Value]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    match v.get("time") {
+        Some(Value::String(s)) => s.hash(&mut h),
+        Some(Value::Number(n)) => n.to_string().hash(&mut h),
+        _ => 0u8.hash(&mut h),
+    }
+    ints.len().hash(&mut h);
+    for x in ints {
+        let bits = x
+            .as_f64()
+            .map(f64::to_bits)
+            .or_else(|| x.as_i64().map(|i| i as u64))
+            .unwrap_or(0);
+        bits.hash(&mut h);
+    }
+    h.finish()
 }
 
 /// Jian `/all` 或单源信封：`{ type, Data, md5 }` 或 `source：xxx`
@@ -2027,8 +2043,8 @@ mod tests {
     }
 
     #[test]
-    fn snet_accepts_1hz_time_sync_intensity_frame() {
-        // 实况形状：首包 stations；其后每秒 time+timestamp+int（对时帧兼强度）
+    fn snet_accepts_data_skips_time_sync_repush() {
+        // 首包 stations；资料帧上送一次；同 time+int 仅换 timestamp 的对时帧不上送
         let mut state = KmoniState::default();
         let (tx, mut rx) = channel();
         ingest_snet_frame(
@@ -2050,6 +2066,26 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, "A");
         assert!((list[0].instrumental - (-1.3)).abs() < 1e-9);
+
+        // 对时重推：timestamp 变了，time/int 不变 → 不上送
+        ingest_snet_frame(
+            &mut state,
+            &tx,
+            r#"{"type":"s-net","time":"20261014084800","timestamp":1791967764000,"int":[-1.3,-4.0],"source":"s-net"}"#,
+        );
+        assert!(rx.try_recv().is_err(), "time-sync repush must not emit Stations");
+
+        // 资料更新：time 变了 → 再上送
+        ingest_snet_frame(
+            &mut state,
+            &tx,
+            r#"{"type":"s-net","time":"20261014084900","timestamp":1791967820000,"int":[-0.5,-4.0],"source":"s-net"}"#,
+        );
+        let NetEvent::Stations { list, .. } = rx.try_recv().expect("data update") else {
+            panic!("expected Stations");
+        };
+        assert_eq!(list.len(), 1);
+        assert!((list[0].instrumental - (-0.5)).abs() < 1e-9);
     }
 
     #[test]

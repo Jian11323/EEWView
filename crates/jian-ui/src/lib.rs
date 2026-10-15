@@ -354,7 +354,6 @@ impl MainShell {
                         &[]
                     },
                     station_card_bottom.bottom_y,
-                    self.map.last_viewport_min_px,
                 );
                 if let Some(net) = station_card_bottom.clicked {
                     if let Some((lon, lat, zoom)) = snap.focus_max_station(net) {
@@ -1017,7 +1016,6 @@ fn draw_typhoon_detail_below_stations(
     hover: Option<&TyphoonHoverHit>,
     typhoons: &[jian_core::TyphoonInfo],
     station_bottom_y: f32,
-    viewport_min_px: f32,
 ) -> Option<(f64, f64, f64)> {
     let hit_owned;
     let hit: Option<&TyphoonHoverHit> = if let Some(h) = hover {
@@ -1188,14 +1186,8 @@ fn draw_typhoon_detail_below_stations(
     if hit.latitude.abs() <= 0.01 && hit.longitude.abs() <= 0.01 {
         return None;
     }
-    let radius_km = typhoons
-        .iter()
-        .find(|t| t.id == hit.id)
-        .map(jian_core::typhoon_max_wind_radius_km)
-        .unwrap_or(0.0)
-        .max(250.0);
-    let z = zoom_to_fit_radius_km(hit.latitude, radius_km, viewport_min_px, 0.45).min(7.0);
-    Some((hit.longitude, hit.latitude, z))
+    // 点击标题飞向中心：固定 Z9（原先按风圈 fit 再 cap 到 7，偏远）
+    Some((hit.longitude, hit.latitude, 9.0))
 }
 
 fn format_typhoon_time_ui(time_str: &str) -> String {

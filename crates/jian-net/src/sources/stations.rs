@@ -1,7 +1,11 @@
 //! 测站源：Jian 中转（kmoni / s-net / kma-station）+ NIED kmoni/lmoni + MSIL S-Net。
 //!
 //! Jian 测站三条 WS **无需鉴权**，连接后即可收帧；与 `/all`（需 key）相互独立。
-//! S-Net 中转约每秒一帧（含 `time`/`timestamp` 对时字段 + `int[]`），僵死看门狗按秒级而非分钟级。
+//!
+//! S-Net 语义：
+//! - **资料**（`time` / `int[]`）约每分钟更新一次（MSIL validTime）
+//! - **Jian 中转**另以约 1Hz steady_push 重推同一资料，只刷新信封 `timestamp` 对时；原版无此对时帧
+//! - 僵死看门狗按「收包」计（秒级）；业务上送仅在资料指纹变化时
 
 use jian_config::StationsConfig;
 use jian_core::{instrumental_display_text, jma_from_instrumental, IntensityKind, StationSample};
@@ -109,7 +113,7 @@ pub fn spawn(
 }
 
 fn spawn_snet_jian(tx: NetTx, url: String) -> JoinHandle<()> {
-    info!(%url, "stations: spawn Jian /s-net (no auth; ~1Hz 对时/强度帧)");
+    info!(%url, "stations: spawn Jian /s-net (no auth; 资料~1min，对时~1Hz)");
     tokio::spawn(async move {
         let mut state = KmoniState::default();
         run_ws_loop(
@@ -122,7 +126,7 @@ fn spawn_snet_jian(tx: NetTx, url: String) -> JoinHandle<()> {
                 periodic_texts: Vec::new(),
                 periodic_secs: 0,
                 backoff_max_secs: 60,
-                // 中转约每秒推送（time/timestamp 对时 + int[]）；勿按「分钟一帧」放宽到 120
+                // 中转每秒有对时帧，看门狗按收包；勿当成「资料每秒更新」放宽到 120
                 stale_secs: 15,
             },
             move |tx, text| ingest_snet_frame(&mut state, tx, text),
