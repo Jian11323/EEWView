@@ -16,7 +16,8 @@ pub fn spawn(tx: NetTx, cfg: P2pSourceConfig) -> Vec<JoinHandle<()>> {
         return Vec::new();
     }
 
-    let poll = cfg.poll_secs.max(10);
+    // API 允许最快约 1 次/秒；默认 1.5s
+    let poll = cfg.poll_secs.max(1.0);
     let base = cfg.http_history.clone();
     info!(%base, poll_secs = poll, "p2pquake: spawn http poll");
 
@@ -67,7 +68,7 @@ pub fn spawn(tx: NetTx, cfg: P2pSourceConfig) -> Vec<JoinHandle<()>> {
                     HealthStatus::Abnormal
                 },
             );
-            sleep(Duration::from_secs(poll)).await;
+            sleep(Duration::from_secs_f64(poll)).await;
         }
     })]
 }

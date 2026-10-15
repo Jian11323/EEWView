@@ -1180,11 +1180,12 @@ fn draw_sources(
             toggle(ui, &mut draft.sources.p2pquake.enabled);
         });
         row_divider(ui);
-        control_row(ui, "轮询间隔（秒）", "保存后立即重连", "\u{25ce}", |ui| {
+        control_row(ui, "轮询间隔（秒）", "最低 1，默认 1.5；保存后立即重连", "\u{25ce}", |ui| {
             ui.add(
                 egui::DragValue::new(&mut draft.sources.p2pquake.poll_secs)
-                    .speed(1.0)
-                    .range(10..=300),
+                    .speed(0.1)
+                    .range(1.0..=300.0)
+                    .fixed_decimals(1),
             );
         });
     });

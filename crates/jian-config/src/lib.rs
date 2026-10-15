@@ -610,8 +610,9 @@ pub struct P2pSourceConfig {
     pub http_history: String,
     #[serde(default = "default_p2p_ws")]
     pub ws_url: String,
+    /// HTTP 轮询间隔（秒）；默认 1.5，最低 1.0。
     #[serde(default = "default_p2p_poll")]
-    pub poll_secs: u64,
+    pub poll_secs: f64,
 }
 
 fn default_true() -> bool {
@@ -650,8 +651,8 @@ fn default_p2p_http() -> String {
 fn default_p2p_ws() -> String {
     "wss://api.p2pquake.net/v2/ws".into()
 }
-fn default_p2p_poll() -> u64 {
-    30
+fn default_p2p_poll() -> f64 {
+    1.5
 }
 fn default_pancakes_base() -> String {
     "https://api.aloys23.link".into()

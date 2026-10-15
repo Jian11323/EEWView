@@ -118,6 +118,8 @@ jma_eqlist = true
 
 [sources.p2pquake]
 enabled = true
+# HTTP 轮询间隔（秒）；最低 1，默认 1.5
+poll_secs = 1.5
 
 [sources.pancakes]
 enabled = true
