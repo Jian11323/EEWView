@@ -28,9 +28,9 @@
 
 | 源 | 用途 | 配置 |
 |----|------|------|
-| **Jian Project API** | 预警 / 速报 / 测站 / 底图 | `[sources.jian]`；设置页用 `lk_` 换 `rt_`，或环境变量 `JIAN_ACCESS_TOKEN` / `JIAN_REFRESH_TOKEN` |
+| **Jian Project API** | 预警 / 速报 / 海啸 / 测站 / 底图 | `[sources.jian]`；设置页用 `lk_` 换 `rt_`，或环境变量 `JIAN_ACCESS_TOKEN` / `JIAN_REFRESH_TOKEN` |
 | **Wolfx** | JMA / CENC 等预警与列表补充 | `[sources.wolfx]` |
-| **P2PQuake** | 气象厅地震情报等 | `[sources.p2pquake]` |
+| **P2PQuake** | 气象厅地震情报（551） | `[sources.p2pquake]` |
 
 底图：`basemap = "auto"` 时暗色优先 `geodata/globalquake/`（GlobalQuake Special 藏南修复矢量），否则要石；亮色用自有海洋地形瓦片 `tilemap.sismotide.top/arcwob`（横向循环）。  
 国外源地名按融合历史 FE 格网修正（`media/place/`）；JMA / CWA / HKO / CENC 保留原文。  

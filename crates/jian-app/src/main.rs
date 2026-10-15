@@ -20,7 +20,7 @@ use jian_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
 use jian_travel::{
     max_s_wave_spread_km, s_wave_still_spreading_to, TravelEngine, Wave,
 };
-use jian_map::{zoom_to_fit_radius_km, BasemapMode, DetectTracker, ProjectionMode};
+use jian_map::{zoom_to_fit_radius_km, BasemapMode, ProjectionMode};
 use jian_ui::{draw_splash, MainShell, SettingsAction, SplashGate, AppUiTheme};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -312,7 +312,6 @@ fn run_app() -> Result<()> {
                 window_geom_save_at: None,
                 last_window_geom: None,
                 splash: SplashGate::default(),
-                detect: DetectTracker::default(),
             }))
         }),
     )
@@ -502,8 +501,6 @@ struct JianApp {
     window_geom_save_at: Option<Instant>,
     last_window_geom: Option<(f32, f32, Option<f32>, Option<f32>, bool)>,
     splash: SplashGate,
-    /// NIED 检知框状态（激活保持 + 震度升档）
-    detect: DetectTracker,
 }
 
 impl eframe::App for JianApp {
@@ -878,24 +875,11 @@ impl eframe::App for JianApp {
             audio.tick_countdown(remain);
         }
 
-        // 检知框 + 震度升档音（对齐要石：仅新最大值 > 旧值时播 shindo_N）
-        let now_ms_detect = chrono::Utc::now().timestamp_millis();
-        let (detect_boxes, shindo_rise) =
-            self.detect.tick(&self.snap.stations, now_ms_detect);
-        if let Some(n) = shindo_rise {
-            if !self.splash.active() {
-                if let Some(audio) = self.audio.as_mut() {
-                    audio.play(AudioCue::Shindo(n));
-                }
-            }
-        }
-
         if let Some(action) = self.shell.ui(
             ctx,
             &mut self.snap,
             self.travel.as_ref(),
             &self.cfg,
-            &detect_boxes,
         ) {
             match action {
                 SettingsAction::Saved { cfg, close } => {
@@ -997,7 +981,6 @@ impl eframe::App for JianApp {
             && self.snap.eew_list.iter().any(|e| {
                 eew_wave_live(e, now_ms, &self.snap.wave_spread_km, self.travel.as_ref())
             });
-        let detect_blink = !detect_boxes.is_empty() && !waves_busy;
         let need = if pointer_busy
             || self.shell.map.wants_anim_repaint()
             || self.splash.active()
@@ -1005,11 +988,7 @@ impl eframe::App for JianApp {
             RepaintNeed::Interactive
         } else if waves_busy {
             RepaintNeed::Waves
-        } else if detect_blink
-            || self.shell.settings.open
-            || self.snap.countdown_s.is_some()
-        {
-            // Soft：检知框 500ms 闪烁需要高于 Idle 的重绘
+        } else if self.shell.settings.open || self.snap.countdown_s.is_some() {
             RepaintNeed::Soft
         } else {
             RepaintNeed::Idle

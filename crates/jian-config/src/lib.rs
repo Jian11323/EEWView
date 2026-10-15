@@ -395,7 +395,7 @@ pub struct StationsConfig {
     /// 日本 JMA/NIED 测站总开关
     #[serde(default = "default_true")]
     pub jma_enabled: bool,
-    /// `jian` | `kmoni` | `lmoni` | `yahoo`
+    /// `jian` | `kmoni` | `lmoni`
     #[serde(default = "default_jma_station_source")]
     pub jma_source: String,
     #[serde(default = "default_jian_station_ws")]
@@ -627,7 +627,7 @@ fn default_jian_station_ws() -> String {
     "wss://api.sismotide.top/kmoni".into()
 }
 fn default_jma_station_source() -> String {
-    "yahoo".into()
+    "jian".into()
 }
 fn default_snet_station_source() -> String {
     "jian".into()
@@ -827,6 +827,7 @@ impl AppConfig {
         }
         cfg.apply_env_overrides();
         cfg.filters.migrate_legacy_record_off();
+        cfg.migrate_removed_station_sources();
         cfg
     }
 
@@ -864,14 +865,23 @@ impl AppConfig {
         let path = dir.join("settings.json");
         let mut sanitized = self.clone();
         sanitized.filters.migrate_legacy_record_off();
+        sanitized.migrate_removed_station_sources();
         sanitized.sources.jian.access_token = None;
         let text = serde_json::to_string_pretty(&sanitized).context("serialize settings.json")?;
         fs::write(&path, text).with_context(|| format!("write {}", path.display()))?;
         Ok(path)
     }
 
+    /// 已下线的测站源回落（如旧 `yahoo` → `jian`）。
+    pub fn migrate_removed_station_sources(&mut self) {
+        if self.sources.stations.jma_source.eq_ignore_ascii_case("yahoo") {
+            self.sources.stations.jma_source = "jian".into();
+        }
+    }
+
     /// `stations.jma_*` 为准；旧键 `jian.station_enabled` 仅镜像，不得反杀测站开关。
     pub fn sync_station_compat(&mut self) {
+        self.migrate_removed_station_sources();
         if self.sources.stations.jma_enabled && self.sources.stations.jma_source == "jian" {
             self.sources.jian.station_enabled = true;
             self.sources.jian.station_ws_url = self.sources.stations.jma_jian_ws.clone();

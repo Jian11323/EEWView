@@ -73,7 +73,8 @@ fn is_investigating_text(s: &str) -> bool {
     )
 }
 
-/// 字段值为调查中文案，或无法解析为数字。
+/// 字段值为调查中文案、Null，或无法解析为数字。
+/// 不把负数当缺测：西经/南纬合法；震级哨兵用 [`field_looks_negative`]。
 fn field_looks_unknown(data: &Value, keys: &[&str]) -> bool {
     for k in keys {
         if let Some(v) = data.get(*k) {
@@ -85,13 +86,20 @@ fn field_looks_unknown(data: &Value, keys: &[&str]) -> bool {
                         return true;
                     }
                 }
-                Value::Number(n) => {
-                    if n.as_f64().is_some_and(|f| f < 0.0) {
-                        return true;
-                    }
-                }
                 Value::Null => return true,
                 _ => {}
+            }
+        }
+    }
+    false
+}
+
+/// 可解析且 `< 0`（震级/深度哨兵如 `-1`）。
+fn field_looks_negative(data: &Value, keys: &[&str]) -> bool {
+    for k in keys {
+        if let Some(v) = data.get(*k) {
+            if json_f64(v).is_some_and(|f| f < 0.0) {
+                return true;
             }
         }
     }
@@ -1019,7 +1027,8 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
             .as_deref()
             .is_some_and(|p| is_investigating_text(p) || p.contains("調査中") || p.contains("调查中"));
     let mag_unknown = flag_true(data, &["magnitudeUnknown", "magnitude_unknown"])
-        || field_looks_unknown(data, &["magnitude", "Magnitude", "Magunitude"]);
+        || field_looks_unknown(data, &["magnitude", "Magnitude", "Magunitude"])
+        || field_looks_negative(data, &["magnitude", "Magnitude", "Magunitude"]);
     let magnitude = match field_f64(data, &["magnitude", "Magnitude", "Magunitude"]) {
         Some(m) if m >= 0.0 && !mag_unknown => m,
         Some(_) if mag_unknown => 0.0,
@@ -1365,7 +1374,8 @@ fn ingest_wolfx_jma_eqlist_value(tx: &NetTx, v: &Value) {
             .and_then(|x| x.as_str())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-        let mag_unknown = field_looks_unknown(item, &["magnitude", "Magnitude"]);
+        let mag_unknown = field_looks_unknown(item, &["magnitude", "Magnitude"])
+            || field_looks_negative(item, &["magnitude", "Magnitude"]);
         let hypo_unknown = field_looks_unknown(item, &["latitude", "Latitude", "longitude", "Longitude"])
             || place_raw
                 .as_deref()
@@ -1455,7 +1465,7 @@ fn ingest_wolfx_jma_eqlist_value(tx: &NetTx, v: &Value) {
     }
 }
 
-/// P2PQuake JSON API v2：`code` 551 地震情报；552 海啸情报。
+/// P2PQuake JSON API v2：仅 `code` 551 地震情报（海啸见 Jian `jma-tsunami`）。
 pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
     let Ok(v) = serde_json::from_str::<Value>(text) else {
         return;
@@ -1468,12 +1478,6 @@ pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
 
     for item in items {
         let code = item.get("code").and_then(|c| c.as_u64()).unwrap_or(0);
-        if code == 552 {
-            if let Some(t) = parse_p2p_tsunami(item) {
-                let _ = tx.send(NetEvent::Tsunami(t));
-            }
-            continue;
-        }
         if code != 551 {
             continue;
         }
@@ -1566,101 +1570,6 @@ pub fn ingest_p2p_items(tx: &NetTx, text: &str) {
             hypocenter_unknown: hypo_unknown,
         }));
     }
-}
-
-/// P2PQuake 552：areas[].grade 常见 MajorWarning / Warning / Watch / Forecast。
-fn parse_p2p_tsunami(item: &Value) -> Option<TsunamiInfo> {
-    let cancelled = item
-        .get("cancelled")
-        .and_then(|x| x.as_bool())
-        .unwrap_or(false);
-    let areas = item.get("areas").and_then(|a| a.as_array());
-    let mut grade = "Forecast".to_string();
-    let mut names: Vec<String> = Vec::new();
-    let mut best_rank = 0_u8;
-    if let Some(arr) = areas {
-        for a in arr {
-            let g = a
-                .get("grade")
-                .and_then(|x| x.as_str())
-                .unwrap_or("Forecast");
-            let rank = match g {
-                "MajorWarning" | "Major" => 4,
-                "Warning" => 3,
-                "Watch" => 2,
-                "Forecast" => 1,
-                _ => 0,
-            };
-            if rank >= best_rank {
-                best_rank = rank;
-                grade = g.to_string();
-            }
-            if let Some(n) = a.get("name").and_then(|x| x.as_str()) {
-                if !n.is_empty() && !names.iter().any(|x| x == n) {
-                    names.push(n.to_string());
-                }
-            }
-        }
-    }
-    let title = if cancelled {
-        "海啸情报解除".into()
-    } else {
-        match grade.as_str() {
-            "MajorWarning" | "Major" => "大海啸警报".into(),
-            "Warning" => "海啸警报".into(),
-            "Watch" => "海啸注意报".into(),
-            _ => "海啸预报".into(),
-        }
-    };
-    let areas_summary = if names.is_empty() {
-        "—".into()
-    } else {
-        names.into_iter().take(8).collect::<Vec<_>>().join("、")
-    };
-    let issued_ms = item
-        .get("time")
-        .and_then(|x| x.as_str())
-        .and_then(parse_time_str)
-        .or_else(|| {
-            item.pointer("/issue/time")
-                .and_then(|x| x.as_str())
-                .and_then(parse_time_str)
-        })
-        .unwrap_or(0);
-    Some(TsunamiInfo {
-        title,
-        grade: if cancelled {
-            "Cancel".into()
-        } else {
-            grade
-        },
-        areas: areas_summary,
-        areas_list: {
-            let mut list = Vec::new();
-            if let Some(arr) = areas {
-                for a in arr {
-                    let g = a
-                        .get("grade")
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("Forecast");
-                    if let Some(n) = a.get("name").and_then(|x| x.as_str()) {
-                        if !n.is_empty() {
-                            list.push(TsunamiArea {
-                                name: n.to_string(),
-                                grade: g.to_string(),
-                            });
-                        }
-                    }
-                }
-            }
-            list
-        },
-        cancelled,
-        issued_ms,
-        source: "p2p".into(),
-        source_priority: 1,
-        expire_ms: 0,
-    })
 }
 
 /// PancakesAPI RealtimeEvent：`{ source, type, action, timestampMs, payload }`。
@@ -1990,6 +1899,24 @@ mod tests {
         assert_eq!(agency_from_list_response("cea-prlist_response"), "cea-pr");
         assert_eq!(agency_from_list_response("cenclist_response"), "cenc");
         assert_eq!(agency_from_list_response("jma_eew_list_response"), "jma_eew");
+    }
+
+    #[test]
+    fn jian_record_keeps_western_southern_coords() {
+        // 负经纬合法；旧逻辑把 Number<0 当调查中，导致无法跳转且地名修正失效
+        let data = serde_json::json!({
+            "placeName": "Offshore Chile",
+            "magnitude": 5.0,
+            "depth": 10.0,
+            "latitude": -30.5,
+            "longitude": -72.0,
+            "originTime": "2026-10-14 20:36:00"
+        });
+        let rec = parse_jian_record("ga", &data).expect("record");
+        assert!(!rec.hypocenter_unknown);
+        assert!(rec.has_map_coord());
+        assert!((rec.latitude - (-30.5)).abs() < 1e-9);
+        assert!((rec.longitude - (-72.0)).abs() < 1e-9);
     }
 
     #[test]

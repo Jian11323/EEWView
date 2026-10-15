@@ -36,22 +36,28 @@ pub fn spawn(tx: NetTx, cfg: P2pSourceConfig) -> Vec<JoinHandle<()>> {
 
         loop {
             emit_health(&tx, "p2pquake", HealthStatus::Fluctuating);
-            // 551 地震情报；552 海啸情报（API 不接受逗号多 code，分开拉）
-            let mut ok_any = false;
-            for (codes, limit) in [("551", 20u32), ("552", 10u32)] {
-                let url = format!("{base}?codes={codes}&limit={limit}");
-                match client.get(&url).send().await {
-                    Ok(resp) if resp.status().is_success() => match resp.text().await {
-                        Ok(body) => {
-                            ingest_p2p_items(&tx, &body);
-                            ok_any = true;
-                        }
-                        Err(e) => warn!(%codes, "p2p body: {e}"),
-                    },
-                    Ok(resp) => warn!(%codes, status = %resp.status(), "p2p http"),
-                    Err(e) => warn!(%codes, "p2p fetch: {e}"),
+            // 仅 551 地震情报；海啸改走 Jian Project API（jma-tsunami）
+            let url = format!("{base}?codes=551&limit=20");
+            let ok_any = match client.get(&url).send().await {
+                Ok(resp) if resp.status().is_success() => match resp.text().await {
+                    Ok(body) => {
+                        ingest_p2p_items(&tx, &body);
+                        true
+                    }
+                    Err(e) => {
+                        warn!("p2p body: {e}");
+                        false
+                    }
+                },
+                Ok(resp) => {
+                    warn!(status = %resp.status(), "p2p http");
+                    false
                 }
-            }
+                Err(e) => {
+                    warn!("p2p fetch: {e}");
+                    false
+                }
+            };
             emit_health(
                 &tx,
                 "p2pquake",

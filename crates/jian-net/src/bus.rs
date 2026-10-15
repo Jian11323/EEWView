@@ -16,7 +16,7 @@ pub enum NetEvent {
         network: &'static str,
         list: Vec<StationSample>,
     },
-    /// JMA 海啸情报（P2PQuake code 552 等）
+    /// JMA 海啸情报（Jian Project API `jma-tsunami`）
     Tsunami(TsunamiInfo),
     /// JMA 火山情报（与地震速报分离）
     Volcano(VolcanoNotice),

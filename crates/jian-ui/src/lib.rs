@@ -20,7 +20,7 @@ use jian_core::{
 };
 use jian_core::palette::{cn_intensity_rgb, instrumental_band_rgb};
 use jian_map::{
-    zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, DetectBox, MapUiResult, MapViewport,
+    zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, MapUiResult, MapViewport,
     ProjectionMode, TyphoonHoverHit, VectorStyle, OCEAN,
 };
 use jian_travel::{max_s_wave_spread_km, s_wave_still_spreading_to, TravelEngine, Wave};
@@ -163,7 +163,6 @@ impl MainShell {
         snap: &mut AppSnapshot,
         travel: Option<&TravelEngine>,
         cfg: &jian_config::AppConfig,
-        detect_boxes: &[DetectBox],
     ) -> Option<SettingsAction> {
         let ui_theme = UiTheme::from_config(&cfg.ui.theme);
         ui_theme.apply_egui(ctx);
@@ -277,7 +276,6 @@ impl MainShell {
                     &cfg.ui.typhoon_forecast_agency,
                     home,
                     snap.tsunami.as_ref(),
-                    detect_boxes,
                     cfg.ui.show_faults,
                 );
                 if cfg.ui.auto_zoom_waves

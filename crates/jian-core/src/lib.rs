@@ -195,10 +195,10 @@ pub struct TsunamiInfo {
     /// 发布时间 unix ms（0 未知）
     #[serde(default)]
     pub issued_ms: i64,
-    /// 来源标识：jian / pancakes / p2p
+    /// 来源标识：jian / pancakes（历史兼容可含 p2p）
     #[serde(default)]
     pub source: String,
-    /// 来源优先级：Jian=3 > Pancakes=2 > P2P=1（高者优先）
+    /// 来源优先级：Jian=3 > Pancakes=2（高者优先；旧 P2P=1 仅兼容）
     #[serde(default)]
     pub source_priority: u8,
     /// 预报有效截止/预计解除 unix ms（0 未知）。注意报/警报级通常靠解除报文，不用此字段自动清。
@@ -608,7 +608,8 @@ pub struct AppSnapshot {
 }
 
 impl AppSnapshot {
-    /// 无上游时的离线示例数据
+    /// 单元测试夹具（不进运行时；无上游时用 `empty`）。
+    #[cfg(test)]
     pub fn offline_sample() -> Self {
         let eew_a = EewReport {
             agency: AgencyId("jma-eew".into()),
@@ -886,7 +887,7 @@ impl AppSnapshot {
         self.tsunami = info;
     }
 
-    /// 海啸并入：Jian > Pancakes > P2P；同级取更新的 issued_ms。
+    /// 海啸并入：Jian > Pancakes；同级取更新的 issued_ms。
     /// 解除报文（注意报/警报等）直接清空；预报可带 expire_ms，到期由 `prune_expired_tsunami` 清除。
     pub fn upsert_tsunami(&mut self, info: TsunamiInfo) {
         let cancel = info.cancelled || info.grade.eq_ignore_ascii_case("Cancel");

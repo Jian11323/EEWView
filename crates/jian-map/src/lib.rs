@@ -1,7 +1,6 @@
 //! 地图视口：GeoJSON 矢量底图（默认）/ 可选 XYZ 瓦片 + 走时表驱动 P/S 叠加层。
 
 mod camera;
-mod detect;
 mod fault_lines;
 mod globe;
 mod marker_icons;
@@ -15,7 +14,6 @@ mod vector_basemap;
 pub use camera::{
     cluster_for_fit, fit_events, globe_framed_center, zoom_to_fit_radius_km, CameraFlight,
 };
-pub use detect::{DetectBox, DetectTracker};
 pub use overlay::TyphoonHoverHit;
 pub use projection::{clamp_lat, km_to_pixels, lonlat_to_screen, normalize_lon, ProjectionMode};
 pub use tile_cache::TileCache;
@@ -322,7 +320,6 @@ impl MapViewport {
         typhoon_forecast_agency: &str,
         home: Option<(f64, f64)>,
         tsunami: Option<&TsunamiInfo>,
-        detect_boxes: &[DetectBox],
         show_faults: bool,
     ) -> MapUiResult {
         if self.vector.poll() {
@@ -417,22 +414,8 @@ impl MapViewport {
                     && !e.event_id.starts_with("record:")
                     && !e.is_cancel
             });
-            // 有传播中预警波圈时隐藏检知框；否则 500ms 闪烁
-            let hide_detect = wave_events.iter().any(|e| {
-                !e.is_cancel
-                    && !e.event_id.starts_with("station:")
-                    && !e.event_id.starts_with("record:")
-            });
-            // 飞跃中跳过重叠层（速报点/火山/台风/检知），两端 zoom 变化时避免每帧海量 project
+            // 飞跃中跳过重叠层（速报点/火山/台风），两端 zoom 变化时避免每帧海量 project
             let flying = self.flight.is_some();
-            if !flying && !hide_detect {
-                detect::paint_detect_boxes(
-                    ui,
-                    &view,
-                    detect_boxes,
-                    detect::detect_box_blink_on(now_ms),
-                );
-            }
             if !flying {
                 let station_q = if interacting {
                     PaintQuality::Eco

@@ -93,8 +93,8 @@ station_enabled = true
 
 [sources.stations]
 jma_enabled = true
-# yahoo = Yahoo リアルタイム震度（默认，对齐要石检知）；jian / kmoni / lmoni 可选
-jma_source = "yahoo"
+# jian / kmoni / lmoni
+jma_source = "jian"
 jma_jian_ws = "wss://api.sismotide.top/kmoni"
 snet_enabled = false
 snet_source = "jian"

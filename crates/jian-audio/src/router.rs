@@ -36,10 +36,6 @@ impl Router {
             AudioCue::Update => (self.event_pack_name(catalog).to_string(), "update".into()),
             AudioCue::Final => (self.event_pack_name(catalog).to_string(), "final".into()),
             AudioCue::Cancel => (self.event_pack_name(catalog).to_string(), "cancel".into()),
-            AudioCue::Shindo(n) => (
-                self.event_pack_name(catalog).to_string(),
-                format!("shindo_{}", (*n).min(7)),
-            ),
             AudioCue::Countdown(sec) => (self.countdown_pack.clone(), format!("{sec}s")),
             AudioCue::CountdownLoop(_) => (self.countdown_pack.clone(), "countdown_loop".into()),
             AudioCue::Prompt => (self.event_pack_name(catalog).to_string(), "prompt".into()),

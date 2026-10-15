@@ -1240,7 +1240,7 @@ fn draw_sources(
         });
         if draft.sources.stations.jma_enabled {
             row_divider(ui);
-            control_row(ui, "JMA 测站源", "Kmoni / lmoni / Yahoo / Jian Project", "\u{25ce}", |ui| {
+            control_row(ui, "JMA 测站源", "Jian Project / Kmoni / lmoni", "\u{25ce}", |ui| {
                 egui::ComboBox::from_id_salt("set_jma_station_src")
                     .selected_text(jma_station_src_label(&draft.sources.stations.jma_source))
                     .width(200.0)
@@ -1259,11 +1259,6 @@ fn draw_sources(
                             &mut draft.sources.stations.jma_source,
                             "lmoni".into(),
                             "lmoni",
-                        );
-                        ui.selectable_value(
-                            &mut draft.sources.stations.jma_source,
-                            "yahoo".into(),
-                            "Yahoo",
                         );
                     });
             });
@@ -1973,7 +1968,6 @@ fn jma_station_src_label(s: &str) -> String {
     match s.trim().to_ascii_lowercase().as_str() {
         "kmoni" => "Kmoni".into(),
         "lmoni" => "lmoni".into(),
-        "yahoo" => "Yahoo".into(),
         _ => "Jian Project".into(),
     }
 }
@@ -2022,7 +2016,7 @@ fn draw_about(ui: &mut Ui) {
 \u{00b7} Wolfx（all_eew 预警与速报）\n\
 \u{00b7} P2PQuake（气象厅地震情报）\n\
 \u{00b7} 台风路径（sismotide /get/typhoon）\n\
-\u{00b7} NIED kmoni / lmoni / Yahoo 测站（可选）",
+\u{00b7} NIED kmoni / lmoni 测站（可选）",
             )
             .size(12.0)
             .color(chrome().muted),
