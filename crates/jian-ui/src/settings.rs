@@ -1939,7 +1939,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
                 });
         });
         row_divider(ui);
-        control_row(ui, "同时输出 stderr", "保存后立即分配/关闭控制台并写 stderr", "\u{25ce}", |ui| {
+        control_row(ui, "同时输出 stderr", "保存后立即开关 stderr 日志（不分配控制台窗口）", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.log.console);
         });
         row_divider(ui);

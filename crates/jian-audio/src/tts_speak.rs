@@ -1,4 +1,5 @@
-//! Windows SAPI TTS（后台线程；非 Windows 为 no-op）。
+//! Windows SAPI TTS（后台线程；COM ISpVoice，不经 PowerShell / 控制台）。
+//! 非 Windows 为 no-op。
 
 use std::sync::mpsc::{self, Sender};
 use std::sync::Mutex;
@@ -16,8 +17,37 @@ fn ensure_worker() -> Option<Sender<String>> {
     thread::Builder::new()
         .name("jian-tts".into())
         .spawn(move || {
+            #[cfg(target_os = "windows")]
+            {
+                let _com = match ComApartment::enter() {
+                    Ok(g) => g,
+                    Err(e) => {
+                        warn!("tts: COM init failed: {e}");
+                        return;
+                    }
+                };
+                let voice = match create_voice() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!("tts: SpVoice create failed: {e}");
+                        return;
+                    }
+                };
+                while let Ok(text) = rx.recv() {
+                    let mut latest = text;
+                    while let Ok(more) = rx.try_recv() {
+                        if !more.trim().is_empty() {
+                            latest = more;
+                        }
+                    }
+                    if latest.trim().is_empty() {
+                        continue;
+                    }
+                    speak_blocking(&voice, &latest);
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
             while let Ok(text) = rx.recv() {
-                // 只念队列里最新一条，丢掉积压（预警多源连刷时否则会念很久）
                 let mut latest = text;
                 while let Ok(more) = rx.try_recv() {
                     if !more.trim().is_empty() {
@@ -52,40 +82,48 @@ pub fn speak_async(text: impl Into<String>) {
 }
 
 #[cfg(target_os = "windows")]
-fn speak_blocking(text: &str) {
-    // PowerShell System.Speech；stdin 传 UTF-8，避免命令行代码页弄坏中文
-    use std::io::Write;
-    use std::os::windows::process::CommandExt;
-    use std::process::{Command, Stdio};
+struct ComApartment;
 
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let script = r#"
-$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::UTF8
-[Console]::InputEncoding = [Text.UTF8Encoding]::UTF8
-Add-Type -AssemblyName System.Speech
-$s = New-Object System.Speech.Synthesis.SpeechSynthesizer
-$s.Rate = 0
-$t = [Console]::In.ReadToEnd()
-if (-not [string]::IsNullOrWhiteSpace($t)) { $s.Speak($t) }
-"#;
-    let mut child = match Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("tts spawn: {e}");
-            return;
+#[cfg(target_os = "windows")]
+impl ComApartment {
+    fn enter() -> windows::core::Result<Self> {
+        use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+        // S_FALSE = 本线程已初始化，仍可继续用
+        unsafe {
+            CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
         }
-    };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(text.as_bytes());
+        Ok(Self)
     }
-    let _ = child.wait();
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        use windows::Win32::System::Com::CoUninitialize;
+        unsafe {
+            CoUninitialize();
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn create_voice() -> windows::core::Result<windows::Win32::Media::Speech::ISpVoice> {
+    use windows::Win32::Media::Speech::SpVoice;
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+    unsafe { CoCreateInstance(&SpVoice, None, CLSCTX_ALL) }
+}
+
+#[cfg(target_os = "windows")]
+fn speak_blocking(voice: &windows::Win32::Media::Speech::ISpVoice, text: &str) {
+    use windows::core::HSTRING;
+    use windows::Win32::Media::Speech::{SPF_IS_NOT_XML, SPF_PURGEBEFORESPEAK};
+
+    // 纯文本、先清未念完的旧句；同步说完再返回（与原先 PowerShell Speak 一致）
+    let flags = (SPF_IS_NOT_XML.0 | SPF_PURGEBEFORESPEAK.0) as u32;
+    let hs = HSTRING::from(text);
+    if let Err(e) = unsafe { voice.Speak(&hs, flags, None) } {
+        warn!("tts: Speak failed: {e}");
+    }
 }
 
 #[cfg(not(target_os = "windows"))]

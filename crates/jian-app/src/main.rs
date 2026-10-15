@@ -1,6 +1,6 @@
 //! EEW View（地震视监器）桌面客户端入口。
 
-// GUI 子系统：默认无控制台窗口；需要 stderr 日志时由 logging::sync_windows_console 再分配。
+// GUI 子系统：无控制台窗口；logging 永不 AllocConsole，仅可选写 stderr。
 #![windows_subsystem = "windows"]
 
 mod logging;

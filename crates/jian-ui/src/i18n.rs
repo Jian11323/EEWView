@@ -241,9 +241,9 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "保存后不关闭"), "儲存後不關閉");
         m.insert((Lang::Ja, "保存后不关闭"), "保存後も開いたまま");
         m.insert((Lang::En, "保存后不关闭"), "Keep open after save");
-        m.insert((Lang::ZhTw, "保存后立即分配/关闭控制台并写 stderr"), "儲存後立即分配/關閉主控台並寫 stderr");
-        m.insert((Lang::Ja, "保存后立即分配/关闭控制台并写 stderr"), "保存後すぐにコンソール割当/解除と stderr 出力");
-        m.insert((Lang::En, "保存后立即分配/关闭控制台并写 stderr"), "Allocates/closes console and writes stderr on save");
+        m.insert((Lang::ZhTw, "保存后立即开关 stderr 日志（不分配控制台窗口）"), "儲存後立即開關 stderr 日誌（不分配主控台視窗）");
+        m.insert((Lang::Ja, "保存后立即开关 stderr 日志（不分配控制台窗口）"), "保存後すぐに stderr ログを切替（コンソール割当なし）");
+        m.insert((Lang::En, "保存后立即开关 stderr 日志（不分配控制台窗口）"), "Toggles stderr logging on save (no console window)");
         m.insert((Lang::ZhTw, "保留天数"), "保留天數");
         m.insert((Lang::Ja, "保留天数"), "保持日数");
         m.insert((Lang::En, "保留天数"), "Retention days");

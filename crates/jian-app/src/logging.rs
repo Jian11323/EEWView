@@ -23,7 +23,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 /// 运行时可切换：tracing 控制台层始终挂载，由此门闩决定是否真正写 stderr。
 static CONSOLE_ENABLED: AtomicBool = AtomicBool::new(false);
 
-/// 热切换 stderr 输出，并同步 Windows 控制台窗口。
+/// 热切换 stderr 输出；Windows 上不同步分配控制台窗口。
 pub fn set_console_output(want: bool) {
     CONSOLE_ENABLED.store(want, Ordering::SeqCst);
     sync_windows_console(want);
@@ -380,23 +380,16 @@ impl<'a> MakeWriter<'a> for SafeStderr {
     }
 }
 
-/// Windows：按配置同步控制台。关闭时脱离 cargo/调试器黑框；开启时确保有可写控制台。
+/// Windows：彻底禁用控制台窗口——永不 AllocConsole，并始终 FreeConsole。
+/// `want` 只影响 tracing 是否写 stderr（调试器/管道仍可接到输出），不弹出黑框。
 #[cfg(windows)]
-pub fn sync_windows_console(want: bool) {
+pub fn sync_windows_console(_want: bool) {
     #[link(name = "kernel32")]
     extern "system" {
         fn FreeConsole() -> i32;
-        fn AllocConsole() -> i32;
-        fn GetConsoleWindow() -> *mut core::ffi::c_void;
     }
     unsafe {
-        if want {
-            if GetConsoleWindow().is_null() {
-                AllocConsole();
-            }
-        } else {
-            FreeConsole();
-        }
+        FreeConsole();
     }
 }
 
@@ -405,7 +398,7 @@ pub fn sync_windows_console(_want: bool) {}
 
 /// 初始化全局 subscriber；不可写时关闭文件层，切勿让 appender panic。
 pub fn init_logging(resource_root: &Path, cfg: &LogConfig) -> WorkerGuard {
-    // 控制台层始终挂载；门闩 + Alloc/Free 支持设置页热切换
+    // 控制台层始终挂载；门闩控制是否写 stderr（不分配控制台窗口）
     let want_console = cfg.console;
     set_console_output(want_console);
 

@@ -3,7 +3,7 @@
 level = "info"
 # Windows 安装版忽略相对路径，固定写到 %APPDATA%/eew view/log.txt；便携包可写时也优先用户目录
 dir = "logs"
-# release 便携默认不打 stderr（无控制台）；开发构建仍会输出
+# 是否写 stderr（不分配控制台窗口；安装版无黑框）
 console = false
 # 按修改时间清理旧日志；0=不清理
 keep_days = 14
