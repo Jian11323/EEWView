@@ -41,8 +41,8 @@ pub fn diagnose() -> PerfDiagnosis {
             "cpu",
             "opengl",
             "eco",
-            20_u32,
-            "未检测到强独显迹象，建议 CPU 软渲染 + 节能 + 20fps".into(),
+            30_u32,
+            "未检测到强独显迹象，建议 CPU 软渲染 + 节能 + 30fps".into(),
         )
     } else if total < 70.0 {
         (

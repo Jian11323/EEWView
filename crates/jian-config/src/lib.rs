@@ -153,9 +153,21 @@ pub struct PerformanceConfig {
     /// `eco` 节能 | `normal` 正常 | `extreme` 极致
     #[serde(default = "default_perf_profile")]
     pub profile: String,
-    /// 目标帧率（空闲/波圈重绘）；默认 30，范围 20–300
+    /// 目标帧率四档：30 / 45 / 60 / 120（默认 30）
     #[serde(default = "default_target_fps")]
     pub target_fps: u32,
+}
+
+/// 目标帧率可选档位。
+pub const TARGET_FPS_PRESETS: [u32; 4] = [30, 45, 60, 120];
+
+/// 将任意 fps 就近映射到四档之一（兼容旧配置 20–300）。
+pub fn snap_target_fps(fps: u32) -> u32 {
+    TARGET_FPS_PRESETS
+        .iter()
+        .copied()
+        .min_by_key(|&p| (p as i64 - fps as i64).unsigned_abs())
+        .unwrap_or(30)
 }
 
 fn default_perf_device() -> String {
@@ -183,15 +195,15 @@ impl Default for PerformanceConfig {
 }
 
 impl PerformanceConfig {
-    /// 钳位到 20–300。
+    /// 映射到四档 30 / 45 / 60 / 120。
     pub fn clamped_fps(&self) -> u32 {
-        self.target_fps.clamp(20, 300)
+        snap_target_fps(self.target_fps)
     }
 
     /// 目标帧率对应的重绘间隔（毫秒）。
     pub fn repaint_interval_ms(&self) -> u64 {
-        let fps = self.clamped_fps().max(1);
-        (1000 / fps).max(1) as u64
+        let fps = self.clamped_fps().max(1) as f64;
+        (1000.0 / fps).round().clamp(1.0, 250.0) as u64
     }
 
     fn profile_norm(&self) -> String {
@@ -207,14 +219,13 @@ impl PerformanceConfig {
         }
     }
 
-    /// 波圈 / 跟焦缩放等动画重绘间隔。
+    /// 波圈 / 跟焦缩放等动画重绘间隔：跟用户目标帧率，节能档另限上限。
     pub fn wave_repaint_ms(&self) -> u64 {
         match self.profile_norm().as_str() {
-            "extreme" => self.repaint_interval_ms(),
-            // 节能：约 10fps，波圈仍可读
-            "eco" => 100,
-            // 正常：不超过目标帧率，且至少约 25fps 上限（interval≥40）
-            _ => self.repaint_interval_ms().max(40),
+            // 节能：约 10fps 上限，避免波圈拖满 CPU
+            "eco" => self.repaint_interval_ms().max(100),
+            // 正常 / 极致：完整兑现目标帧率（60 → 17ms，不再被 40ms 卡成 ~25fps）
+            _ => self.repaint_interval_ms(),
         }
     }
 

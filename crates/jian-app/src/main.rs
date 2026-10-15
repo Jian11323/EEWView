@@ -355,7 +355,7 @@ enum RepaintNeed {
 
 fn repaint_ms(perf: &jian_config::PerformanceConfig, need: RepaintNeed) -> u64 {
     match need {
-        // 跟手/飞跃：严格按用户目标帧率，不再强制 ≤16ms（否则 30fps 设定下飞跃仍按 60 重绘更易卡）
+        // 跟手/飞跃：严格按用户目标帧率（60→约17ms；不再被波圈档位二次压低）
         RepaintNeed::Interactive => perf.repaint_interval_ms(),
         RepaintNeed::Waves => perf.wave_repaint_ms(),
         RepaintNeed::Soft => perf.soft_repaint_ms(),
@@ -644,13 +644,14 @@ impl eframe::App for JianApp {
                     } else {
                         8.5
                     };
-                    self.shell.map.fly_to(lon, lat, Some(z), 1.6);
+                    self.shell.map.fly_to(lon, lat, Some(z), 0.9);
                     self.auto_center_pending = false;
                     if let Some(ev) = &self.snap.active {
                         self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
                     }
                 } else if let Some((lon, lat, zoom, key)) = self.snap.focus_latest_record() {
-                    self.shell.map.fly_to(lon, lat, Some(zoom), 1.0);
+                    // 速报对准震中，勿用球体日本构图东偏（否则堪察加会被拉成北太平洋全景）
+                    self.shell.map.fly_to_centered(lon, lat, Some(zoom), 1.0);
                     self.last_record_follow_key = Some(key);
                     self.auto_center_pending = false;
                 } else if elapsed >= 4.0 {
@@ -712,7 +713,7 @@ impl eframe::App for JianApp {
                             self.travel.as_ref(),
                             self.shell.map.last_viewport_min_px,
                         );
-                        self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 1.6);
+                        self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 0.9);
                         self.shell.map.user_camera_override = false;
                         self.last_follow_key = Some(key);
                         self.cinema_idx = 0;
@@ -776,7 +777,7 @@ impl eframe::App for JianApp {
                                 self.travel.as_ref(),
                                 self.shell.map.last_viewport_min_px,
                             );
-                            self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 1.6);
+                            self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 0.9);
                             if is_new_arrival {
                                 self.shell.map.user_camera_override = false;
                             }
@@ -829,12 +830,14 @@ impl eframe::App for JianApp {
             } else if !browsing_station && !self.shell.map.user_camera_override {
                 if let Some((lon, lat, zoom)) = self.snap.pending_record_fly.take() {
                     if lat.abs() > 0.01 || lon.abs() > 0.01 {
-                        self.shell.map.fly_to(lon, lat, Some(zoom), 1.0);
+                        self.shell.map.fly_to_centered(lon, lat, Some(zoom), 1.0);
                     }
                 }
+                // 无预警：列表头变化时选中并跟焦最新有坐标速报（对准震中，不做日本构图东偏）
                 if let Some((lon, lat, zoom, key)) = self.snap.latest_record_camera() {
                     if self.last_record_follow_key.as_ref() != Some(&key) {
-                        self.shell.map.fly_to(lon, lat, Some(zoom), 1.0);
+                        let _ = self.snap.focus_latest_record();
+                        self.shell.map.fly_to_centered(lon, lat, Some(zoom), 1.0);
                         self.last_record_follow_key = Some(key);
                     }
                 }

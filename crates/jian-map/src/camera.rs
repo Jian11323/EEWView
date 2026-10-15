@@ -1,11 +1,14 @@
 //! 地图镜头：抛物线飞跃与按波圈半径适配缩放。
 
+use std::time::Instant;
+
 use crate::projection::{self, clamp_lat, normalize_lon};
 
 const ZOOM_MIN: f64 = 2.0;
 const ZOOM_MAX: f64 = 12.0;
 
 /// 抛物线镜头飞跃（中途略拉远，两端落在震中）。
+/// 进度按墙钟计时，与目标帧率 / `stable_dt` 脱钩，避免「帧率越高跳越快」。
 #[derive(Debug, Clone)]
 pub struct CameraFlight {
     start_lon: f64,
@@ -14,7 +17,7 @@ pub struct CameraFlight {
     end_lon: f64,
     end_lat: f64,
     end_zoom: f64,
-    elapsed: f64,
+    started: Instant,
     duration: f64,
 }
 
@@ -33,16 +36,15 @@ impl CameraFlight {
             end_lon: normalize_lon(end_lon),
             end_lat: clamp_lat(end_lat),
             end_zoom: end_zoom.clamp(ZOOM_MIN, ZOOM_MAX),
-            elapsed: 0.0,
+            started: Instant::now(),
             duration: duration_s.max(0.05),
         }
     }
 
-    /// 推进 `dt` 秒；返回 (lon, lat, zoom, finished)。
+    /// 按墙钟推进；返回 (lon, lat, zoom, finished)。
     /// 位移：GQ 余弦缓动；缩放：线性时间抛物线（对齐 eewcn），中途拉远有上限，不贴 ZOOM_MIN。
-    pub fn tick(&mut self, dt: f64) -> (f64, f64, f64, bool) {
-        self.elapsed = (self.elapsed + dt).min(self.duration);
-        let t = (self.elapsed / self.duration).clamp(0.0, 1.0);
+    pub fn tick(&mut self, _dt: f64) -> (f64, f64, f64, bool) {
+        let t = (self.started.elapsed().as_secs_f64() / self.duration).clamp(0.0, 1.0);
         // GQ: t1 = -cos(t*PI)*0.5+0.5
         let t1 = -((t * std::f64::consts::PI).cos()) * 0.5 + 0.5;
         let lon = lerp_lon(self.start_lon, self.end_lon, t1);
@@ -87,19 +89,19 @@ impl CameraFlight {
     }
 }
 
-/// 中途拉远目标 zoom：远距最多掉约 1 级，地板 3.5，避免卡在 ZOOM_MIN。
+/// 中途拉远目标 zoom：近距轻拉，远距更深，避免跳转像「先缩到地球再放大」拖时长。
 fn mid_flight_zoom(z0: f64, z1: f64, dist_km: f64) -> f64 {
-    let lo = z0.min(z1);
     let avg = (z0 + z1) * 0.5;
-    if dist_km < 800.0 {
-        return avg;
-    }
-    let pull = (dist_km / 14000.0).clamp(0.0, 1.0) * 1.0;
-    let mut ym = (lo - pull).max(avg - 1.0).max(lo - 1.0).max(4.5);
-    if ym > avg - 0.12 {
-        ym = avg - 0.12;
-    }
-    ym.clamp(4.5, ZOOM_MAX)
+    let lo = z0.min(z1);
+    let pull = if dist_km < 400.0 {
+        0.55
+    } else if dist_km < 1500.0 {
+        0.55 + (dist_km - 400.0) / 1100.0 * 0.65
+    } else {
+        1.2 + (dist_km / 14000.0).clamp(0.0, 1.0) * 0.9
+    };
+    let ym = (avg - pull).min(lo - 0.25);
+    ym.clamp(4.0, ZOOM_MAX)
 }
 
 fn haversine_km(lat0: f64, lon0: f64, lat1: f64, lon1: f64) -> f64 {
@@ -132,7 +134,8 @@ fn lerp_lon(a: f64, b: f64, t: f64) -> f64 {
 
 /// 球体构图：西太平洋震中略向东偏，减少左侧欧亚/俄罗斯占比、留出美洲侧。
 /// `zoom` 越大越近；跟焦常用 9–13，故在 zoom < 11 即开始偏置。
-/// 仅日本—西太平洋带（约 125°E 以东）施加东偏；中国内陆（如固原 ~106°E）必须对准震中。
+/// 仅日本列岛及近海施加东偏；中国内陆、堪察加/千岛等高纬必须对准震中
+/// （否则闲时跟焦堪察加速报会被偏到日界线，看起来像「默认北太平洋」）。
 pub fn globe_framed_center(lon: f64, lat: f64, zoom: f64) -> (f64, f64) {
     let lon = normalize_lon(lon);
     let lat = clamp_lat(lat);
@@ -140,10 +143,14 @@ pub fn globe_framed_center(lon: f64, lat: f64, zoom: f64) -> (f64, f64) {
         return (lon, lat);
     }
     let t = ((11.0 - zoom) / 8.0).clamp(0.0, 1.0);
-    // 日本—西太平洋：震中偏左，镜头中心东移（不含中国内陆）
-    if (125.0..170.0).contains(&lon) && (-10.0..60.0).contains(&lat) {
+    // 日本列岛及近海（约 125–150°E、24–46°N）；不含中国内陆与堪察加
+    if (125.0..150.0).contains(&lon) && (24.0..46.0).contains(&lat) {
         let bias = 12.0 + 20.0 * t; // 约 12°–32°
         return (normalize_lon(lon + bias), lat);
+    }
+    // 加勒比海盆：对准震中，禁止西偏（否则波圈贴右侧栏、左侧大片空域）
+    if (-90.0..-55.0).contains(&lon) && (5.0..28.0).contains(&lat) {
+        return (lon, lat);
     }
     // 东太平洋 / 北美西岸：略西偏，避免右侧陆地贴边被裁
     if (-170.0..-50.0).contains(&lon) && (-10.0..70.0).contains(&lat) {
@@ -294,5 +301,21 @@ mod framed_center_tests {
     fn near_zoom_no_bias() {
         let (lon, _) = globe_framed_center(140.0, 35.0, 11.5);
         assert!((lon - 140.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn caribbean_stays_on_epicenter() {
+        // 莫纳海峡附近：不得被东太平洋西偏顶到右侧
+        let (lon, lat) = globe_framed_center(-67.5, 18.0, 8.5);
+        assert!((lon - (-67.5)).abs() < 1e-9, "lon={lon}");
+        assert!((lat - 18.0).abs() < 1e-9, "lat={lat}");
+    }
+
+    #[test]
+    fn kamchatka_stays_on_epicenter() {
+        // 堪察加东岸近海：不得被日本构图东偏拉到日界线
+        let (lon, lat) = globe_framed_center(160.3, 52.5, 7.5);
+        assert!((lon - 160.3).abs() < 1e-9, "lon={lon}");
+        assert!((lat - 52.5).abs() < 1e-9, "lat={lat}");
     }
 }

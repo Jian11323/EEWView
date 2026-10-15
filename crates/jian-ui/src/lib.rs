@@ -316,9 +316,11 @@ impl MainShell {
                         } else {
                             0.12
                         };
+                        let dt = ctx.input(|i| i.unstable_dt as f64).clamp(1e-4, 0.25);
                         self.map.apply_linear_zoom_out(
                             z,
                             rate,
+                            dt,
                             Some(ev.longitude),
                             Some(ev.latitude),
                         );
@@ -407,7 +409,7 @@ impl MainShell {
                                     0.52,
                                 )
                                 .clamp(8.0, 12.5);
-                                let dur = if tab == SidebarTab::Eew { 1.2 } else { 1.0 };
+                                let dur = if tab == SidebarTab::Eew { 0.85 } else { 0.7 };
                                 self.map.fly_to_centered(lon, lat, Some(end_z), dur);
                                 // 手动点选：锁定镜头，避免影院轮播 / 跟焦抢走速报跳转
                                 self.map.user_camera_override = true;
@@ -708,10 +710,11 @@ fn draw_event_header(
                     } else {
                         String::new()
                     };
+                    // 报数挂在机构后：`地名 (JMA)  #终`
                     let title = if ev.is_cancel {
                         format!("{idx_mark}{} ({agency}) \u{00b7} 取消", ev.place)
-                    } else if ev.serial > 0 && ev.serial < 10_000 {
-                        format!("{idx_mark}{} ({agency}) #{}", ev.place, ev.serial)
+                    } else if let Some(mark) = ev.serial_mark() {
+                        format!("{idx_mark}{} ({agency})  {mark}", ev.place)
                     } else {
                         format!("{idx_mark}{} ({agency})", ev.place)
                     };
@@ -721,14 +724,7 @@ fn draw_event_header(
                     } else {
                         format!("M{:.1}", ev.magnitude)
                     };
-                    let depth_line = if ev.is_assumption
-                        && ev.latitude.abs() < 0.01
-                        && ev.longitude.abs() < 0.01
-                    {
-                        "调查中".to_string()
-                    } else {
-                        format!("{:.0}km", ev.depth_km)
-                    };
+                    let depth_line = ev.depth_label();
                     let focused = snap.active.as_ref().is_some_and(|a| {
                         a.agency.0 == ev.agency.0 && a.event_id == ev.event_id
                     });
@@ -1767,13 +1763,20 @@ fn draw_sidebar(
                                         &r.intensity_text,
                                         scale,
                                     );
+                                    // 单行：时间 震级 深度，避免分控件叠字
+                                    let sub = format!(
+                                        "{}  {}  {}",
+                                        r.time_text,
+                                        r.magnitude_label(),
+                                        r.depth_label()
+                                    );
                                     if list_row(
                                         ui,
                                         p,
                                         icons,
                                         &place,
-                                        &r.time_text,
-                                        &r.magnitude_label(),
+                                        &sub,
+                                        "",
                                         r.intensity_kind,
                                         r.intensity_level,
                                         &r.intensity_text,
@@ -1803,8 +1806,16 @@ fn draw_sidebar(
                                             tab: SidebarTab::Eew,
                                             index: real_i,
                                         });
-                                    let place = place_with_agency(&e.place, &e.agency.0);
+                                    let mut place = place_with_agency(&e.place, &e.agency.0);
+                                    if let Some(mark) = e.serial_mark() {
+                                        place.push_str("  ");
+                                        place.push_str(&mark);
+                                    }
                                     let time = format_list_time(e.origin_ms);
+                                    let mag = format!("M{:.1}", e.magnitude);
+                                    let depth = e.depth_label();
+                                    // 第二行仅时间/震级/深度；报数已挂在机构后
+                                    let sub = format!("{time}  {mag}  {depth}");
                                     let (_, _, col, _) = intensity_chip(
                                         e.intensity_kind,
                                         e.intensity_level,
@@ -1816,8 +1827,8 @@ fn draw_sidebar(
                                         p,
                                         icons,
                                         &place,
-                                        &format!("{time}  #{}", e.serial),
-                                        &format!("M{:.1}", e.magnitude),
+                                        &sub,
+                                        "",
                                         e.intensity_kind,
                                         e.intensity_level,
                                         &e.max_intensity_text,

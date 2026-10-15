@@ -72,7 +72,7 @@ pub struct MapViewport {
     markers: MarkerIcons,
     flight: Option<CameraFlight>,
     /// 飞跃刚结束后抑制波圈自动缩放，避免落地瞬间被二次改 zoom「弹一下」
-    post_flight_cooldown: f64,
+    post_flight_until: Option<std::time::Instant>,
     /// 用户拖拽/滚轮后暂停自动跟焦缩放，直到下一次主动飞跃
     pub user_camera_override: bool,
     /// 最近一帧视口短边（px），供跟焦时按波圈估 zoom
@@ -100,7 +100,7 @@ impl Default for MapViewport {
             faults: FaultLines::default(),
             markers: MarkerIcons::default(),
             flight: None,
-            post_flight_cooldown: 0.0,
+            post_flight_until: None,
             user_camera_override: false,
             last_viewport_min_px: 720.0,
             paint_quality: PaintQuality::Normal,
@@ -153,7 +153,8 @@ impl MapViewport {
     /// 列表/图例联动：瞬时居中到经纬，可选改缩放
     pub fn center_on(&mut self, lon: f64, lat: f64, zoom: Option<f64>) {
         self.flight = None;
-        self.post_flight_cooldown = 1.2;
+        self.post_flight_until =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs_f64(1.2));
         self.center_lon = projection::normalize_lon(lon);
         self.center_lat = projection::clamp_lat(lat);
         if let Some(z) = zoom {
@@ -192,23 +193,30 @@ impl MapViewport {
             self.center_on(lon, lat, Some(end_zoom));
             return;
         }
-        // GQ runAnimation 约 5s；平面图按大圆距离略缩短
+        // 尊重调用方基准时长；远距略加时，短距不强制拉长
         let km = dist * 111.0;
-        let dur = (duration_s.max(1.2) + km / 9000.0).clamp(1.2, 4.5);
+        let dur = (duration_s.max(0.2) + km / 16000.0).clamp(0.2, 2.0);
         self.flight = Some(CameraFlight::new(
             (self.center_lon, self.center_lat, self.zoom),
             (lon, lat, end_zoom),
             dur,
         ));
-        self.post_flight_cooldown = 0.0;
+        self.post_flight_until = None;
         // 不在此清 user_camera_override：列表点选会在 fly 后立刻锁镜头；
         // 自动跟焦路径本身不会带锁，由调用方决定。
     }
 
+    fn post_flight_active(&self) -> bool {
+        self.post_flight_until
+            .is_some_and(|t| std::time::Instant::now() < t)
+    }
+
     /// 推进镜头动画；返回是否仍在飞跃中。
     pub fn tick_flight(&mut self, dt: f64) -> bool {
-        if self.post_flight_cooldown > 0.0 {
-            self.post_flight_cooldown = (self.post_flight_cooldown - dt).max(0.0);
+        if let Some(until) = self.post_flight_until {
+            if std::time::Instant::now() >= until {
+                self.post_flight_until = None;
+            }
         }
         let Some(flight) = self.flight.as_mut() else {
             return false;
@@ -224,7 +232,8 @@ impl MapViewport {
             self.zoom = ez;
             self.flight = None;
             // 短暂抑制落地弹簧；过长会挡住 S 波跟焦缩小
-            self.post_flight_cooldown = 0.85;
+            self.post_flight_until =
+                Some(std::time::Instant::now() + std::time::Duration::from_secs_f64(0.85));
         }
         !done
     }
@@ -235,26 +244,30 @@ impl MapViewport {
 
     /// 飞跃或落地冷却中，需要按目标帧率连续重绘（由应用层调度，勿在此硬编码 16ms）。
     pub fn wants_anim_repaint(&self) -> bool {
-        self.flight.is_some() || self.post_flight_cooldown > 0.0
+        self.flight.is_some() || self.post_flight_active()
     }
 
     /// 预警期跟 S 波：只线性缩小（zoom 减小），不放大、不停顿跳级。
+    /// `rate` 为约 30fps 下一帧靠近比例；内部按 `dt` 换成时间常数，与帧率无关。
     /// 镜头始终对准震中经纬（不做球体构图偏置），避免加勒比等区域震中被顶到右侧栏。
     pub fn apply_linear_zoom_out(
         &mut self,
         target_zoom: f64,
         rate: f64,
+        dt: f64,
         focus_lon: Option<f64>,
         focus_lat: Option<f64>,
     ) {
-        if self.flight.is_some() || self.user_camera_override || self.post_flight_cooldown > 0.0 {
+        if self.flight.is_some() || self.user_camera_override || self.post_flight_active() {
             return;
         }
         let target = target_zoom.clamp(ZOOM_MIN, ZOOM_MAX);
         if target >= self.zoom - 0.02 && focus_lon.is_none() {
             return;
         }
-        let k = rate.clamp(0.02, 0.35);
+        // 将「每帧 rate」换算为时间推进：30fps 下与旧行为接近
+        let r = rate.clamp(0.02, 0.35);
+        let k = (1.0 - (1.0 - r).powf(dt.clamp(1e-4, 0.25) * 30.0)).clamp(0.0, 1.0);
         if target < self.zoom - 0.02 {
             self.zoom = (self.zoom + (target - self.zoom) * k).clamp(ZOOM_MIN, ZOOM_MAX);
         }
@@ -271,7 +284,7 @@ impl MapViewport {
             };
             let dlat = tlat - self.center_lat;
             if dlon.abs() > 0.05 || dlat.abs() > 0.05 {
-                let kb = (k * 0.85).clamp(0.02, 0.3);
+                let kb = (k * 0.85).clamp(0.0, 1.0);
                 self.center_lon = projection::normalize_lon(self.center_lon + dlon * kb);
                 self.center_lat = projection::clamp_lat(self.center_lat + dlat * kb);
             }
@@ -332,7 +345,8 @@ impl MapViewport {
         }
         self.markers.ensure(ui.ctx());
 
-        let dt = ui.input(|i| i.stable_dt) as f64;
+        // 飞跃进度走墙钟；跟焦缩放用 unstable_dt（勿用 heavily-smoothed stable_dt）
+        let dt = ui.input(|i| i.unstable_dt as f64).clamp(1e-4, 0.25);
         let _ = self.tick_flight(dt);
 
         let (resp, _) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
@@ -414,24 +428,24 @@ impl MapViewport {
                     && !e.event_id.starts_with("record:")
                     && !e.is_cancel
             });
-            // 飞跃中跳过重叠层（速报点/火山/台风），两端 zoom 变化时避免每帧海量 project
+            // 测站/速报飞跃中仍画（节能档抽稀）；火山/台风飞跃中可跳过减负
             let flying = self.flight.is_some();
+            let station_q = if interacting {
+                PaintQuality::Eco
+            } else {
+                self.paint_quality
+            };
+            overlay::paint_stations(
+                ui,
+                &view,
+                stations,
+                selected_station,
+                icons,
+                eew_active,
+                station_q,
+            );
+            overlay::paint_records(ui, &view, records, selected_record, icons);
             if !flying {
-                let station_q = if interacting {
-                    PaintQuality::Eco
-                } else {
-                    self.paint_quality
-                };
-                overlay::paint_stations(
-                    ui,
-                    &view,
-                    stations,
-                    selected_station,
-                    icons,
-                    eew_active,
-                    station_q,
-                );
-                overlay::paint_records(ui, &view, records, selected_record, icons);
                 overlay::paint_volcanoes(ui, &view, volcanoes, selected_volcano);
                 if !typhoons.is_empty() {
                     let hover = resp.hover_pos();
@@ -511,7 +525,7 @@ impl MapViewport {
 
         if resp.dragged() {
             self.flight = None;
-            self.post_flight_cooldown = 0.0;
+            self.post_flight_until = None;
             self.user_camera_override = true;
             let d = resp.drag_delta();
             let (lon, lat) = view.pan_by_delta(d.x, d.y);
@@ -523,7 +537,7 @@ impl MapViewport {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll.abs() > 0.0 {
                 self.flight = None;
-                self.post_flight_cooldown = 0.0;
+                self.post_flight_until = None;
                 self.user_camera_override = true;
                 let before = self.zoom;
                 let after = (before + scroll as f64 * 0.002).clamp(ZOOM_MIN, ZOOM_MAX);

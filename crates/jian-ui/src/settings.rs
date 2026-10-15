@@ -1718,27 +1718,25 @@ fn draw_general(
         control_row(
             ui,
             "目标帧率",
-            "交互/极致档跟手上限；空闲与波圈另有降频；默认 30，范围 20–300",
+            "交互/波圈跟手上限；空闲另有降频；四档 30 / 45 / 60 / 120",
             "\u{25ce}",
             |ui| {
-                let mut fps = draft.performance.target_fps as i32;
-                ui.add(
-                    egui::DragValue::new(&mut fps)
-                        .speed(1.0)
-                        .range(20..=300)
-                        .suffix(" fps"),
-                );
-                draft.performance.target_fps = fps.clamp(20, 300) as u32;
+                draft.performance.target_fps =
+                    jian_config::snap_target_fps(draft.performance.target_fps);
+                egui::ComboBox::from_id_salt("set_perf_target_fps")
+                    .selected_text(format!("{} fps", draft.performance.target_fps))
+                    .width(140.0)
+                    .show_ui(ui, |ui| {
+                        for &fps in &jian_config::TARGET_FPS_PRESETS {
+                            ui.selectable_value(
+                                &mut draft.performance.target_fps,
+                                fps,
+                                format!("{fps} fps"),
+                            );
+                        }
+                    });
             },
         );
-        if draft.performance.target_fps > 120 {
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new("请注意帧率设置，避免因为帧率过高导致电脑异常")
-                    .size(12.0)
-                    .color(Color32::from_rgb(0xF0, 0xA0, 0x40)),
-            );
-        }
         row_divider(ui);
         control_row(ui, "性能诊断", "按 CPU/内存估分推荐配置", "\u{25ce}", |ui| {
             if glass_btn(ui, "开始诊断", true).clicked() {
@@ -1746,7 +1744,7 @@ fn draw_general(
                 draft.performance.device = d.device;
                 draft.performance.gpu_api = d.gpu_api;
                 draft.performance.profile = d.profile;
-                draft.performance.target_fps = d.target_fps;
+                draft.performance.target_fps = jian_config::snap_target_fps(d.target_fps);
                 *perf_diag = Some(d.summary);
             }
         });
