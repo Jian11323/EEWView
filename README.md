@@ -1,157 +1,108 @@
-# EEW View · 地震视监器
+<p align="center">
+  <img src="icon/brand/app.png" alt="EEW View" width="128" />
+</p>
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+<h1 align="center">EEW View · 地震实时监看</h1>
 
-纯 Rust 地震预警 / 速报桌面客·端。  
+<p align="center">
+  纯 Rust 桌面端 · 多源预警 / 速报视监
+</p>
 
----
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
+  <img src="https://img.shields.io/badge/Rust-1.70%2B-orange.svg" alt="Rust" />
+  <img src="https://img.shields.io/badge/Platform-Windows-0078D6.svg" alt="Windows" />
+  <img src="https://img.shields.io/badge/Release-Beta%201.4.0-informational.svg" alt="Beta 1.4.0" />
+</p>
 
-## 地震视监器
-
-| 区域 | 内容 |
-|------|------|
-| 健·点 | `Jian` · `Wolfx` · `P2P` → **正常 / 波动 / 异常** |
-| 速报 | 速报历史（地名 / 时间 / M / 震度色块） |
-| 预警 | 预警列表（报数 / M / 最大震度） |
-| 测站 | NIED Kmoni 有感测站（列表 + 地图色点） |
-| 地图 | 暗色 GQ Special 矢量（藏南修复）/ 亮色地形瓦片 + 震中 + P/S 波圈（JMA2001 走时） |
-| 图例 / 时钟 | ·下烈度色标；右下本地时间（可加 JST） |
-| 信息头 / 倒计时 | 当前事件；本机经纬有效时 S 波剩余秒叠在右下时钟上方 |
-| 主题 | 设置 → 显示：暗色 / 亮色（主界面色板 + auto 底图同步切换） |
-| 设置 | API与数据源 / 地图与显示 / 音频 / 性能与渲染 / 高级 / 关于（主窗内嵌设置） |
-
-点击列表项可将地图居中到对应事件或测站，并·新信息头。
+<p align="center">
+  <img src="https://socialify.git.ci/Jian11323/EEWView/image?description=1&amp;font=Inter&amp;language=1&amp;name=1&amp;owner=1&amp;pattern=Solid&amp;theme=Auto" alt="EEWView" width="640" />
+</p>
 
 ---
 
-## 数据源
+## 简介
 
-| 源 | 用途 | 配置 |
-|----|------|------|
-| **Jian Project API** | 预警 / 速报 / 海啸 / 测站 / 底图 | `[sources.jian]`；设置页用 `lk_` 换 `rt_`，或环境变量 `JIAN_ACCESS_TOKEN` / `JIAN_REFRESH_TOKEN` |
-| **Wolfx** | JMA / CENC 等预警与列表补充 | `[sources.wolfx]` |
-| **P2PQuake** | 气象厅地震情报（551） | `[sources.p2pquake]` |
-
-底图：`basemap = "auto"` 时暗色优先 `geodata/globalquake/`（GlobalQuake Special 藏南修复矢量），否则要石；亮色用自有海洋地形瓦片 `tilemap.sismotide.top/arcwob`（横向循环）。  
-国外源地名按融合历史 FE 格网修正（`media/place/`）；JMA / CWA / HKO / CENC 保留原文。  
-字段约定见 [`docs/数据源.md`](docs/数据源.md)；底图说明见 [`geodata/README.md`](geodata/README.md)。
+**EEW View** 是一款面向桌面的地震预警与速报视监客户端。  
+聚合多源实时情报，在地图上展示震中、走时波圈与测站烈度，并提供本机倒计时与音效播报。
 
 ---
 
-## 音效
+## 主要功能
 
-| 用途 | 素材 | 说明 |
-|------|------|------|
-| 预警事件 | [SREV](media/sound/ATTRIBUTION.md) | CC BY-SA 2.0，须署名 |
-| 本地 S 波倒计时 | 地牛 Wake Up! | 非自由许可；发行前须授权或替换；默认不随仓库分发 |
-| 测站 / UI | 原创合成 | CC0 |
-
-·由表：`media/sound/catalog.json`；说明见 [`docs/音效·由.md`](docs/音效·由.md)。
-
----
-
-## 走时与色标
-
-| 项 | 说明 |
-|----|------|
-| 近·走时 | 气象厅 **JMA2001**（[`ATTRIBUTION`](media/travel/ATTRIBUTION.md)） |
-| 远·走时 | IASPEI **ak135**（回退表） |
-| 震度色 | 气象厅配色指针表２－２ |
-| 烈度色 | 按 GB/T 38226 制图规范摘录（见 `media/palette/`） |
+- 接收中国地震局、台湾中央气象署、日本气象厅、韩国气象厅等地震预警
+- 接收中国地震台网、日本气象厅等地震速报 / 列表
+- 接收日本气象厅海啸情报
+- 展示 NIED 強震モニタ、S-Net、KMA 等测站烈度（列表与地图色点）
+- 地图叠加震中、P/S 波圈（近距 JMA2001，远距 ak135）
+- 暗色矢量底图 / 亮色海洋地形瓦片，可随主题切换
+- 台风路径、风圈与多源预报（可开关）
+- 配置本机经纬度后估算本地 S 波倒计时，并支持音效播报
+- 各数据源健康状态：**正常** / **波动** / **异常**
+- 主窗内嵌设置（数据源、地图与显示、音频、性能、高级、关于）
 
 ---
 
-## 版本
+## 数据来源
 
-当前通道：**Beta**，版本与 Cargo workspace 一致（现为 **1.4.0**）。界面展示为 `Beta x.y.z`。
-
-| 变更性质 | 递增位 | 示例 |
-|----------|--------|------|
-| 缺·修复、文案/·式微调、性能小修、无对外行为变化 | **PATCH**（第三位） | 1.0.0 → 1.0.1 |
-| 新功能、新数据源/设置项、交互或展示行为有意变更 | **MINOR**（第二位） | 1.0.1 → 1.1.0 |
-| 配置/协议不兼容，或结束 Beta 转正式版 | **MAJOR**（第一位） | 1.x → 2.0.0；正式版可去掉 Beta 标 |
-
-改版本时同步：`Cargo.toml` → `[workspace.package].version`，并重新打包便携包。
-
----
-
-## 构建运行
-
-需要：Rust（edition 2021）；Windows 建议安装 VS Build Tools（编译 eframe）。
-
-```bash
-# 若尚无走时 JSON
-cargo run -p convert_travel_tables
-
-# 启动
-cargo run -p jian-app
-```
-
-本机位置（倒计时与本地 S 波 ETA）：
-
-```toml
-# config/default.toml 或本机覆盖配置
-[local]
-latitude = 35.68
-longitude = 139.76
-```
-
-Jian 访问令牌（PowerShell 示例）：
-
-```bash
-$env:JIAN_ACCESS_TOKEN = "at_…"
-cargo run -p jian-app
-```
-
-未配置令牌时仍可使用 Wolfx 与 P2PQuake；Jian 健·态为「异常」。
-
-发行打包（产物在 `dist/`，不进 Git）：
-
-```bash
-# Windows 便携包
-python tools/pack_windows.py
-# Windows 安装包（NSIS → setup.exe；需先有便携目录或本脚本会自动组装）
-python tools/pack_windows_installer.py
-
-# Linux x86_64 便携包（本机 Linux / WSL，或 Windows 交叉 cargo zigbuild 后）
-# cargo zigbuild -p jian-app --release --target x86_64-unknown-linux-gnu.2.31
-python tools/pack_linux.py --skip-build --bin target/x86_64-unknown-linux-gnu/release/eewview
-
-# NixOS / flake（在已装 Nix 的机器上）
-# nix run .#
-# nix profile install .#
-python tools/pack_nix.py
-```
-
-资源根默认是可执行文件所在目录（或其上级仓库根）；也可用环境变量 `EEWVIEW_ROOT` 指定。
-
-Windows 安装包默认装到 `C:\Program Files (x86)\eew view`。本地配置 `%APPDATA%\eew view\settings.json`，运行日志同目录 `log.txt`（UTF-8、令牌已脱敏）。设置 → 高级可打开日志目录。环境变量 `RUST_LOG` 优先于配置中的等级。
+- 地震预警（CEA/CWA/JMA/KMA 等）、地震速报、海啸情报、实时测站、台风路径：[Jian Project API](https://api.sismotide.top/api/)
+- 地震预警（CEA/SC/FJ/CWA/JMA/CENC）、地震列表（CENC/JMA）：[Wolfx Open API](https://wolfx.jp/api/)（请注意参考接口文档）
+- 地震信息（JMA）：[P2PQuake](https://www.p2pquake.net/)
+- GlobalQuake 全球预警、JMA-Atom 火山情报：[PancakesAPI](https://wiki.aloys23.link/wiki/PancakesAPI)
+- 日本测站烈度：[NIED 強震モニタ](https://www.lmoni.bosai.go.jp/)
+- 亮色海洋地形瓦片：[sismotide tilemap](https://tilemap.sismotide.top/)
+- 中国大陆地图：[阿里云 DataV.GeoAtlas](https://datav.aliyun.com/portal/school/atlas/area_selector)
+- 中国台湾地图：[GeoJSON.cn](https://geojson.cn/)
+- 日本地图：[日本气象厅](https://www.data.jma.go.jp/developer/gis.html)（注意钓鱼岛地区处理）
+- 世界地图：[GeoJSON Maps of the globe](https://geojson-maps.kyd.au/)（注意甄别争议地区）
+- 全球活动断层：[GEM Global Active Faults](https://github.com/GEMScienceTools/gem-global-active-faults)
+- 中国活动断层：[gmt-china/china-geospatial-data](https://github.com/gmt-china/china-geospatial-data)（CAFD）
+- 近距走时表：[气象厅 JMA2001](https://www.data.jma.go.jp/eqev/data/bulletin/catalog/appendix/trtime/trt_j.html)
+- 远距走时表：IASPEI ak135
+- SREV 音效：[scratch-realtime-earthquake-viewer-page](https://github.com/kotoho7/scratch-realtime-earthquake-viewer-page)
+- 中文倒计时播报素材：[地牛 Wake Up!](https://eew.earthquake.tw/)
+- 界面字体：[霞鹜文楷](https://github.com/lxgw/LxgwWenKai)（SIL OFL 1.1）
 
 ---
 
-## 目录
+## 参考软件
 
-| ·径 | 说明 |
-|------|------|
-| `crates/` | 应用、界面、地图、网络、音效、走时等 |
-| `media/` | 音效、走时、色标、地名格网、测站、字体 |
-| `icon/` | 烈度/震度 SVG、地图标记、品牌图标 |
-| `geodata/` | 暗色 GQ Special 矢量（优先）/ 要石回退；可选行政区 GeoJSON |
-| `config/default.toml` | 默认配置（密钥勿提交） |
-| `docs/` | 架构与接口说明 |
-| `tools/` | 走时表转换等·· |
-
-架构总览：[`docs/项目结构规划.md`](docs/项目结构规划.md)。
+- [Open EEW CN](https://github.com/OpenEEWCN/eewcn)
+- [GlobalQuake 0.11](https://github.com/xspanger3770/GlobalQuake)
+- [Kanameishi（要石）](https://github.com/Lipomoea/kanameishi)
+- [RhythmQuake](https://github.com/yuelinyayun-star/flutterRhythmQuake)
+- [Scratch-Realtime-Earthquake-Viewer-Page](https://github.com/kotoho7/scratch-realtime-earthquake-viewer-page)
 
 ---
 
-## License
+## 版权声明
 
-**代码**：[Apache License 2.0](LICENSE)
+- [RhythmQuake](https://github.com/yuelinyayun-star/flutterRhythmQuake)
+- [Kanameishi](https://github.com/Lipomoea/kanameishi)
+- [OPEN EEWCN](https://github.com/OpenEEWCN/eewcn)
+- [GlobalQuake 0.11](https://github.com/OpenEEWCN/eewcn)
 
-第三方素材不随代码许可证覆盖：
+第三方素材（音效、走时表、底图矢量、断层、字体、地图标记等）不随代码许可证覆盖，请遵循各自上游许可；SREV 音效为 CC BY-SA 2.0，须署名。震度色参考气象厅配色；中国烈度色按 GB/T 相关制图规范摘录。
 
-- [`media/sound/ATTRIBUTION.md`](media/sound/ATTRIBUTION.md)
-- [`media/travel/ATTRIBUTION.md`](media/travel/ATTRIBUTION.md)
-- [`media/ATTRIBUTION.md`](media/ATTRIBUTION.md)
-- [`media/place/ATTRIBUTION.md`](media/place/ATTRIBUTION.md)
+---
+
+## 特别鸣谢
+
+- [平平无奇的4](https://space.bilibili.com/3707038962027155)
+- [悦琳雅韵☆Rhythm(Stille)](https://github.com/yuelinyayun-star)
+- [lxfly2000](https://github.com/lxfly2000)
+- 以及各位给予帮助的 EEW 爱好者
+
+---
+
+## 注意事项
+
+1. **非官方渠道**：本软件仅供信息展示与学习研究，**不构成**各国气象 / 地震主管部门的官方预警渠道。紧急情况下请以主管部门发布为准，并遵从当地防灾指引。
+2. **数据免责**：开发者不保证上游数据的实时性、完整性与准确性；网络波动、上游变更或连接超限均可能导致延迟、缺报或显示异常。
+3. **令牌与隐私**：Jian 访问令牌（`lk_` / `rt_` / `at_`）请仅保存在本机设置或环境变量中，**勿提交进公开仓库**。
+4. **素材授权**：部分音效（如「地牛 Wake Up!」倒计时语音）为非自由许可，默认不随仓库分发；公开再分发前请自行确认授权或更换素材。
+5. **连接额度**：同一 IP / 令牌并发有限。若同时开启多个客户端或调试页，可能触发上游连接限制；请关闭多余连接后再试。
+
+## 版权声明
+
+本仓库代码以 [Apache License 2.0](LICENSE) 发布。
