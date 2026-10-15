@@ -3,7 +3,7 @@ Unicode true
 RequestExecutionLevel admin
 
 !ifndef VERSION
-  !define VERSION "1.4.1"
+  !define VERSION "1.4.2"
 !endif
 !ifndef DIST_DIR
   !define DIST_DIR "..\dist\EEWView"

@@ -252,6 +252,16 @@ fn felt_level(s: &StationSample) -> u8 {
 }
 
 /// 测站散点：震度 >=1 用 `shindo_inst`；其余計測色点。有预警时有感点始终显示。
+/// 平面拖图时复用静默测站 mesh，避免每帧重投上千点导致「拖时消失、松手才回来」。
+#[derive(Default)]
+pub struct StationPaintCache {
+    data_fp: u64,
+    mesh_lon: f64,
+    mesh_lat: f64,
+    build_zoom: f64,
+    mesh: Option<std::sync::Arc<Mesh>>,
+}
+
 pub fn paint_stations(
     ui: &mut Ui,
     view: &ViewCtx,
@@ -260,8 +270,10 @@ pub fn paint_stations(
     icons: Option<&MarkerIcons>,
     eew_active: bool,
     quality: crate::PaintQuality,
+    cache: &mut StationPaintCache,
 ) {
     if stations.is_empty() {
+        cache.mesh = None;
         return;
     }
     let rect = view.rect;
@@ -297,10 +309,15 @@ pub fn paint_stations(
         crate::PaintQuality::Extreme => (0.0, 2500),
     };
 
-    // 两遍绘制：静默点地理网格；有感点数量少，再按震度升序
-    let mut quiet_drawn = 0usize;
-    let mut occupied: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+    let data_fp = station_quiet_fp(stations, selected_id, quality, view, grid_deg, quiet_cap);
+    let flat = !view.mode.is_globe();
+    let can_shift = flat
+        && cache.mesh.is_some()
+        && cache.data_fp == data_fp
+        && (cache.build_zoom - view.zoom).abs() < 1e-9;
+
     let mut felt_idx: Vec<usize> = Vec::new();
+    let mut selected_quiet: Vec<usize> = Vec::new();
     for (idx, s) in stations.iter().enumerate() {
         let felt = match s.intensity_kind {
             jian_core::IntensityKind::JmaShindo => {
@@ -310,21 +327,92 @@ pub fn paint_stations(
         };
         if felt {
             felt_idx.push(idx);
-            continue;
+        } else if selected_id == Some(s.id.as_str()) {
+            selected_quiet.push(idx);
         }
-        let selected = selected_id == Some(s.id.as_str());
-        if !selected {
-            if quiet_drawn >= quiet_cap {
+    }
+
+    if can_shift {
+        if let Some(mesh) = cache.mesh.as_mut() {
+            if let Some((dx, dy)) = station_flat_pan_delta(cache.mesh_lon, cache.mesh_lat, view) {
+                if dx.abs() > 0.05 || dy.abs() > 0.05 {
+                    let m = std::sync::Arc::make_mut(mesh);
+                    m.translate(Vec2::new(dx, dy));
+                    cache.mesh_lon = view.center_lon;
+                    cache.mesh_lat = view.center_lat;
+                }
+            } else {
+                // 跨日界等：放弃平移，强制重建
+                cache.mesh = None;
+            }
+        }
+    }
+
+    if let Some(mesh) = cache.mesh.as_ref().filter(|_| {
+        cache.data_fp == data_fp && (cache.build_zoom - view.zoom).abs() < 1e-9 && flat
+    }) {
+        painter.add(egui::Shape::Mesh(mesh.clone()));
+    } else if flat {
+        let mesh = build_quiet_station_mesh(
+            view,
+            stations,
+            selected_id,
+            grid_deg,
+            quiet_cap,
+            pad,
+        );
+        painter.add(egui::Shape::Mesh(mesh.clone()));
+        cache.data_fp = data_fp;
+        cache.mesh_lon = view.center_lon;
+        cache.mesh_lat = view.center_lat;
+        cache.build_zoom = view.zoom;
+        cache.mesh = Some(mesh);
+    } else {
+        // 球体：逐点投影（背面剔除），不缓存平移
+        cache.mesh = None;
+        let mut quiet_drawn = 0usize;
+        let mut occupied: std::collections::HashSet<(i32, i32)> =
+            std::collections::HashSet::new();
+        for s in stations {
+            let felt = match s.intensity_kind {
+                jian_core::IntensityKind::JmaShindo => {
+                    s.intensity_level >= 1 || s.instrumental >= 0.5
+                }
+                jian_core::IntensityKind::CnIntensity => s.intensity_level >= 1,
+            };
+            if felt {
                 continue;
             }
-            if grid_deg > 0.0 {
-                let gx = (s.longitude / grid_deg).floor() as i32;
-                let gy = (s.latitude / grid_deg).floor() as i32;
-                if !occupied.insert((gx, gy)) {
+            let selected = selected_id == Some(s.id.as_str());
+            let Some(p) = view.project(s.longitude, s.latitude) else {
+                continue;
+            };
+            if p.x < rect.left() - pad
+                || p.x > rect.right() + pad
+                || p.y < rect.top() - pad
+                || p.y > rect.bottom() + pad
+            {
+                continue;
+            }
+            if !selected {
+                if quiet_drawn >= quiet_cap {
                     continue;
                 }
+                if grid_deg > 0.0 {
+                    let gx = (s.longitude / grid_deg).floor() as i32;
+                    let gy = (s.latitude / grid_deg).floor() as i32;
+                    if !occupied.insert((gx, gy)) {
+                        continue;
+                    }
+                }
+                quiet_drawn += 1;
             }
+            paint_station_dot(&painter, view, icons, s, p, selected, true);
         }
+    }
+
+    for idx in selected_quiet {
+        let s = &stations[idx];
         let Some(p) = view.project(s.longitude, s.latitude) else {
             continue;
         };
@@ -335,10 +423,7 @@ pub fn paint_stations(
         {
             continue;
         }
-        if !selected {
-            quiet_drawn += 1;
-        }
-        paint_station_dot(&painter, view, icons, s, p, selected, true);
+        paint_station_dot(&painter, view, icons, s, p, true, true);
     }
 
     felt_idx.sort_by(|&a, &b| {
@@ -366,6 +451,131 @@ pub fn paint_stations(
         }
         let selected = selected_id == Some(s.id.as_str());
         paint_station_dot(&painter, view, icons, s, p, selected, false);
+    }
+}
+
+fn station_quiet_fp(
+    stations: &[StationSample],
+    selected_id: Option<&str>,
+    quality: crate::PaintQuality,
+    view: &ViewCtx,
+    grid_deg: f64,
+    quiet_cap: usize,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    stations.len().hash(&mut h);
+    quality.hash(&mut h);
+    view.zoom.to_bits().hash(&mut h);
+    (view.rect.width() as i32).hash(&mut h);
+    (view.rect.height() as i32).hash(&mut h);
+    grid_deg.to_bits().hash(&mut h);
+    quiet_cap.hash(&mut h);
+    selected_id.hash(&mut h);
+    std::mem::discriminant(&view.mode).hash(&mut h);
+    for s in stations {
+        s.id.hash(&mut h);
+        s.instrumental.to_bits().hash(&mut h);
+        s.intensity_level.hash(&mut h);
+        std::mem::discriminant(&s.intensity_kind).hash(&mut h);
+    }
+    h.finish()
+}
+
+fn station_flat_pan_delta(build_lon: f64, build_lat: f64, view: &ViewCtx) -> Option<(f32, f32)> {
+    let build_lon = projection::wrap_lon_near(build_lon, view.center_lon);
+    let (x0, y0) = projection::lonlat_to_world(build_lon, build_lat, view.zoom);
+    let (x1, y1) =
+        projection::lonlat_to_world(view.center_lon, view.center_lat, view.zoom);
+    let dx = (x0 - x1) as f32;
+    let dy = (y0 - y1) as f32;
+    let max = (projection::world_size(view.zoom) as f32) * 0.45;
+    if !dx.is_finite() || !dy.is_finite() || dx.abs() > max || dy.abs() > max {
+        return None;
+    }
+    Some((dx, dy))
+}
+
+fn build_quiet_station_mesh(
+    view: &ViewCtx,
+    stations: &[StationSample],
+    selected_id: Option<&str>,
+    grid_deg: f64,
+    quiet_cap: usize,
+    pad: f32,
+) -> std::sync::Arc<Mesh> {
+    let rect = view.rect;
+    let mut mesh = Mesh::default();
+    let mut quiet_drawn = 0usize;
+    let mut occupied: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+    for s in stations {
+        let felt = match s.intensity_kind {
+            jian_core::IntensityKind::JmaShindo => {
+                s.intensity_level >= 1 || s.instrumental >= 0.5
+            }
+            jian_core::IntensityKind::CnIntensity => s.intensity_level >= 1,
+        };
+        if felt || selected_id == Some(s.id.as_str()) {
+            continue;
+        }
+        let Some(p) = view.project(s.longitude, s.latitude) else {
+            continue;
+        };
+        // 先视口裁剪，再占网格：避免屏外点抢格导致拖图时「空洞/整片消失」
+        if p.x < rect.left() - pad
+            || p.x > rect.right() + pad
+            || p.y < rect.top() - pad
+            || p.y > rect.bottom() + pad
+        {
+            continue;
+        }
+        if quiet_drawn >= quiet_cap {
+            continue;
+        }
+        if grid_deg > 0.0 {
+            let gx = (s.longitude / grid_deg).floor() as i32;
+            let gy = (s.latitude / grid_deg).floor() as i32;
+            if !occupied.insert((gx, gy)) {
+                continue;
+            }
+        }
+        quiet_drawn += 1;
+        let rgb = match s.intensity_kind {
+            jian_core::IntensityKind::CnIntensity => jian_core::palette::Rgb::new(0x66, 0x66, 0x66),
+            jian_core::IntensityKind::JmaShindo => {
+                if s.instrumental >= -3.0 {
+                    jian_core::instrumental_rgb(s.instrumental)
+                } else {
+                    color_for(s.intensity_kind, s.intensity_level)
+                }
+            }
+        };
+        let fill = Color32::from_rgb(rgb.r, rgb.g, rgb.b);
+        append_filled_circle(&mut mesh, p, 2.2, fill);
+    }
+    std::sync::Arc::new(mesh)
+}
+
+fn append_filled_circle(mesh: &mut Mesh, center: Pos2, radius: f32, color: Color32) {
+    const N: usize = 8;
+    let base = mesh.vertices.len() as u32;
+    mesh.vertices.push(Vertex {
+        pos: center,
+        uv: Pos2::ZERO,
+        color,
+    });
+    for i in 0..N {
+        let a = (i as f32) * std::f32::consts::TAU / (N as f32);
+        mesh.vertices.push(Vertex {
+            pos: center + Vec2::new(a.cos(), a.sin()) * radius,
+            uv: Pos2::ZERO,
+            color,
+        });
+    }
+    for i in 0..N {
+        let i1 = base + 1 + i as u32;
+        let i2 = base + 1 + ((i + 1) % N) as u32;
+        mesh.indices.extend_from_slice(&[base, i1, i2]);
     }
 }
 

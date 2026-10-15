@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "convert_travel_tables"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "anyhow",
  "serde",
@@ -2088,7 +2088,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jian-app"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2111,7 +2111,7 @@ dependencies = [
 
 [[package]]
 name = "jian-audio"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "anyhow",
  "rodio",
@@ -2123,7 +2123,7 @@ dependencies = [
 
 [[package]]
 name = "jian-config"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "anyhow",
  "directories",
@@ -2134,7 +2134,7 @@ dependencies = [
 
 [[package]]
 name = "jian-core"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "jian-util",
  "serde",
@@ -2143,7 +2143,7 @@ dependencies = [
 
 [[package]]
 name = "jian-map"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "earcutr",
  "egui",
@@ -2160,7 +2160,7 @@ dependencies = [
 
 [[package]]
 name = "jian-net"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2179,7 +2179,7 @@ dependencies = [
 
 [[package]]
 name = "jian-travel"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "jian-util",
  "serde",
@@ -2189,7 +2189,7 @@ dependencies = [
 
 [[package]]
 name = "jian-ui"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "chrono",
  "egui",
@@ -2206,7 +2206,7 @@ dependencies = [
 
 [[package]]
 name = "jian-util"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "jian-config",
  "sysinfo",

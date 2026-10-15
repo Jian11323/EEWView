@@ -344,7 +344,7 @@ impl MainShell {
                 }
                 draw_tsunami_banner(ui, &p, snap, travel);
                 let station_card_bottom = draw_realtime_intensity_card(ui, &p, snap);
-                draw_typhoon_detail_below_stations(
+                let typhoon_fly = draw_typhoon_detail_below_stations(
                     ui,
                     &p,
                     map_ui.typhoon_hover.as_ref(),
@@ -354,12 +354,17 @@ impl MainShell {
                         &[]
                     },
                     station_card_bottom.bottom_y,
+                    self.map.last_viewport_min_px,
                 );
                 if let Some(net) = station_card_bottom.clicked {
                     if let Some((lon, lat, zoom)) = snap.focus_max_station(net) {
                         self.map.fly_to_centered(lon, lat, Some(zoom.clamp(7.5, 11.0)), 0.4);
                         self.map.user_camera_override = true;
                     }
+                }
+                if let Some((lon, lat, z)) = typhoon_fly {
+                    self.map.user_camera_override = false;
+                    self.map.fly_to(lon, lat, Some(z), 1.0);
                 }
                 if cfg.ui.show_legend {
                     draw_legend_bar(ui, &p);
@@ -1005,13 +1010,15 @@ fn draw_tsunami_banner(
 
 
 /// 台风实况详情：固定在测站卡片下方，避免地图锚点浮层带尾巴。
+/// 点击标题栏名称/标题 → 飞向该台风；返回 `(lon, lat, zoom)`。
 fn draw_typhoon_detail_below_stations(
     ui: &mut Ui,
     p: &ThemePalette,
     hover: Option<&TyphoonHoverHit>,
     typhoons: &[jian_core::TyphoonInfo],
     station_bottom_y: f32,
-) {
+    viewport_min_px: f32,
+) -> Option<(f64, f64, f64)> {
     let hit_owned;
     let hit: Option<&TyphoonHoverHit> = if let Some(h) = hover {
         Some(h)
@@ -1059,7 +1066,7 @@ fn draw_typhoon_detail_below_stations(
         None
     };
     let Some(hit) = hit else {
-        return;
+        return None;
     };
 
     let time = format_typhoon_time_ui(&hit.time_text);
@@ -1118,13 +1125,26 @@ fn draw_typhoon_detail_below_stations(
     let origin = egui::pos2(right - CARD_W, station_bottom_y + 14.0);
     let rect = egui::Rect::from_min_size(origin, Vec2::new(CARD_W, total_h));
     let (r, g, b) = jian_core::typhoon_color_rgb(&hit.strong, hit.power);
+    let mut clicked = false;
     overlay_child(ui, "typhoon_detail_card", rect, |ui| {
-        let painter = ui.painter();
         let header_rect = egui::Rect::from_min_size(rect.min, Vec2::new(CARD_W, header_h));
         let body_rect = egui::Rect::from_min_size(
             egui::pos2(rect.min.x, header_rect.bottom() + 2.0),
             Vec2::new(CARD_W, body_h),
         );
+        // 标题栏可点：跳转到台风中心（同层 interact，不抢整图拖拽）
+        let hdr_resp = ui.interact(
+            header_rect,
+            ui.id().with("typhoon_hdr_click"),
+            Sense::click(),
+        );
+        if hdr_resp.clicked() {
+            clicked = true;
+        }
+        if hdr_resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let painter = ui.painter();
         painter.rect_filled(header_rect, 4.0, Color32::from_rgb(r, g, b).gamma_multiply(0.85));
         painter.rect_stroke(
             header_rect,
@@ -1162,6 +1182,20 @@ fn draw_typhoon_detail_below_stations(
             y += line_h;
         }
     });
+    if !clicked {
+        return None;
+    }
+    if hit.latitude.abs() <= 0.01 && hit.longitude.abs() <= 0.01 {
+        return None;
+    }
+    let radius_km = typhoons
+        .iter()
+        .find(|t| t.id == hit.id)
+        .map(jian_core::typhoon_max_wind_radius_km)
+        .unwrap_or(0.0)
+        .max(250.0);
+    let z = zoom_to_fit_radius_km(hit.latitude, radius_km, viewport_min_px, 0.45).min(7.0);
+    Some((hit.longitude, hit.latitude, z))
 }
 
 fn format_typhoon_time_ui(time_str: &str) -> String {

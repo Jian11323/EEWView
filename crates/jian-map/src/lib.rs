@@ -14,7 +14,7 @@ mod vector_basemap;
 pub use camera::{
     cluster_for_fit, fit_events, globe_framed_center, zoom_to_fit_radius_km, CameraFlight,
 };
-pub use overlay::TyphoonHoverHit;
+pub use overlay::{StationPaintCache, TyphoonHoverHit};
 pub use projection::{
     clamp_lat, clamp_lat_globe, km_to_pixels, lonlat_to_screen, normalize_lon, ProjectionMode,
 };
@@ -90,6 +90,8 @@ pub struct MapViewport {
     pub last_viewport_min_px: f32,
     /// 性能档对应的绘制抽稀
     paint_quality: PaintQuality,
+    /// 平面静默测站 mesh（拖图平移复用）
+    station_cache: overlay::StationPaintCache,
 }
 
 impl Default for MapViewport {
@@ -115,6 +117,7 @@ impl Default for MapViewport {
             user_camera_override: false,
             last_viewport_min_px: 720.0,
             paint_quality: PaintQuality::Normal,
+            station_cache: overlay::StationPaintCache::default(),
         }
     }
 }
@@ -378,6 +381,56 @@ impl MapViewport {
         let rect = resp.rect;
         self.last_viewport_min_px = rect.width().min(rect.height()).max(120.0);
 
+        // 先应用拖/滚轮，再取 ViewCtx 绘制：底图 mesh 平移与测站投影同一帧对齐
+        let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
+        let dragging = resp.dragged() || (resp.hovered() && scroll_y.abs() > 0.0);
+        let flying = self.flight.is_some();
+        let globe = self.projection_mode.is_globe();
+        {
+            let view_in = ViewCtx::new(
+                self.projection_mode,
+                self.center_lon,
+                self.center_lat,
+                self.zoom,
+                rect,
+            );
+            if resp.dragged() {
+                self.flight = None;
+                self.post_flight_until = None;
+                self.user_camera_override = true;
+                let d = resp.drag_delta();
+                let (lon, lat) = view_in.pan_by_delta(d.x, d.y);
+                self.center_lon = lon;
+                self.center_lat = self.clamp_view_lat(lat);
+            }
+            if resp.hovered() && scroll_y.abs() > 0.0 {
+                self.flight = None;
+                self.post_flight_until = None;
+                self.user_camera_override = true;
+                let before = self.zoom;
+                let after = (before + scroll_y as f64 * 0.002).clamp(ZOOM_MIN, ZOOM_MAX);
+                if (after - before).abs() > 1e-9 {
+                    if let Some(pos) = resp.hover_pos() {
+                        if globe {
+                            self.zoom = after;
+                        } else {
+                            let (lon, lat) = view_in.screen_to_lonlat(pos);
+                            self.zoom = after;
+                            let dx = (pos.x - rect.center().x) as f64;
+                            let dy = (pos.y - rect.center().y) as f64;
+                            let (wx, wy) = projection::lonlat_to_world(lon, lat, after);
+                            let (nlon, nlat) =
+                                projection::world_to_lonlat(wx - dx, wy - dy, after);
+                            self.center_lon = projection::normalize_lon(nlon);
+                            self.center_lat = self.clamp_view_lat(nlat);
+                        }
+                    } else {
+                        self.zoom = after;
+                    }
+                }
+            }
+        }
+
         let view = ViewCtx::new(
             self.projection_mode,
             self.center_lon,
@@ -385,7 +438,8 @@ impl MapViewport {
             self.zoom,
             rect,
         );
-        let globe = self.projection_mode.is_globe();
+        // 手动拖/滚轮保持完整底图与测站（lite 会变粗线、丢小岛并闪烁）；仅飞跃降质
+        let interacting = dragging || flying;
 
         ui.painter().rect_filled(rect, 0.0, self.ocean_fill);
 
@@ -406,12 +460,6 @@ impl MapViewport {
             self.cache
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
-
-        let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
-        let dragging = resp.dragged() || (resp.hovered() && scroll_y.abs() > 0.0);
-        let flying = self.flight.is_some();
-        // 手动拖/滚轮保持完整底图与测站（lite 会变粗线、丢小岛并闪烁）；仅飞跃降质
-        let interacting = dragging || flying;
 
         // 暗色矢量 / 球体：只描轮廓，不填陆地（对齐旧版纯黑轮廓图）
         if globe || self.basemap.show_vector() {
@@ -474,6 +522,7 @@ impl MapViewport {
                 icons,
                 eew_active,
                 station_q,
+                &mut self.station_cache,
             );
             overlay::paint_records(ui, &view, records, selected_record, icons);
             if !flying {
@@ -550,48 +599,6 @@ impl MapViewport {
                 });
                 if !already {
                     overlay::paint_marker_only(ui, &view, ev, icons);
-                }
-            }
-        }
-
-        if resp.dragged() {
-            self.flight = None;
-            self.post_flight_until = None;
-            self.user_camera_override = true;
-            let d = resp.drag_delta();
-            let (lon, lat) = view.pan_by_delta(d.x, d.y);
-            self.center_lon = lon;
-            self.center_lat = lat;
-        }
-
-        if resp.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll.abs() > 0.0 {
-                self.flight = None;
-                self.post_flight_until = None;
-                self.user_camera_override = true;
-                let before = self.zoom;
-                let after = (before + scroll as f64 * 0.002).clamp(ZOOM_MIN, ZOOM_MAX);
-                if (after - before).abs() > 1e-9 {
-                    if let Some(pos) = resp.hover_pos() {
-                        if globe {
-                            // 球体：缩放只改相机高度，中心经纬不变
-                            let _ = pos;
-                            self.zoom = after;
-                        } else {
-                            let (lon, lat) = view.screen_to_lonlat(pos);
-                            self.zoom = after;
-                            let dx = (pos.x - rect.center().x) as f64;
-                            let dy = (pos.y - rect.center().y) as f64;
-                            let (wx, wy) = projection::lonlat_to_world(lon, lat, after);
-                            let (nlon, nlat) =
-                                projection::world_to_lonlat(wx - dx, wy - dy, after);
-                            self.center_lon = projection::normalize_lon(nlon);
-                            self.center_lat = self.clamp_view_lat(nlat);
-                        }
-                    } else {
-                        self.zoom = after;
-                    }
                 }
             }
         }
