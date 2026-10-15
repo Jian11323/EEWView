@@ -1718,14 +1718,14 @@ fn draw_general(
         control_row(
             ui,
             "目标帧率",
-            "交互/波圈跟手上限（镜头跳转按墙钟，与帧率无关）；空闲另有降频；四档 30 / 45 / 60 / 120",
+            "交互/波圈跟手上限（镜头跳转按墙钟，与帧率无关）；空闲另有降频；档位跟常见刷新率",
             "\u{25ce}",
             |ui| {
                 draft.performance.target_fps =
                     jian_config::snap_target_fps(draft.performance.target_fps);
                 egui::ComboBox::from_id_salt("set_perf_target_fps")
                     .selected_text(format!("{} fps", draft.performance.target_fps))
-                    .width(140.0)
+                    .width(160.0)
                     .show_ui(ui, |ui| {
                         for &fps in &jian_config::TARGET_FPS_PRESETS {
                             ui.selectable_value(
@@ -1738,7 +1738,7 @@ fn draw_general(
             },
         );
         row_divider(ui);
-        control_row(ui, "性能诊断", "按 CPU/内存估分推荐配置", "\u{25ce}", |ui| {
+        control_row(ui, "性能诊断", "按 CPU/内存/主屏刷新率推荐配置", "\u{25ce}", |ui| {
             if glass_btn(ui, "开始诊断", true).clicked() {
                 let d = jian_util::perf::diagnose();
                 draft.performance.device = d.device;

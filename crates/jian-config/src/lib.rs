@@ -153,21 +153,42 @@ pub struct PerformanceConfig {
     /// `eco` 节能 | `normal` 正常 | `extreme` 极致
     #[serde(default = "default_perf_profile")]
     pub profile: String,
-    /// 目标帧率四档：30 / 45 / 60 / 120（默认 30）
+    /// 目标帧率：常见刷新率档（默认 60）
     #[serde(default = "default_target_fps")]
     pub target_fps: u32,
 }
 
-/// 目标帧率可选档位。
-pub const TARGET_FPS_PRESETS: [u32; 4] = [30, 45, 60, 120];
+/// 目标帧率可选档位（对齐常见显示器刷新率）。
+pub const TARGET_FPS_PRESETS: [u32; 11] = [
+    30, 45, 60, 75, 90, 120, 144, 165, 180, 240, 300,
+];
 
-/// 将任意 fps 就近映射到四档之一（兼容旧配置 20–300）。
+/// 将任意 fps 就近映射到档位之一（兼容旧配置）。
 pub fn snap_target_fps(fps: u32) -> u32 {
     TARGET_FPS_PRESETS
         .iter()
         .copied()
         .min_by_key(|&p| (p as i64 - fps as i64).unsigned_abs())
-        .unwrap_or(30)
+        .unwrap_or(60)
+}
+
+/// 取不超过 `max_fps` 的最高档（用于按显示器刷新率封顶）。
+pub fn snap_target_fps_at_most(max_fps: u32) -> u32 {
+    TARGET_FPS_PRESETS
+        .iter()
+        .copied()
+        .filter(|&p| p <= max_fps.max(1))
+        .max()
+        .unwrap_or_else(|| snap_target_fps(max_fps))
+}
+
+/// 综合机器预算与显示器刷新率，给出建议目标帧率。
+pub fn recommend_target_fps(machine_budget: u32, display_hz: Option<u32>) -> u32 {
+    let display_cap = display_hz
+        .map(snap_target_fps_at_most)
+        .unwrap_or(60);
+    let machine = snap_target_fps(machine_budget);
+    snap_target_fps_at_most(machine.min(display_cap))
 }
 
 fn default_perf_device() -> String {
@@ -180,7 +201,7 @@ fn default_perf_profile() -> String {
     "normal".into()
 }
 fn default_target_fps() -> u32 {
-    30
+    60
 }
 
 impl Default for PerformanceConfig {
@@ -195,12 +216,12 @@ impl Default for PerformanceConfig {
 }
 
 impl PerformanceConfig {
-    /// 映射到四档 30 / 45 / 60 / 120。
+    /// 映射到可选档位。
     pub fn clamped_fps(&self) -> u32 {
         snap_target_fps(self.target_fps)
     }
 
-    /// 目标帧率对应的重绘间隔（毫秒）。
+    /// 目标帧率对应的重绘间隔（毫秒）；高刷下可到 1ms。
     pub fn repaint_interval_ms(&self) -> u64 {
         let fps = self.clamped_fps().max(1) as f64;
         (1000.0 / fps).round().clamp(1.0, 250.0) as u64
@@ -1039,6 +1060,23 @@ fn merge_json(base: serde_json::Value, overlay: serde_json::Value) -> serde_json
             serde_json::Value::Object(a)
         }
         (_, overlay) => overlay,
+    }
+}
+
+#[cfg(test)]
+mod fps_preset_tests {
+    use super::{recommend_target_fps, snap_target_fps, snap_target_fps_at_most, TARGET_FPS_PRESETS};
+
+    #[test]
+    fn presets_include_common_refresh_rates() {
+        assert!(TARGET_FPS_PRESETS.contains(&240));
+        assert!(TARGET_FPS_PRESETS.contains(&144));
+        assert!(TARGET_FPS_PRESETS.contains(&300));
+        assert_eq!(snap_target_fps(100), 90);
+        assert_eq!(snap_target_fps(250), 240);
+        assert_eq!(snap_target_fps_at_most(200), 180);
+        assert_eq!(recommend_target_fps(300, Some(240)), 240);
+        assert_eq!(recommend_target_fps(120, Some(240)), 120);
     }
 }
 

@@ -5,3 +5,4 @@ edition.workspace = true
 
 [dependencies]
 sysinfo = "0.33"
+jian-config = { workspace = true }
