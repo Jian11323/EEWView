@@ -36,6 +36,7 @@ pub fn diagnose() -> PerfDiagnosis {
     let total = cpu_score + ram_score;
 
     // 无独立 GPU 枚举时：低配偏 CPU 软渲染；中高配 GPU+Vulkan
+    // 估分不到满分时也适当抬建议：镜头跳转已按墙钟，帧率只换采样密度，可多用空闲算力换丝滑。
     let (device, gpu_api, profile, target_fps, gpu_hint) = if total < 35.0 || ram_gb < 6.0 {
         (
             "cpu",
@@ -49,16 +50,16 @@ pub fn diagnose() -> PerfDiagnosis {
             "gpu",
             "opengl",
             "normal",
-            30,
-            "中端机：GPU + OpenGL，正常模式 + 30fps".into(),
+            45,
+            "中端机：GPU + OpenGL，正常模式 + 45fps".into(),
         )
     } else if total < 110.0 {
         (
             "gpu",
             "vulkan",
             "normal",
-            30,
-            "中高端：GPU + Vulkan，正常模式 + 30fps".into(),
+            60,
+            "中高端：GPU + Vulkan，正常模式 + 60fps（有余量可试极致）".into(),
         )
     } else {
         (
@@ -66,7 +67,7 @@ pub fn diagnose() -> PerfDiagnosis {
             "vulkan",
             "extreme",
             60,
-            "高端：GPU + Vulkan，极致模式 + 60fps".into(),
+            "高端：GPU + Vulkan，极致模式 + 60fps（显示器支持可开 120）".into(),
         )
     };
 

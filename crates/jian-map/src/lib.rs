@@ -36,6 +36,15 @@ impl PaintQuality {
             _ => Self::Normal,
         }
     }
+
+    /// 拖拽/飞跃时的绘制档：节能仍狠抽；正常略降；极致几乎不降，用满空闲算力换丝滑。
+    pub fn while_interacting(self) -> Self {
+        match self {
+            Self::Eco => Self::Eco,
+            Self::Normal => Self::Eco,
+            Self::Extreme => Self::Normal,
+        }
+    }
 }
 
 /// 地图一帧交互结果。
@@ -193,9 +202,9 @@ impl MapViewport {
             self.center_on(lon, lat, Some(end_zoom));
             return;
         }
-        // 尊重调用方基准时长；远距略加时，短距不强制拉长
+        // 墙钟秒（与目标帧率无关）：基准尊重调用方，远距略加时；高帧率只更密采样。
         let km = dist * 111.0;
-        let dur = (duration_s.max(0.2) + km / 16000.0).clamp(0.2, 2.0);
+        let dur = (duration_s.max(0.55) + km / 12000.0).clamp(0.55, 2.4);
         self.flight = Some(CameraFlight::new(
             (self.center_lon, self.center_lat, self.zoom),
             (lon, lat, end_zoom),
@@ -428,10 +437,10 @@ impl MapViewport {
                     && !e.event_id.starts_with("record:")
                     && !e.is_cancel
             });
-            // 测站/速报飞跃中仍画（节能档抽稀）；火山/台风飞跃中可跳过减负
+            // 测站/速报飞跃中仍画（按档抽稀）；火山/台风飞跃中可跳过减负
             let flying = self.flight.is_some();
             let station_q = if interacting {
-                PaintQuality::Eco
+                self.paint_quality.while_interacting()
             } else {
                 self.paint_quality
             };

@@ -255,9 +255,9 @@ impl FaultLines {
             }
         }
 
-        // 无缓存：前台建一帧（交互中用 Eco）
+        // 无缓存：前台建一帧（交互中按档降质，极致仍保留更多细节）
         let q = if interacting {
-            PaintQuality::Eco
+            quality.while_interacting()
         } else {
             quality
         };

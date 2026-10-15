@@ -8,7 +8,8 @@ const ZOOM_MIN: f64 = 2.0;
 const ZOOM_MAX: f64 = 12.0;
 
 /// 抛物线镜头飞跃（中途略拉远，两端落在震中）。
-/// 进度按墙钟计时，与目标帧率 / `stable_dt` 脱钩，避免「帧率越高跳越快」。
+/// 进度只认墙钟秒，与目标帧率 / 每帧 `dt` / 重绘间隔无关：
+/// 30/60/120fps 下同一段跳转墙钟时长一致（高帧率只更密采样，不会更快或更慢）。
 #[derive(Debug, Clone)]
 pub struct CameraFlight {
     start_lon: f64,
@@ -41,7 +42,12 @@ impl CameraFlight {
         }
     }
 
-    /// 按墙钟推进；返回 (lon, lat, zoom, finished)。
+    /// 墙钟总时长（秒），供测试与调试；与帧率无关。
+    pub fn duration_s(&self) -> f64 {
+        self.duration
+    }
+
+    /// 按墙钟推进；`_dt` 保留签名但不参与进度（禁止用帧间隔累加）。
     /// 位移：GQ 余弦缓动；缩放：线性时间抛物线（对齐 eewcn），中途拉远有上限，不贴 ZOOM_MIN。
     pub fn tick(&mut self, _dt: f64) -> (f64, f64, f64, bool) {
         let t = (self.started.elapsed().as_secs_f64() / self.duration).clamp(0.0, 1.0);
@@ -89,19 +95,19 @@ impl CameraFlight {
     }
 }
 
-/// 中途拉远目标 zoom：近距轻拉，远距更深，避免跳转像「先缩到地球再放大」拖时长。
+/// 中途拉远目标 zoom：近距轻拉，远距适中，避免「先砸到地球再拉回」的顿挫感。
 fn mid_flight_zoom(z0: f64, z1: f64, dist_km: f64) -> f64 {
     let avg = (z0 + z1) * 0.5;
     let lo = z0.min(z1);
     let pull = if dist_km < 400.0 {
-        0.55
+        0.35
     } else if dist_km < 1500.0 {
-        0.55 + (dist_km - 400.0) / 1100.0 * 0.65
+        0.35 + (dist_km - 400.0) / 1100.0 * 0.45
     } else {
-        1.2 + (dist_km / 14000.0).clamp(0.0, 1.0) * 0.9
+        0.85 + (dist_km / 14000.0).clamp(0.0, 1.0) * 0.65
     };
-    let ym = (avg - pull).min(lo - 0.25);
-    ym.clamp(4.0, ZOOM_MAX)
+    let ym = (avg - pull).min(lo - 0.15);
+    ym.clamp(4.5, ZOOM_MAX)
 }
 
 fn haversine_km(lat0: f64, lon0: f64, lat1: f64, lon1: f64) -> f64 {
@@ -279,6 +285,32 @@ pub fn fit_events(
     Some((center_lon, center_lat, z))
 }
 
+
+#[cfg(test)]
+mod flight_timing_tests {
+    use super::CameraFlight;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn flight_progress_is_wall_clock_not_tick_count() {
+        // 同一墙钟时长：tick 2 次与 tick 20 次都应接近同一进度（与「帧率」无关）
+        let dur = 0.20_f64;
+        let mut sparse = CameraFlight::new((0.0, 0.0, 6.0), (10.0, 5.0, 8.0), dur);
+        let mut dense = CameraFlight::new((0.0, 0.0, 6.0), (10.0, 5.0, 8.0), dur);
+        thread::sleep(Duration::from_millis(100));
+        let (_, _, _, _) = sparse.tick(1.0 / 30.0);
+        let (lon_s, lat_s, z_s, _) = sparse.tick(1.0 / 30.0);
+        for _ in 0..20 {
+            let _ = dense.tick(1.0 / 120.0);
+        }
+        let (lon_d, lat_d, z_d, _) = dense.tick(1.0 / 120.0);
+        assert!((lon_s - lon_d).abs() < 0.35, "lon {lon_s} vs {lon_d}");
+        assert!((lat_s - lat_d).abs() < 0.25, "lat {lat_s} vs {lat_d}");
+        assert!((z_s - z_d).abs() < 0.35, "zoom {z_s} vs {z_d}");
+        assert!((sparse.duration_s() - dur).abs() < 1e-9);
+    }
+}
 
 #[cfg(test)]
 mod framed_center_tests {
