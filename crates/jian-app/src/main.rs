@@ -247,6 +247,11 @@ fn run_app() -> Result<()> {
         ProjectionMode::parse(&cfg.map.projection),
         cfg.ui.show_faults,
     );
+    shell
+        .map
+        .set_tile_capacity(jian_util::perf::recommended_tile_slots(
+            cfg.performance.device.eq_ignore_ascii_case("cpu"),
+        ));
     snap.tab = match cfg.ui.sidebar_default_tab.to_ascii_lowercase().as_str() {
         "records" | "record" => jian_core::SidebarTab::Records,
         "station" => jian_core::SidebarTab::Station,
@@ -278,7 +283,7 @@ fn run_app() -> Result<()> {
         viewport = viewport.with_always_on_top();
     }
 
-    // 恢复 d07a801 之前：仅 Glow，避免 wgpu/独立 viewport 抢输入
+    // 固定 OpenGL（Glow）。软渲染仅在用户选择 CPU 模式时关闭硬件加速。
     let options = build_native_options(viewport, &cfg.performance);
 
     let started = Instant::now();
@@ -338,7 +343,6 @@ fn build_native_options(
 ) -> eframe::NativeOptions {
     let device = perf.device.to_ascii_lowercase();
     let profile = perf.profile.to_ascii_lowercase();
-    // 无 wgpu feature：一律 Glow；cpu=关硬件加速
     let hw = if device == "cpu" {
         eframe::HardwareAcceleration::Off
     } else {
@@ -932,7 +936,7 @@ impl eframe::App for JianApp {
                             self.snap.show_wave_rings = self.cfg.ui.show_wave_rings;
                             let mut note = format!("已保存到 {}", path.display());
                             if renderer_changed {
-                                note.push_str("；渲染设备/GPU 接口需重启生效，其余已热重载");
+                                note.push_str("；渲染设备需重启生效，其余已热重载");
                             }
                             self.shell.settings.set_save_note(note);
                             if close {
@@ -1216,9 +1220,7 @@ impl JianApp {
             && self.cfg.travel.fallback == new_cfg.travel.fallback
             && self.cfg.travel.linear_last_resort == new_cfg.travel.linear_last_resort;
         let renderer_changed = self.cfg.performance.device.to_ascii_lowercase()
-            != new_cfg.performance.device.to_ascii_lowercase()
-            || self.cfg.performance.gpu_api.to_ascii_lowercase()
-                != new_cfg.performance.gpu_api.to_ascii_lowercase();
+            != new_cfg.performance.device.to_ascii_lowercase();
         self.cfg = new_cfg;
         // 日志 stderr 热切换（控制台层启动时已挂载，此处只拨门闩 + Alloc/Free）
         logging::set_console_output(self.cfg.log.console);
@@ -1244,6 +1246,11 @@ impl JianApp {
             ProjectionMode::parse(&self.cfg.map.projection),
             self.cfg.ui.show_faults,
         );
+        self.shell
+            .map
+            .set_tile_capacity(jian_util::perf::recommended_tile_slots(
+                self.cfg.performance.device.eq_ignore_ascii_case("cpu"),
+            ));
 
         if !travel_same {
             match TravelEngine::load_named(

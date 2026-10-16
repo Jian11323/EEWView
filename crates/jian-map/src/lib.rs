@@ -64,9 +64,16 @@ use projection::ViewCtx;
 use fault_lines::FaultLines;
 use tsunami_coast::TsunamiCoast;
 use tile_cache::TileCache as Cache;
+use std::sync::Arc;
 
 const ZOOM_MIN: f64 = 2.0;
 const ZOOM_MAX: f64 = 12.0;
+
+/// 视角静止时复用的底图/断层/测站 mesh，波圈等动态层仍每帧绘制。
+struct StillStatic {
+    key: u64,
+    layers: Vec<Arc<egui::epaint::Mesh>>,
+}
 
 pub struct MapViewport {
     pub center_lon: f64,
@@ -92,6 +99,8 @@ pub struct MapViewport {
     paint_quality: PaintQuality,
     /// 平面静默测站 mesh（拖图平移复用）
     station_cache: overlay::StationPaintCache,
+    /// 非交互时合成底图层，避免波圈动画每帧再走一遍矢量/断层/测站路径
+    still_static: Option<StillStatic>,
 }
 
 impl Default for MapViewport {
@@ -118,6 +127,7 @@ impl Default for MapViewport {
             last_viewport_min_px: 720.0,
             paint_quality: PaintQuality::Normal,
             station_cache: overlay::StationPaintCache::default(),
+            still_static: None,
         }
     }
 }
@@ -162,6 +172,11 @@ impl MapViewport {
     /// 一键清除内存瓦片缓存。
     pub fn clear_tile_cache(&mut self) {
         self.cache.clear();
+    }
+
+    /// 按本机内存调整瓦片张数上限（软渲染或小内存保持 256）。
+    pub fn set_tile_capacity(&mut self, slots: usize) {
+        self.cache.set_capacity(slots);
     }
 
     fn clamp_view_lat(&self, lat: f64) -> f64 {
@@ -440,6 +455,20 @@ impl MapViewport {
         );
         // 手动拖/滚轮保持完整底图与测站（lite 会变粗线、丢小岛并闪烁）；仅飞跃降质
         let interacting = dragging || flying;
+        let want_vector = globe || self.basemap.show_vector();
+        let still_key = still_static_key(
+            &view,
+            self.paint_quality,
+            self.ocean_fill,
+            self.vector_style,
+            want_vector,
+            show_faults,
+        );
+        let still_hit = !interacting
+            && self
+                .still_static
+                .as_ref()
+                .is_some_and(|s| s.key == still_key && !s.layers.is_empty());
 
         ui.painter().rect_filled(rect, 0.0, self.ocean_fill);
 
@@ -461,29 +490,63 @@ impl MapViewport {
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
 
-        // 暗色矢量 / 球体：只描轮廓，不填陆地（对齐旧版纯黑轮廓图）
-        if globe || self.basemap.show_vector() {
-            self.vector.paint(
-                ui,
-                &view,
-                /* fill_land */ false,
-                self.vector_style,
-                /* skip_world_stroke */ false,
-                self.paint_quality,
-                /* lite */ false,
-            );
-        }
+        if still_hit {
+            // 波圈/空闲重绘：直接贴已镶嵌底图+断层，跳过矢量路径与 tessellate
+            let painter = ui.painter_at(rect);
+            if let Some(s) = self.still_static.as_ref() {
+                for mesh in &s.layers {
+                    painter.add(egui::Shape::Mesh(mesh.clone()));
+                }
+            }
+        } else {
+            // 暗色矢量 / 球体：只描轮廓，不填陆地（对齐旧版纯黑轮廓图）
+            if want_vector {
+                self.vector.paint(
+                    ui,
+                    &view,
+                    /* fill_land */ false,
+                    self.vector_style,
+                    /* skip_world_stroke */ false,
+                    self.paint_quality,
+                    /* lite */ false,
+                );
+            }
 
-        // 活动断层：矢量轮廓之上、事件叠加之下；瓦片底图时也绘制
-        if show_faults {
-            let dark = self.ocean_fill.r() < 80;
-            let fault_q = if flying {
-                self.paint_quality.while_interacting()
+            // 活动断层：矢量轮廓之上、事件叠加之下；瓦片底图时也绘制
+            if show_faults {
+                let dark = self.ocean_fill.r() < 80;
+                let fault_q = if flying {
+                    self.paint_quality.while_interacting()
+                } else {
+                    self.paint_quality
+                };
+                self.faults
+                    .paint(ui, &view, dark, fault_q, interacting);
+            }
+
+            if interacting {
+                self.still_static = None;
             } else {
-                self.paint_quality
-            };
-            self.faults
-                .paint(ui, &view, dark, fault_q, interacting);
+                let mut layers = Vec::with_capacity(2);
+                if want_vector {
+                    if let Some(m) = self.vector.still_mesh() {
+                        layers.push(m);
+                    }
+                }
+                if show_faults {
+                    if let Some(m) = self.faults.still_mesh() {
+                        layers.push(m);
+                    }
+                }
+                self.still_static = if layers.is_empty() {
+                    None
+                } else {
+                    Some(StillStatic {
+                        key: still_key,
+                        layers,
+                    })
+                };
+            }
         }
 
         // JMA 海啸：按沿岸预报区描边闪烁（不对中日外轮廓整圈描边）
@@ -618,6 +681,34 @@ impl MapViewport {
             typhoon_hover,
         }
     }
+}
+
+fn still_static_key(
+    view: &ViewCtx,
+    quality: PaintQuality,
+    ocean: Color32,
+    style: VectorStyle,
+    want_vector: bool,
+    show_faults: bool,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    view.center_lon.to_bits().hash(&mut h);
+    view.center_lat.to_bits().hash(&mut h);
+    view.zoom.to_bits().hash(&mut h);
+    (view.rect.width() as i32).hash(&mut h);
+    (view.rect.height() as i32).hash(&mut h);
+    (view.rect.min.x as i32).hash(&mut h);
+    (view.rect.min.y as i32).hash(&mut h);
+    std::mem::discriminant(&view.mode).hash(&mut h);
+    quality.hash(&mut h);
+    ocean.to_array().hash(&mut h);
+    style.land_fill.to_array().hash(&mut h);
+    style.world_border.to_array().hash(&mut h);
+    style.admin_border.to_array().hash(&mut h);
+    want_vector.hash(&mut h);
+    show_faults.hash(&mut h);
+    h.finish()
 }
 
 /// 粗略角距离（度），用于判断是否值得开飞跃动画。

@@ -11,10 +11,8 @@ pub struct PerfDiagnosis {
     /// 主屏当前刷新率（Hz）；读取失败则为 `None`
     pub display_hz: Option<u32>,
     pub gpu_hint: String,
-    /// `cpu` | `gpu`
+    /// `cpu` | `gpu`。诊断一律建议 `gpu`（OpenGL）；软渲染只在画面无法创建时由用户手选。
     pub device: String,
-    /// `opengl` | `vulkan`
-    pub gpu_api: String,
     /// `eco` | `normal` | `extreme`
     pub profile: String,
     /// 建议目标帧率（已按机器预算与显示器刷新率封顶并对齐档位）
@@ -40,41 +38,39 @@ pub fn diagnose() -> PerfDiagnosis {
     let total = cpu_score + ram_score;
     let display_hz = primary_display_hz();
 
-    // 机器预算：能扛住的上限档；最终再与显示器刷新率取交并对齐档位。
-    let (device, gpu_api, profile, machine_budget, gpu_hint) =
-        if total < 35.0 || ram_gb < 6.0 {
-            (
-                "cpu",
-                "opengl",
-                "eco",
-                30_u32,
-                "未检测到强独显迹象，建议 CPU 软渲染 + 节能".into(),
-            )
-        } else if total < 70.0 {
-            (
-                "gpu",
-                "opengl",
-                "normal",
-                90,
-                "中端机：GPU + OpenGL，正常模式".into(),
-            )
-        } else if total < 110.0 {
-            (
-                "gpu",
-                "vulkan",
-                "normal",
-                165,
-                "中高端：GPU + Vulkan，正常模式（有余量可试极致）".into(),
-            )
-        } else {
-            (
-                "gpu",
-                "vulkan",
-                "extreme",
-                300,
-                "高端：GPU + Vulkan，极致模式（帧率跟主屏刷新率）".into(),
-            )
-        };
+    let slots = tile_cache_slots(ram_gb, false);
+    // 机器预算：能扛住的上限档；最终再与显示器刷新率取交并对齐档位。一律 OpenGL。
+    let (device, profile, machine_budget, gpu_hint) = if total < 35.0 || ram_gb < 6.0 {
+        (
+            "gpu",
+            "eco",
+            30_u32,
+            format!(
+                "内存或处理器偏紧：OpenGL 硬件加速 + 节能，避免软渲染占满 CPU。空闲约 1.5 秒一帧，瓦片缓存 {slots} 张。画面无法显示时再改 CPU 模式。"
+            ),
+        )
+    } else if total < 70.0 {
+        (
+            "gpu",
+            "normal",
+            90,
+            format!("中端机：OpenGL，正常模式。空闲约 1 秒一帧，瓦片缓存 {slots} 张。"),
+        )
+    } else if total < 110.0 {
+        (
+            "gpu",
+            "normal",
+            165,
+            format!("中高端：OpenGL，正常模式（有余量可试极致）。瓦片缓存 {slots} 张。"),
+        )
+    } else {
+        (
+            "gpu",
+            "extreme",
+            300,
+            format!("高端：OpenGL，极致模式（帧率跟主屏刷新率）。瓦片缓存 {slots} 张。"),
+        )
+    };
 
     let target_fps = recommend_target_fps(machine_budget, display_hz);
     let hz_text = match display_hz {
@@ -83,7 +79,7 @@ pub fn diagnose() -> PerfDiagnosis {
     };
 
     let summary = format!(
-        "CPU：{cpu_name}\n内存：{ram_gb:.1} GB（估分 CPU {cpu_score:.0} / 内存 {ram_score:.0}）\n{hz_text}\n{gpu_hint}\n建议：设备={device}，API={gpu_api}，档位={profile}，帧率={target_fps}\n（设备/GPU 接口需重启；性能档位与帧率立即生效）"
+        "CPU：{cpu_name}\n内存：{ram_gb:.1} GB（估分 CPU {cpu_score:.0} / 内存 {ram_score:.0}）\n{hz_text}\n{gpu_hint}\n建议：OpenGL，档位={profile}，帧率={target_fps}，瓦片缓存={slots} 张\n（切换渲染设备需重启；性能档位与帧率立即生效）"
     );
 
     PerfDiagnosis {
@@ -92,11 +88,27 @@ pub fn diagnose() -> PerfDiagnosis {
         display_hz,
         gpu_hint,
         device: device.into(),
-        gpu_api: gpu_api.into(),
         profile: profile.into(),
         target_fps,
         summary,
     }
+}
+
+/// 瓦片张数。软渲染或内存不足 16GB 时 256 张（约 64MB）；否则 800 张（约 200MB）。
+pub fn tile_cache_slots(ram_gb: f64, software_raster: bool) -> usize {
+    if software_raster || ram_gb < 16.0 {
+        256
+    } else {
+        800
+    }
+}
+
+/// 读取本机内存后给出瓦片张数上限。
+pub fn recommended_tile_slots(software_raster: bool) -> usize {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    let ram_gb = sys.total_memory() as f64 / (1024.0 * 1024.0 * 1024.0);
+    tile_cache_slots(ram_gb, software_raster)
 }
 
 fn score_ram(gb: f64) -> f64 {
@@ -263,5 +275,13 @@ mod tests {
             d.display_hz, d.target_fps, d.profile
         );
         assert!(jian_config::TARGET_FPS_PRESETS.contains(&d.target_fps));
+        assert_eq!(d.device, "gpu");
+    }
+
+    #[test]
+    fn tile_slots_follow_ram_and_software_raster() {
+        assert_eq!(super::tile_cache_slots(8.0, false), 256);
+        assert_eq!(super::tile_cache_slots(32.0, false), 800);
+        assert_eq!(super::tile_cache_slots(32.0, true), 256);
     }
 }

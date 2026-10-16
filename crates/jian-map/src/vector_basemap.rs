@@ -520,6 +520,14 @@ impl VectorBasemap {
         changed
     }
 
+    /// 静止帧可复用的完整底图 mesh（飞跃轻量图不算）。
+    pub fn still_mesh(&self) -> Option<std::sync::Arc<egui::epaint::Mesh>> {
+        self.paint_cache
+            .as_ref()
+            .filter(|c| !c.fly_lite)
+            .map(|c| c.mesh.clone())
+    }
+
     /// `lite`：拖拽/滚轮轻量绘制；飞跃应传 `false`，否则会只剩粗国界像「没加载地图」。
     pub fn paint(
         &mut self,

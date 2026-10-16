@@ -144,15 +144,12 @@ impl Default for WindowConfig {
     }
 }
 
-/// 渲染设备与性能档位（改渲染后端需重启后生效）。
+/// 渲染设备与性能档位（改渲染设备需重启后生效）。GPU 固定 OpenGL。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceConfig {
-    /// `cpu` = 软渲染；`gpu` = 硬件加速
+    /// `cpu` = 软渲染；`gpu` = OpenGL 硬件加速
     #[serde(default = "default_perf_device")]
     pub device: String,
-    /// GPU API：`opengl` | `vulkan`（仅 device=gpu）
-    #[serde(default = "default_perf_gpu_api")]
-    pub gpu_api: String,
     /// `eco` 节能 | `normal` 正常 | `extreme` 极致
     #[serde(default = "default_perf_profile")]
     pub profile: String,
@@ -197,9 +194,6 @@ pub fn recommend_target_fps(machine_budget: u32, display_hz: Option<u32>) -> u32
 fn default_perf_device() -> String {
     "gpu".into()
 }
-fn default_perf_gpu_api() -> String {
-    "opengl".into()
-}
 fn default_perf_profile() -> String {
     "normal".into()
 }
@@ -211,7 +205,6 @@ impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
             device: default_perf_device(),
-            gpu_api: default_perf_gpu_api(),
             profile: default_perf_profile(),
             target_fps: default_target_fps(),
         }
@@ -224,41 +217,55 @@ impl PerformanceConfig {
         snap_target_fps(self.target_fps)
     }
 
-    /// 目标帧率对应的重绘间隔（毫秒）；高刷下可到 1ms。
+    fn software_raster(&self) -> bool {
+        self.device.eq_ignore_ascii_case("cpu")
+    }
+
+    /// 目标帧率对应的重绘间隔（毫秒）。软渲染最高约 30fps，避免像素光栅化占满 CPU。
     pub fn repaint_interval_ms(&self) -> u64 {
         let fps = self.clamped_fps().max(1) as f64;
-        (1000.0 / fps).round().clamp(1.0, 250.0) as u64
+        let ms = (1000.0 / fps).round().clamp(1.0, 250.0) as u64;
+        if self.software_raster() {
+            ms.max(33)
+        } else {
+            ms
+        }
     }
 
     fn profile_norm(&self) -> String {
         self.profile.to_ascii_lowercase()
     }
 
-    /// 空闲（无交互、无波圈）重绘间隔：老机器靠降频省 CPU/GPU。
+    /// 空闲（无交互、无波圈）重绘间隔。正常约 1 秒，节能约 1.5 秒，软渲染约 2 秒。
     pub fn idle_repaint_ms(&self) -> u64 {
+        if self.software_raster() {
+            return 2000;
+        }
         match self.profile_norm().as_str() {
             "extreme" => self.repaint_interval_ms(),
-            "eco" => 500, // ~2 fps
-            _ => 250,     // ~4 fps
+            "eco" => 1500,
+            _ => 1000,
         }
     }
 
-    /// 波圈 / 跟焦缩放等动画重绘间隔：跟用户目标帧率，节能档另限上限。
+    /// 波圈 / 跟焦缩放等动画重绘间隔。节能与软渲染约 10fps，其余跟目标帧率。
     pub fn wave_repaint_ms(&self) -> u64 {
-        match self.profile_norm().as_str() {
-            // 节能：约 10fps 上限，避免波圈拖满 CPU
-            "eco" => self.repaint_interval_ms().max(100),
-            // 正常 / 极致：完整兑现目标帧率（60 → 17ms，不再被 40ms 卡成 ~25fps）
-            _ => self.repaint_interval_ms(),
+        if self.software_raster() || self.profile_norm() == "eco" {
+            self.repaint_interval_ms().max(100)
+        } else {
+            self.repaint_interval_ms()
         }
     }
 
     /// 设置页打开、倒计时秒显等「软忙」间隔（无需跟手 60fps）。
     pub fn soft_repaint_ms(&self) -> u64 {
+        if self.software_raster() {
+            return 400;
+        }
         match self.profile_norm().as_str() {
             "extreme" => self.repaint_interval_ms(),
-            "eco" => 200,
-            _ => 120,
+            "eco" => 300,
+            _ => 200,
         }
     }
 }
@@ -1095,6 +1102,23 @@ mod fps_preset_tests {
         assert_eq!(snap_target_fps_at_most(200), 180);
         assert_eq!(recommend_target_fps(300, Some(240)), 240);
         assert_eq!(recommend_target_fps(120, Some(240)), 120);
+    }
+
+    #[test]
+    fn idle_and_cpu_repaint_are_throttled() {
+        let mut p = super::PerformanceConfig::default();
+        assert_eq!(p.idle_repaint_ms(), 1000);
+        p.profile = "eco".into();
+        assert_eq!(p.idle_repaint_ms(), 1500);
+        assert!(p.wave_repaint_ms() >= 100);
+        p.profile = "extreme".into();
+        p.target_fps = 60;
+        assert_eq!(p.idle_repaint_ms(), p.repaint_interval_ms());
+        p.device = "cpu".into();
+        assert_eq!(p.idle_repaint_ms(), 2000);
+        assert!(p.repaint_interval_ms() >= 33);
+        assert!(p.wave_repaint_ms() >= 100);
+        assert!(p.soft_repaint_ms() >= 400);
     }
 }
 

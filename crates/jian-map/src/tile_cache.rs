@@ -6,7 +6,8 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-const MAX_CACHED: usize = 256;
+const DEFAULT_CACHED: usize = 256;
+const MAX_CACHED_CAP: usize = 800;
 const MAX_IN_FLIGHT: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -32,6 +33,7 @@ pub struct TileCache {
     tile_source: String,
     entries: HashMap<TileId, TileState>,
     lru: VecDeque<TileId>,
+    max_cached: usize,
     tx: Sender<DecodedTile>,
     rx: Receiver<DecodedTile>,
     in_flight: usize,
@@ -46,6 +48,7 @@ impl TileCache {
             tile_source,
             entries: HashMap::new(),
             lru: VecDeque::new(),
+            max_cached: DEFAULT_CACHED,
             tx,
             rx,
             in_flight: 0,
@@ -61,6 +64,12 @@ impl TileCache {
         self.tile_base = base;
         self.tile_source = tile_source;
         self.clear();
+    }
+
+    /// 瓦片张数上限。内存宽裕时可到 800（约 200MB），否则保持 256。
+    pub fn set_capacity(&mut self, slots: usize) {
+        self.max_cached = slots.clamp(64, MAX_CACHED_CAP);
+        self.evict_overflow();
     }
 
     /// 清空内存中的瓦片纹理与排队请求（不改 URL）。
@@ -83,7 +92,11 @@ impl TileCache {
             self.lru.remove(pos);
         }
         self.lru.push_back(id);
-        while self.lru.len() > MAX_CACHED {
+        self.evict_overflow();
+    }
+
+    fn evict_overflow(&mut self) {
+        while self.lru.len() > self.max_cached {
             if let Some(old) = self.lru.pop_front() {
                 self.entries.remove(&old);
             }

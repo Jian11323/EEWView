@@ -1397,14 +1397,6 @@ fn perf_device_label(v: &str) -> &'static str {
     }
 }
 
-fn perf_gpu_api_label(v: &str) -> &'static str {
-    if v.eq_ignore_ascii_case("opengl") || v.eq_ignore_ascii_case("gl") {
-        "OpenGL"
-    } else {
-        "Vulkan"
-    }
-}
-
 fn perf_profile_label(v: &str) -> &'static str {
     match v.to_ascii_lowercase().as_str() {
         "eco" | "节能" => t("节能模式"),
@@ -1694,7 +1686,7 @@ fn draw_general(
     });
 
     section(ui, "性能与渲染", "\u{25ce}", |ui| {
-        control_row(ui, "渲染设备", "CPU 软渲染 / GPU 硬件加速（仅此项与 GPU 接口需重启）", "\u{25ce}", |ui| {
+        control_row(ui, "渲染设备", "GPU 使用 OpenGL；仅切换渲染设备需重启", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("set_perf_device")
                 .selected_text(perf_device_label(&draft.performance.device))
                 .width(140.0)
@@ -1703,28 +1695,8 @@ fn draw_general(
                     ui.selectable_value(&mut draft.performance.device, "gpu".into(), t("GPU 模式"));
                 });
         });
-        if draft.performance.device.eq_ignore_ascii_case("gpu") {
-            row_divider(ui);
-            control_row(ui, "GPU 接口", "OpenGL 或 Vulkan（wgpu）", "\u{25ce}", |ui| {
-                egui::ComboBox::from_id_salt("set_perf_gpu_api")
-                    .selected_text(perf_gpu_api_label(&draft.performance.gpu_api))
-                    .width(140.0)
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut draft.performance.gpu_api,
-                            "opengl".into(),
-                            "OpenGL",
-                        );
-                        ui.selectable_value(
-                            &mut draft.performance.gpu_api,
-                            "vulkan".into(),
-                            "Vulkan",
-                        );
-                    });
-            });
-        }
         row_divider(ui);
-        control_row(ui, "性能模式", "节能 / 正常 / 极致（保存后立即生效，无需重启）", "\u{25ce}", |ui| {
+        control_row(ui, "性能模式", "节能空闲约 1.5 秒，正常约 1 秒，极致跟目标帧率（保存后立即生效）", "\u{25ce}", |ui| {
             egui::ComboBox::from_id_salt("set_perf_profile")
                 .selected_text(perf_profile_label(&draft.performance.profile))
                 .width(140.0)
@@ -1770,7 +1742,6 @@ fn draw_general(
             if glass_btn(ui, "开始诊断", true).clicked() {
                 let d = jian_util::perf::diagnose();
                 draft.performance.device = d.device;
-                draft.performance.gpu_api = d.gpu_api;
                 draft.performance.profile = d.profile;
                 draft.performance.target_fps = jian_config::snap_target_fps(d.target_fps);
                 *perf_diag = Some(d.summary);

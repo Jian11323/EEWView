@@ -140,6 +140,11 @@ impl FaultLines {
         self.rebuild_rx = None;
     }
 
+    /// 静止帧可复用的断层 mesh。
+    pub fn still_mesh(&self) -> Option<Arc<Mesh>> {
+        self.paint_cache.as_ref().map(|c| c.mesh.clone())
+    }
+
     /// 收取后台重建结果；有更新返回 true。
     pub fn poll(&mut self, ctx: &Context) -> bool {
         let Some(rx) = self.rebuild_rx.as_ref() else {

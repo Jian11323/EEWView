@@ -94,9 +94,6 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "CPU 模式"), "CPU 模式");
         m.insert((Lang::Ja, "CPU 模式"), "CPUモード");
         m.insert((Lang::En, "CPU 模式"), "CPU mode");
-        m.insert((Lang::ZhTw, "CPU 软渲染 / GPU 硬件加速（仅此项与 GPU 接口需重启）"), "CPU 軟渲染 / GPU 硬體加速（僅此項與 GPU 介面需重啟）");
-        m.insert((Lang::Ja, "CPU 软渲染 / GPU 硬件加速（仅此项与 GPU 接口需重启）"), "CPUソフト描画 / GPU加速（これとGPU APIのみ再起動が必要）");
-        m.insert((Lang::En, "CPU 软渲染 / GPU 硬件加速（仅此项与 GPU 接口需重启）"), "CPU software / GPU accel (restart only for device & GPU API)");
         m.insert((Lang::ZhTw, "EEW View · 地震视监器"), "EEW View · 地震視監器");
         m.insert((Lang::Ja, "EEW View · 地震视监器"), "EEW View · 地震モニター");
         m.insert((Lang::En, "EEW View · 地震视监器"), "EEW View · Quake Monitor");
@@ -106,9 +103,9 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "EEWView · 左侧分类与右侧内容合并为同一玻璃面板"), "EEWView · 左側分類與右側內容合併為同一玻璃面板");
         m.insert((Lang::Ja, "EEWView · 左侧分类与右侧内容合并为同一玻璃面板"), "EEWView · 左ナビと右パネルを一体のガラスUIに統合");
         m.insert((Lang::En, "EEWView · 左侧分类与右侧内容合并为同一玻璃面板"), "EEWView · Sidebar and content share one glass panel");
-        m.insert((Lang::ZhTw, "GPU 接口"), "GPU 介面");
-        m.insert((Lang::Ja, "GPU 接口"), "GPU API");
-        m.insert((Lang::En, "GPU 接口"), "GPU API");
+        m.insert((Lang::ZhTw, "GPU 使用 OpenGL；仅切换渲染设备需重启"), "GPU 使用 OpenGL；僅切換渲染裝置需重啟");
+        m.insert((Lang::Ja, "GPU 使用 OpenGL；仅切换渲染设备需重启"), "GPU は OpenGL。描画デバイス切替のみ再起動");
+        m.insert((Lang::En, "GPU 使用 OpenGL；仅切换渲染设备需重启"), "GPU uses OpenGL; restart only when switching renderer");
         m.insert((Lang::ZhTw, "GPU 模式"), "GPU 模式");
         m.insert((Lang::Ja, "GPU 模式"), "GPUモード");
         m.insert((Lang::En, "GPU 模式"), "GPU mode");
@@ -133,9 +130,6 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "Jian Project / Kmoni / lmoni"), "Jian Project / Kmoni / lmoni");
         m.insert((Lang::Ja, "Jian Project / Kmoni / lmoni"), "Jian Project / Kmoni / lmoni");
         m.insert((Lang::En, "Jian Project / Kmoni / lmoni"), "Jian Project / Kmoni / lmoni");
-        m.insert((Lang::ZhTw, "OpenGL 或 Vulkan（wgpu）"), "OpenGL 或 Vulkan（wgpu）");
-        m.insert((Lang::Ja, "OpenGL 或 Vulkan（wgpu）"), "OpenGL または Vulkan（wgpu）");
-        m.insert((Lang::En, "OpenGL 或 Vulkan（wgpu）"), "OpenGL or Vulkan (wgpu)");
         m.insert((Lang::ZhTw, "P/S 波圈"), "P/S 波圈");
         m.insert((Lang::Ja, "P/S 波圈"), "P/S波面");
         m.insert((Lang::En, "P/S 波圈"), "P/S wave rings");
@@ -763,9 +757,9 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "节能"), "節能");
         m.insert((Lang::Ja, "节能"), "省エネ");
         m.insert((Lang::En, "节能"), "Eco");
-        m.insert((Lang::ZhTw, "节能 / 正常 / 极致（保存后立即生效，无需重启）"), "節能 / 正常 / 極致（儲存後立即生效，無需重啟）");
-        m.insert((Lang::Ja, "节能 / 正常 / 极致（保存后立即生效，无需重启）"), "省エネ / 標準 / 極限（保存後すぐ反映、再起動不要）");
-        m.insert((Lang::En, "节能 / 正常 / 极致（保存后立即生效，无需重启）"), "Eco / Normal / Extreme (applies on save, no restart)");
+        m.insert((Lang::ZhTw, "节能空闲约 1.5 秒，正常约 1 秒，极致跟目标帧率（保存后立即生效）"), "節能空閒約 1.5 秒，正常約 1 秒，極致跟目標幀率（儲存後立即生效）");
+        m.insert((Lang::Ja, "节能空闲约 1.5 秒，正常约 1 秒，极致跟目标帧率（保存后立即生效）"), "省エネは待機約1.5秒、標準は約1秒、極限は目標fps（保存後すぐ）");
+        m.insert((Lang::En, "节能空闲约 1.5 秒，正常约 1 秒，极致跟目标帧率（保存后立即生效）"), "Eco idles ~1.5s, Normal ~1s, Extreme follows target fps (applies on save)");
         m.insert((Lang::ZhTw, "节能模式"), "節能模式");
         m.insert((Lang::Ja, "节能模式"), "省エネ");
         m.insert((Lang::En, "节能模式"), "Eco mode");
