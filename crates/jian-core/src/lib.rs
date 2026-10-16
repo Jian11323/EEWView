@@ -1653,7 +1653,17 @@ pub fn same_eew_event(a: &EewReport, b: &EewReport) -> bool {
 }
 
 /// `new` 是否应覆盖 `old`：报数优先，其次镜像源优先级。
+///
+/// 取消报例外：必须覆盖同事件已有预报，即使 `serial` 回退
+/// （如 2026-10-16 JMA 误报：已发到 #42 后取消电报仍标 `serialNo=37`）。
 fn prefer_eew_report(old: &EewReport, new: &EewReport) -> bool {
+    if new.is_cancel && !old.is_cancel {
+        return true;
+    }
+    if old.is_cancel && !new.is_cancel {
+        // 已取消后仅接受更高报数的异常续报
+        return new.serial > old.serial;
+    }
     if new.serial != old.serial {
         return new.serial > old.serial;
     }
@@ -1866,6 +1876,43 @@ mod eew_dedup_tests {
         assert_eq!(snap.eew_list[0].agency.0, "jma-eew");
         let side = eew_sidebar_entries(&snap.eew_list);
         assert_eq!(side.len(), 1);
+    }
+
+    #[test]
+    fn cancel_overrides_even_when_serial_goes_backwards() {
+        // 复现 2026-10-16 误报：已到 #42，取消电报仍标 serial=37
+        let mut snap = AppSnapshot::offline_sample();
+        snap.eew_list.clear();
+        snap.active = None;
+        snap.upsert_eew(sample("jma-eew", "20261016123810", 42));
+        assert_eq!(snap.eew_list.len(), 1);
+        assert!(!snap.eew_list[0].is_cancel);
+
+        let mut cancel = sample("jma-eew", "20261016123810", 37);
+        cancel.is_cancel = true;
+        cancel.magnitude = 0.0;
+        cancel.depth_km = 0.0;
+        cancel.latitude = 0.0;
+        cancel.longitude = 0.0;
+        snap.upsert_eew(cancel);
+
+        assert_eq!(snap.eew_list.len(), 1);
+        assert!(snap.eew_list[0].is_cancel);
+        assert_eq!(snap.eew_list[0].serial, 37);
+        // 侧栏 / 波圈候选跳过取消
+        assert!(eew_sidebar_entries(&snap.eew_list).is_empty());
+    }
+
+    #[test]
+    fn older_non_cancel_does_not_override_cancel() {
+        let mut snap = AppSnapshot::offline_sample();
+        snap.eew_list.clear();
+        let mut cancel = sample("jma-eew", "evt-c", 5);
+        cancel.is_cancel = true;
+        snap.upsert_eew(cancel);
+        snap.upsert_eew(sample("jma-eew", "evt-c", 4));
+        assert!(snap.eew_list[0].is_cancel);
+        assert_eq!(snap.eew_list[0].serial, 5);
     }
 
     #[test]

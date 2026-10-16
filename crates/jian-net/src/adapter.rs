@@ -1251,18 +1251,33 @@ fn emit_wolfx_eew(tx: &NetTx, v: &Value, agency: &str) {
         .or_else(|| v.get("ReportNum"))
         .and_then(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok())))
         .unwrap_or(1) as u32;
-    // Magnitude 优先；Magunitude 仅为兼容旧拼写
-    let Some(magnitude) = field_f64(v, &["Magnitude", "magnitude", "Magunitude"]) else {
-        return;
+    let is_cancel = flag_true(
+        v,
+        &["isCancel", "isCanceled", "isCancelled", "canceled", "cancelled", "is_cancel"],
+    ) || v
+        .get("Type")
+        .and_then(|x| x.as_str())
+        .is_some_and(|s| s.contains("取消"));
+    // Magnitude 优先；Magunitude 仅为兼容旧拼写。取消报允许缺经纬/震级/深度（对齐 Jian）。
+    let magnitude = match field_f64(v, &["Magnitude", "magnitude", "Magunitude"]) {
+        Some(m) => m,
+        None if is_cancel => 0.0,
+        None => return,
     };
-    let Some(depth_km) = field_depth_km(v, &["Depth", "depth"]) else {
-        return;
+    let depth_km = match field_depth_km(v, &["Depth", "depth"]) {
+        Some(d) => d,
+        None if is_cancel => 0.0,
+        None => return,
     };
-    let Some(latitude) = field_f64(v, &["Latitude", "latitude"]) else {
-        return;
+    let latitude = match field_f64(v, &["Latitude", "latitude"]) {
+        Some(x) => x,
+        None if is_cancel => 0.0,
+        None => return,
     };
-    let Some(longitude) = field_f64(v, &["Longitude", "longitude"]) else {
-        return;
+    let longitude = match field_f64(v, &["Longitude", "longitude"]) {
+        Some(x) => x,
+        None if is_cancel => 0.0,
+        None => return,
     };
     let origin_ms = v
         .get("OriginTime")
@@ -1285,10 +1300,6 @@ fn emit_wolfx_eew(tx: &NetTx, v: &Value, agency: &str) {
     let (max_intensity_text, intensity_level) =
         fill_intensity(kind, magnitude, depth_km, raw.as_deref());
 
-    let is_cancel = flag_true(v, &["isCancel", "isCanceled", "is_cancel"])
-        || v.get("Type")
-            .and_then(|x| x.as_str())
-            .is_some_and(|s| s.contains("取消"));
     let is_final = !is_cancel
         && (flag_true(v, &["isFinal", "is_final", "Final"])
             || v.get("Type")
