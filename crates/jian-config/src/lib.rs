@@ -78,6 +78,9 @@ pub struct UiConfig {
     pub language: String,
     pub show_nied_clock: bool,
     pub sidebar_default_tab: String,
+    /// 右侧情报列表侧栏（可关；关闭后用地图右键菜单）
+    #[serde(default = "default_true")]
+    pub show_sidebar: bool,
     pub intensity_scale: String,
     /// 主窗口始终置顶（对齐滚动字幕「窗口置顶」）
     #[serde(default)]
@@ -363,6 +366,9 @@ pub struct SourcesConfig {
     pub jian: JianSourceConfig,
     pub wolfx: WolfxSourceConfig,
     pub p2pquake: P2pSourceConfig,
+    /// FSSN 地震信息（Fan Studio Seismic Network）
+    #[serde(default)]
+    pub fssn: FssnSourceConfig,
     /// PancakesAPI（api.aloys23.link）全灾害源
     #[serde(default)]
     pub pancakes: PancakesSourceConfig,
@@ -644,6 +650,24 @@ impl FiltersConfig {
     }
 }
 
+/// FSSN 地震信息 WebSocket（`/fssn`）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FssnSourceConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_fssn_ws")]
+    pub ws_url: String,
+}
+
+impl Default for FssnSourceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ws_url: default_fssn_ws(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct P2pSourceConfig {
     #[serde(default = "default_true")]
@@ -696,6 +720,9 @@ fn default_p2p_ws() -> String {
 fn default_p2p_poll() -> f64 {
     1.5
 }
+fn default_fssn_ws() -> String {
+    "wss://fssn-api.fanstudio.tech/fssn".into()
+}
 fn default_pancakes_base() -> String {
     "https://api.aloys23.link".into()
 }
@@ -740,6 +767,7 @@ impl Default for AppConfig {
                 language: default_ui_language(),
                 show_nied_clock: false,
                 sidebar_default_tab: "eew".into(),
+                show_sidebar: true,
                 intensity_scale: "auto".into(),
                 always_on_top: false,
                 auto_follow_eew: true,
@@ -820,6 +848,7 @@ impl Default for AppConfig {
                     ws_url: default_p2p_ws(),
                     poll_secs: default_p2p_poll(),
                 },
+                fssn: FssnSourceConfig::default(),
                 pancakes: PancakesSourceConfig::default(),
                 stations: StationsConfig::default(),
                 typhoon: TyphoonSourceConfig::default(),
@@ -1012,6 +1041,7 @@ impl AppConfig {
             || (self.sources.wolfx.enabled
                 && (self.sources.wolfx.any_eew() || self.sources.wolfx.any_eqlist()))
             || self.sources.p2pquake.enabled
+            || self.sources.fssn.enabled
             || self.sources.pancakes.enabled
             || self.sources.typhoon.enabled
     }
@@ -1056,6 +1086,8 @@ impl AppConfig {
             && self.sources.p2pquake.http_history == other.sources.p2pquake.http_history
             && self.sources.p2pquake.ws_url == other.sources.p2pquake.ws_url
             && self.sources.p2pquake.poll_secs == other.sources.p2pquake.poll_secs
+            && self.sources.fssn.enabled == other.sources.fssn.enabled
+            && self.sources.fssn.ws_url == other.sources.fssn.ws_url
             && self.sources.pancakes.enabled == other.sources.pancakes.enabled
             && self.sources.pancakes.base_url == other.sources.pancakes.base_url
             && self.sources.pancakes.ws_url == other.sources.pancakes.ws_url

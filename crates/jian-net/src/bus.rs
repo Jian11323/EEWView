@@ -16,6 +16,12 @@ pub enum NetEvent {
         network: &'static str,
         list: Vec<StationSample>,
     },
+    /// 测站网对时/保活（如 Jian `/s-net` 每秒重推只刷新 `timestamp`）；不改列表，只刷新卡片时钟
+    StationClock {
+        network: &'static str,
+        /// 上游信封毫秒时间；缺省由消费端用本机墙钟
+        ts_ms: Option<i64>,
+    },
     /// JMA 海啸情报（Jian Project API `jma-tsunami`）
     Tsunami(TsunamiInfo),
     /// JMA 火山情报（与地震速报分离）

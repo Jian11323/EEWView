@@ -622,6 +622,7 @@ pub struct AppSnapshot {
     pub health_wolfx: HealthStatus,
     pub health_p2p: HealthStatus,
     pub health_pancakes: HealthStatus,
+    pub health_fssn: HealthStatus,
     pub tab: SidebarTab,
     pub selection: Option<ListSelection>,
     /// 图例 P-S：是否绘制走时波圈
@@ -823,6 +824,7 @@ impl AppSnapshot {
             health_wolfx: HealthStatus::Normal,
             health_p2p: HealthStatus::Fluctuating,
             health_pancakes: HealthStatus::Abnormal,
+            health_fssn: HealthStatus::Abnormal,
             tab: SidebarTab::Eew,
             selection: Some(ListSelection {
                 tab: SidebarTab::Eew,
@@ -908,6 +910,7 @@ impl AppSnapshot {
             health_wolfx: HealthStatus::Abnormal,
             health_p2p: HealthStatus::Abnormal,
             health_pancakes: HealthStatus::Abnormal,
+            health_fssn: HealthStatus::Abnormal,
             tab: SidebarTab::Eew,
             selection: None,
             show_wave_rings: true,
@@ -1016,6 +1019,7 @@ impl AppSnapshot {
             "wolfx" => self.health_wolfx = status,
             "p2pquake" | "p2p" => self.health_p2p = status,
             "pancakes" => self.health_pancakes = status,
+            "fssn" => self.health_fssn = status,
             _ => {}
         }
     }
@@ -1309,6 +1313,19 @@ impl AppSnapshot {
         self.merge_stations("default", stations);
     }
 
+    /// 刷新测站网卡片时钟（中转对时帧 / 原版轮询保活）；不改测站列表。
+    pub fn touch_station_clock(&mut self, network: &str, ts_ms: Option<i64>) {
+        let ts = ts_ms.filter(|t| *t > 0).unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0)
+        });
+        if ts > 0 {
+            self.station_updated_ms.insert(network.to_string(), ts);
+        }
+    }
+
     /// 按网络前缀合并测站帧（`kmoni:` / `snet:` / `kma:`），互不覆盖。
     pub fn merge_stations(&mut self, network: &str, mut stations: Vec<StationSample>) {
         let prefix = format!("{network}:");
@@ -1329,29 +1346,9 @@ impl AppSnapshot {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
 
-        // S-Net 资料约每分钟一变；中转对时帧已在 net 层过滤。此处再防計測未变时刷时钟
-        let snet_unchanged = network == "snet" && {
-            let mut old: Vec<(String, i32)> = self
-                .stations
-                .iter()
-                .filter(|s| s.id.starts_with(&prefix))
-                .map(|s| (s.id.clone(), (s.instrumental * 10.0).round() as i32))
-                .collect();
-            let mut neu: Vec<(String, i32)> = stations
-                .iter()
-                .map(|s| (s.id.clone(), (s.instrumental * 10.0).round() as i32))
-                .collect();
-            old.sort_by(|a, b| a.0.cmp(&b.0));
-            neu.sort_by(|a, b| a.0.cmp(&b.0));
-            old == neu
-        };
-
         self.stations.retain(|s| !s.id.starts_with(&prefix));
-        if !(network == "snet" && snet_unchanged) {
-            self.station_updated_ms.insert(network.to_string(), now_ms);
-        } else if !self.station_updated_ms.contains_key(network) {
-            self.station_updated_ms.insert(network.to_string(), now_ms);
-        }
+        // 资料帧到达即刷新卡片时钟（对时重推走 StationClock，不经此路径）
+        self.station_updated_ms.insert(network.to_string(), now_ms);
         self.stations.extend(stations);
         self.stations.sort_by(|a, b| {
             b.instrumental

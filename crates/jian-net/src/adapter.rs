@@ -272,7 +272,7 @@ pub fn ingest_kmoni_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
 /// - 中转每秒只刷新信封 `timestamp` 作对时/保活；`time`/`int` 不变
 /// - 原版 MSIL 无对时帧，仅在 validTime 变化时取色
 ///
-/// 对时帧不上送 `NetEvent::Stations`（WS 看门狗仍因收包保活）；资料变化才上送。
+/// 对时帧不上送 `NetEvent::Stations`，只发 `StationClock` 刷新卡片时钟；资料变化才上送列表。
 pub fn ingest_snet_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
     ingest_snet_int_frame(state, tx, text);
 }
@@ -382,7 +382,12 @@ fn ingest_snet_int_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
     // 资料指纹：业务 time（分钟级）+ int[]；忽略每秒刷新的 timestamp
     let data_fp = snet_data_fingerprint(&v, ints);
     if state.last_snet_data_fp != 0 && state.last_snet_data_fp == data_fp {
-        // 对时重推：不上送，避免 UI/地图当「每秒新资料」
+        // 对时重推：不改列表，只刷新卡片时钟（信封 timestamp）
+        let ts_ms = envelope_timestamp_ms(&v);
+        let _ = tx.send(NetEvent::StationClock {
+            network: "snet",
+            ts_ms,
+        });
         return;
     }
 
@@ -414,6 +419,15 @@ fn ingest_snet_int_frame(state: &mut KmoniState, tx: &NetTx, text: &str) {
         network: "snet",
         list: out,
     });
+}
+
+fn envelope_timestamp_ms(v: &Value) -> Option<i64> {
+    match v.get("timestamp") {
+        Some(Value::Number(n)) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
+        Some(Value::String(s)) => s.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+    .filter(|t| *t > 1_000_000_000_000) // 毫秒级
 }
 
 fn snet_data_fingerprint(v: &Value, ints: &[Value]) -> u64 {
@@ -1975,11 +1989,145 @@ fn jma_volcano_coords(name: &str) -> Option<(f64, f64)> {
     None
 }
 
+/// FSSN `/fssn`：`initial` / `update` / `query_response` 的 `Data` 对象，以及 `fssnlist_response` 数组。
+/// 文档：<https://fssn-api.fanstudio.tech/#fssn>
+pub fn ingest_fssn_frame(tx: &NetTx, text: &str) {
+    let Ok(v) = serde_json::from_str::<Value>(text) else {
+        return;
+    };
+    let typ = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
+    match typ {
+        "heartbeat" | "pong" | "error" => return,
+        "fssnlist_response" => {
+            if let Some(arr) = v.get("Data").and_then(|d| d.as_array()) {
+                for item in arr.iter().take(80) {
+                    ingest_fssn_item(tx, item);
+                }
+            }
+        }
+        _ => {
+            let Some(data) = v.get("Data") else {
+                return;
+            };
+            if data.is_object() {
+                ingest_fssn_item(tx, data);
+            }
+        }
+    }
+}
+
+fn ingest_fssn_item(tx: &NetTx, item: &Value) {
+    let Some(magnitude) = field_f64(item, &["magnitude"]) else {
+        return;
+    };
+    if !magnitude.is_finite() {
+        return;
+    }
+    let Some(latitude) = field_f64(item, &["latitude"]) else {
+        return;
+    };
+    let Some(longitude) = field_f64(item, &["longitude"]) else {
+        return;
+    };
+    let Some(depth_km) = field_depth_km(item, &["depth"]) else {
+        return;
+    };
+    let place = item
+        .get("placeName_zh")
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            item.get("placeName")
+                .and_then(|x| x.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or("\u{2014}")
+        .to_string();
+    let origin_ms = item
+        .get("shockTime")
+        .and_then(|x| x.as_str())
+        .and_then(parse_time_str)
+        .unwrap_or(0);
+    let time_text = if origin_ms > 0 {
+        format_time_text(origin_ms)
+    } else {
+        item.get("shockTime")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "\u{2014}".into())
+    };
+    let _ = tx.send(NetEvent::Record(EqRecord {
+        agency: AgencyId("fssn".into()),
+        place: crate::place::fix_place("fssn", &place, latitude, longitude),
+        time_text,
+        magnitude,
+        intensity_text: "\u{2014}".into(),
+        intensity_kind: IntensityKind::CnIntensity,
+        intensity_level: 0,
+        latitude,
+        longitude,
+        depth_km,
+        origin_ms,
+        is_auto: false,
+        magnitude_unknown: false,
+        hypocenter_unknown: false,
+    }));
+}
+
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::bus::channel;
+
+    #[test]
+    fn fssn_initial_keeps_zh_place_and_skips_intensity() {
+        let body = r#"{
+          "type": "initial",
+          "Data": {
+            "id": "FSSN2026tsch",
+            "shockTime": "2026-10-08 14:46:47",
+            "latitude": -52.5994,
+            "longitude": 140.3181,
+            "depth": 10,
+            "magnitude": 5.4,
+            "placeName": "West of Macquarie Island",
+            "placeName_zh": "麦夸里岛以西",
+            "infoTypeName": "正式(已核实)"
+          }
+        }"#;
+        let (tx, mut rx) = channel();
+        ingest_fssn_frame(&tx, body);
+        let NetEvent::Record(rec) = rx.try_recv().expect("record") else {
+            panic!("expected Record");
+        };
+        assert_eq!(rec.agency.0, "fssn");
+        assert!(rec.place.contains("麦夸里岛以西"));
+        assert!((rec.magnitude - 5.4).abs() < 1e-6);
+        assert!((rec.depth_km - 10.0).abs() < 1e-6);
+        assert_eq!(rec.intensity_level, 0);
+        assert!(rec.origin_ms > 0);
+    }
+
+    #[test]
+    fn fssn_skips_when_depth_missing() {
+        let body = r#"{
+          "type": "update",
+          "Data": {
+            "shockTime": "2026-10-08 14:46:47",
+            "latitude": 1.0,
+            "longitude": 2.0,
+            "magnitude": 4.0,
+            "placeName_zh": "测试"
+          }
+        }"#;
+        let (tx, mut rx) = channel();
+        ingest_fssn_frame(&tx, body);
+        assert!(rx.try_recv().is_err());
+    }
 
     #[test]
     fn strip_jma_volcano_name_label_removes_field_prefix() {
@@ -2078,15 +2226,37 @@ mod tests {
         assert_eq!(list[0].id, "A");
         assert!((list[0].instrumental - (-1.3)).abs() < 1e-9);
 
-        // 对时重推：timestamp 变了，time/int 不变 → 不上送
+        // 对时重推：timestamp 变了，time/int 不变 → 只刷时钟，不上送 Stations
         ingest_snet_frame(
             &mut state,
             &tx,
             r#"{"type":"s-net","time":"20261014084800","timestamp":1791967764000,"int":[-1.3,-4.0],"source":"s-net"}"#,
         );
-        assert!(rx.try_recv().is_err(), "time-sync repush must not emit Stations");
+        match rx.try_recv().expect("time-sync clock") {
+            NetEvent::StationClock {
+                network,
+                ts_ms: Some(ts),
+            } => {
+                assert_eq!(network, "snet");
+                assert_eq!(ts, 1_791_967_764_000);
+            }
+            other => panic!("expected StationClock, got {other:?}"),
+        }
+        assert!(rx.try_recv().is_err(), "time-sync must not emit Stations");
 
-        // 资料更新：time 变了 → 再上送
+        // 同分钟、int 变了（中转资料更新）→ 再上送新震度
+        ingest_snet_frame(
+            &mut state,
+            &tx,
+            r#"{"type":"s-net","time":"20261014084800","timestamp":1791967765000,"int":[2.4,-4.0],"source":"s-net"}"#,
+        );
+        let NetEvent::Stations { list, .. } = rx.try_recv().expect("int update") else {
+            panic!("expected Stations");
+        };
+        assert_eq!(list.len(), 1);
+        assert!((list[0].instrumental - 2.4).abs() < 1e-9);
+
+        // 分钟变了也上送
         ingest_snet_frame(
             &mut state,
             &tx,
@@ -2097,6 +2267,33 @@ mod tests {
         };
         assert_eq!(list.len(), 1);
         assert!((list[0].instrumental - (-0.5)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn snet_relay_intensity_replaces_snapshot() {
+        // 中转：资料帧写入快照；对时帧不改震度；下一帧新 int 覆盖旧值
+        let mut state = KmoniState::default();
+        let (tx, mut rx) = channel();
+        let mut snap = jian_core::AppSnapshot::empty();
+        let frames = [
+            r#"{"type":"s-net","stations":[{"code":"A","name":"a","lat":35.0,"lon":139.0}]}"#,
+            r#"{"type":"s-net","time":"20261014084800","timestamp":1791967763000,"int":[-1.3]}"#,
+            r#"{"type":"s-net","time":"20261014084800","timestamp":1791967764000,"int":[-1.3]}"#,
+            r#"{"type":"s-net","time":"20261014084800","timestamp":1791967765000,"int":[1.6]}"#,
+        ];
+        for text in frames {
+            ingest_snet_frame(&mut state, &tx, text);
+            if let Ok(ev) = rx.try_recv() {
+                crate::apply_event(&mut snap, ev);
+            }
+        }
+        let s = snap
+            .stations
+            .iter()
+            .find(|s| s.id == "snet:A")
+            .expect("station A");
+        assert!((s.instrumental - 1.6).abs() < 1e-9);
+        assert!(snap.station_updated_ms.get("snet").copied().unwrap_or(0) > 0);
     }
 
     #[test]

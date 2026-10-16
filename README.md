@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
   <img src="https://img.shields.io/badge/Rust-1.70%2B-orange.svg" alt="Rust" />
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6.svg" alt="Windows" />
-  <img src="https://img.shields.io/badge/Release-Beta%201.4.4-informational.svg" alt="Beta 1.4.4" />
+  <img src="https://img.shields.io/badge/Release-Beta%201.5.0-informational.svg" alt="Beta 1.5.0" />
 </p>
 
 <p align="center">
@@ -40,6 +40,7 @@
 - 配置本机经纬度后估算本地 S 波倒计时，并支持音效播报
 - 各数据源健康状态：**正常** / **波动** / **异常**
 - 界面语言切换：简体中文 / 繁体中文 / 日本語 / English（设置 → 通用）
+- 右侧情报侧栏可开关（设置、向右拖关闭或右缘拉开）；关闭后地图右键可打开设置、跳转所在地、图例、设置所在地与关于
 - 主窗内嵌设置（数据源、地图与显示、音频、性能、高级、关于）
 
 ---
@@ -49,6 +50,7 @@
 - 地震预警（CEA/CWA/JMA/KMA 等）、地震速报、海啸情报、实时测站、台风路径：[Jian Project API](https://api.sismotide.top/api/)
 - 地震预警（CEA/SC/FJ/CWA/JMA/CENC）、地震列表（CENC/JMA）：[Wolfx Open API](https://wolfx.jp/api/)（请注意参考接口文档）
 - 地震信息（JMA）：[P2PQuake](https://www.p2pquake.net/)
+- 地震信息（FSSN）：[FSSN WebSocket API](https://fssn-api.fanstudio.tech/#fssn)
 - GlobalQuake 全球预警、JMA-Atom 火山情报：[PancakesAPI](https://wiki.aloys23.link/wiki/PancakesAPI)
 - 日本测站烈度：[NIED 強震モニタ](https://www.lmoni.bosai.go.jp/)
 - 亮色海洋地形瓦片：[sismotide tilemap](https://tilemap.sismotide.top/)

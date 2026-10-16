@@ -165,8 +165,8 @@ impl MainShell {
         ctx: &egui::Context,
         snap: &mut AppSnapshot,
         travel: Option<&TravelEngine>,
-        cfg: &jian_config::AppConfig,
-    ) -> Option<SettingsAction> {
+        cfg: &mut jian_config::AppConfig,
+    ) -> (Option<SettingsAction>, bool) {
         crate::i18n::set_lang_from_config(&cfg.ui.language);
         let ui_theme = UiTheme::from_config(&cfg.ui.theme);
         ui_theme.apply_egui(ctx);
@@ -193,6 +193,7 @@ impl MainShell {
         // 无有效发震时刻时用 map_elapsed 驱动波圈（上游 origin 缺测）
         let sample_elapsed = self.map_elapsed % 120.0;
         let mut map_ui = MapUiResult::default();
+        let mut persist_cfg = false;
 
         // 波圈动画按档位降频，避免 uncapped request_repaint 拉高 CPU
         if show_waves && !wave_owned.is_empty() {
@@ -200,11 +201,16 @@ impl MainShell {
             ctx.request_repaint_after(std::time::Duration::from_millis(ms));
         }
 
-        // SidePanel：小窗优先保地图宽度，侧栏可缩到下限
+        // SidePanel：可拖宽；向右拖窄过阈值即关闭；关闭后右缘拉开
         let screen_w = ctx.screen_rect().width();
         const MAP_MIN_W: f32 = 360.0;
         const SIDE_IDEAL: f32 = 280.0;
         const SIDE_MIN: f32 = 168.0;
+        /// 允许拖到比内容更窄，便于继续向右拖到关闭
+        const SIDE_DRAG_MIN: f32 = 40.0;
+        /// 目标宽度（或指针意图宽度）低于此则关闭
+        const SIDE_CLOSE_W: f32 = 110.0;
+        const SIDE_GRIP: f32 = 12.0;
         let sidebar_w = if screen_w < MAP_MIN_W + SIDE_MIN {
             (screen_w * 0.36).clamp(140.0, SIDE_MIN)
         } else {
@@ -212,27 +218,78 @@ impl MainShell {
             cap.min(screen_w * 0.28).max(SIDE_MIN)
         };
         let mut side_action = None;
+        let show_sidebar = cfg.ui.show_sidebar;
+        let sidebar_id = egui::Id::new("eew_sidebar");
 
-        egui::SidePanel::right("eew_sidebar")
-            .exact_width(sidebar_w)
-            .resizable(false)
-            .frame(Frame::NONE.fill(p.sidebar_bg))
-            .show(ctx, |ui| {
-                side_action = draw_sidebar(
-                    ui,
-                    &p,
-                    snap,
-                    scale.as_str(),
-                    &self.intensity_icons,
-                    cfg.ui.show_volcanoes,
-                    [
-                        cfg.sources.jian.enabled,
-                        cfg.sources.wolfx.enabled,
-                        cfg.sources.p2pquake.enabled,
-                        cfg.sources.pancakes.enabled,
-                    ],
-                );
-            });
+        if show_sidebar {
+            let panel_resp = egui::SidePanel::right(sidebar_id)
+                .default_width(sidebar_w)
+                .min_width(SIDE_DRAG_MIN)
+                .max_width((screen_w - MAP_MIN_W).clamp(SIDE_MIN, SIDE_IDEAL + 80.0))
+                .resizable(true)
+                .frame(Frame::NONE.fill(p.sidebar_bg))
+                .show(ctx, |ui| {
+                    side_action = draw_sidebar(
+                        ui,
+                        &p,
+                        snap,
+                        scale.as_str(),
+                        &self.intensity_icons,
+                        cfg.ui.show_volcanoes,
+                        [
+                            cfg.sources.jian.enabled,
+                            cfg.sources.wolfx.enabled,
+                            cfg.sources.p2pquake.enabled,
+                            cfg.sources.pancakes.enabled,
+                            cfg.sources.fssn.enabled,
+                        ],
+                    );
+                });
+            // 向右拖窄：拖动中指针意图宽度过低，或松手时实际宽度过低 → 关闭
+            let cur_w = panel_resp.response.rect.width();
+            let resize_id = sidebar_id.with("__resize");
+            let mut want_close = false;
+            if let Some(resize_resp) = ctx.read_response(resize_id) {
+                if resize_resp.dragged() || resize_resp.drag_stopped() {
+                    if let Some(pointer) = resize_resp.interact_pointer_pos() {
+                        let intent_w = (ctx.screen_rect().right() - pointer.x).max(0.0);
+                        if intent_w <= SIDE_CLOSE_W {
+                            want_close = true;
+                        }
+                    }
+                    if resize_resp.drag_stopped() && cur_w <= SIDE_CLOSE_W {
+                        want_close = true;
+                    }
+                }
+            }
+            if want_close && !matches!(side_action, Some(SideAction::CloseSidebar)) {
+                side_action = Some(SideAction::CloseSidebar);
+            }
+        } else {
+            egui::SidePanel::right("eew_sidebar_grip")
+                .exact_width(SIDE_GRIP)
+                .resizable(false)
+                .frame(Frame::NONE.fill(p.sidebar_bg))
+                .show(ctx, |ui| {
+                    let (rect, resp) =
+                        ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+                    let painter = ui.painter();
+                    let c = rect.center();
+                    for dy in [-6.0_f32, 0.0, 6.0] {
+                        painter.circle_filled(
+                            egui::pos2(c.x, c.y + dy),
+                            1.6,
+                            p.text_dim,
+                        );
+                    }
+                    let open = resp.clicked()
+                        || (resp.dragged() && resp.drag_delta().x < -1.5);
+                    if open {
+                        side_action = Some(SideAction::OpenSidebar);
+                    }
+                    resp.on_hover_text(crate::i18n::t("打开侧栏"));
+                });
+        }
 
         egui::CentralPanel::default()
             .frame(Frame::NONE.fill(p.map_bg))
@@ -369,6 +426,70 @@ impl MainShell {
                     draw_legend_bar(ui, &p);
                 }
                 draw_countdown_hud(ui, &p, snap, self.show_nied_clock, map_rect);
+
+                // 侧栏关闭时：地图右键菜单（开着侧栏时不挂，避免挡列表）
+                let allow_ctx = !show_sidebar
+                    && !self.settings.open
+                    && self.settings.map_pick.is_none();
+                if allow_ctx {
+                    if let Some(resp) = map_ui.map_response.as_ref() {
+                        let mut jump_local = false;
+                        let mut open_settings = false;
+                        let mut open_about = false;
+                        let mut local_pick = false;
+                        let mut toggle_legend = false;
+                        let has_local = self.local_lon.is_some() && self.local_lat.is_some();
+                        resp.context_menu(|ui| {
+                            if ui.button(crate::i18n::t("设置")).clicked() {
+                                open_settings = true;
+                                ui.close_menu();
+                            }
+                            ui.add_enabled_ui(has_local, |ui| {
+                                if ui.button(crate::i18n::t("跳转所在地")).clicked() {
+                                    jump_local = true;
+                                    ui.close_menu();
+                                }
+                            });
+                            let legend_label = if cfg.ui.show_legend {
+                                crate::i18n::t("隐藏图例")
+                            } else {
+                                crate::i18n::t("显示图例")
+                            };
+                            if ui.button(legend_label).clicked() {
+                                toggle_legend = true;
+                                ui.close_menu();
+                            }
+                            if ui.button(crate::i18n::t("设置所在地")).clicked() {
+                                local_pick = true;
+                                ui.close_menu();
+                            }
+                            if ui.button(crate::i18n::t("关于")).clicked() {
+                                open_about = true;
+                                ui.close_menu();
+                            }
+                        });
+                        if open_settings {
+                            self.settings.open_with(cfg);
+                        }
+                        if open_about {
+                            self.settings.open_about(cfg);
+                        }
+                        if local_pick {
+                            self.settings.begin_local_pick(cfg);
+                        }
+                        if toggle_legend {
+                            cfg.ui.show_legend = !cfg.ui.show_legend;
+                            persist_cfg = true;
+                        }
+                        if jump_local {
+                            if let (Some(lon), Some(lat)) = (self.local_lon, self.local_lat) {
+                                let z = self.home_zoom.clamp(7.5, 11.0);
+                                self.map.fly_to(lon, lat, Some(z), 0.9);
+                                self.map.user_camera_override = true;
+                            }
+                        }
+                    }
+                }
             });
 
         if let Some(act) = side_action {
@@ -376,7 +497,8 @@ impl MainShell {
                 SideAction::List(tab, idx) => {
                     if let Some((lon, lat, zoom)) = snap.select_list_item(tab, idx) {
                         let vp = ctx.screen_rect();
-                        let map_w = (vp.width() - sidebar_w).max(120.0);
+                        let used_side = if show_sidebar { sidebar_w } else { SIDE_GRIP };
+                        let map_w = (vp.width() - used_side).max(120.0);
                         let map_h = vp.height().max(120.0);
                         match tab {
                             SidebarTab::Eew | SidebarTab::Records => {
@@ -449,6 +571,21 @@ impl MainShell {
                 SideAction::Settings => {
                     self.settings.open_with(cfg);
                 }
+                SideAction::CloseSidebar => {
+                    cfg.ui.show_sidebar = false;
+                    persist_cfg = true;
+                    // 清掉过窄宽度，下次打开用 default_width
+                    ctx.data_mut(|d| {
+                        d.remove::<egui::containers::panel::PanelState>(sidebar_id);
+                    });
+                }
+                SideAction::OpenSidebar => {
+                    cfg.ui.show_sidebar = true;
+                    persist_cfg = true;
+                    ctx.data_mut(|d| {
+                        d.remove::<egui::containers::panel::PanelState>(sidebar_id);
+                    });
+                }
             }
         }
 
@@ -472,12 +609,15 @@ impl MainShell {
             wolfx: snap.health_wolfx,
             p2p: snap.health_p2p,
             pancakes: snap.health_pancakes,
+            fssn: snap.health_fssn,
             jian_enabled: cfg.sources.jian.enabled,
             wolfx_enabled: cfg.sources.wolfx.enabled,
             p2p_enabled: cfg.sources.p2pquake.enabled,
             pancakes_enabled: cfg.sources.pancakes.enabled,
+            fssn_enabled: cfg.sources.fssn.enabled,
         };
-        self.settings.ui(ctx, cfg, &health)
+        let settings_action = self.settings.ui(ctx, cfg, &health);
+        (settings_action, persist_cfg)
     }
 
     fn apply_map_pick(&mut self, lon: f64, lat: f64) {
@@ -1143,22 +1283,35 @@ fn draw_typhoon_detail_below_stations(
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         let painter = ui.painter();
+        let light = p.text.r() < 128;
+        let header_stroke = if light {
+            Color32::from_rgb(0x6B, 0x72, 0x80)
+        } else {
+            Color32::from_rgb(0xAA, 0xAA, 0xBB)
+        };
+        let body_stroke = if light {
+            Color32::from_rgb(0xC5, 0xCB, 0xD3)
+        } else {
+            Color32::from_rgb(0x44, 0x48, 0x58)
+        };
         painter.rect_filled(header_rect, 4.0, Color32::from_rgb(r, g, b).gamma_multiply(0.85));
         painter.rect_stroke(
             header_rect,
             4.0,
-            Stroke::new(1.0_f32, Color32::from_rgb(0xAA, 0xAA, 0xBB)),
+            Stroke::new(1.0_f32, header_stroke),
             egui::StrokeKind::Outside,
         );
-        painter.rect_filled(
-            body_rect,
-            4.0,
-            Color32::from_rgba_unmultiplied(0x12, 0x14, 0x1C, 0xF0),
+        let body_fill = Color32::from_rgba_unmultiplied(
+            p.panel_solid.r(),
+            p.panel_solid.g(),
+            p.panel_solid.b(),
+            0xF0,
         );
+        painter.rect_filled(body_rect, 4.0, body_fill);
         painter.rect_stroke(
             body_rect,
             4.0,
-            Stroke::new(1.0_f32, Color32::from_rgb(0x44, 0x48, 0x58)),
+            Stroke::new(1.0_f32, body_stroke),
             egui::StrokeKind::Outside,
         );
         painter.text(
@@ -1679,6 +1832,8 @@ fn outlined_label(ui: &mut Ui, text: &str, color: Color32, size: f32, monospace:
 enum SideAction {
     List(SidebarTab, usize),
     Settings,
+    CloseSidebar,
+    OpenSidebar,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1703,7 +1858,7 @@ fn draw_sidebar(
     scale: &str,
     icons: &IntensityIcons,
     show_volcano_icons: bool,
-    source_enabled: [bool; 4],
+    source_enabled: [bool; 5],
 ) -> Option<SideAction> {
     let mut clicked = None;
     ui.set_min_width(ui.available_width());
@@ -1721,6 +1876,20 @@ fn draw_sidebar(
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add(
+                            egui::Button::new(
+                                RichText::new("\u{00d7}").size(16.0).color(p.text_muted),
+                            )
+                            .fill(Color32::TRANSPARENT)
+                            .corner_radius(6.0)
+                            .min_size(Vec2::new(26.0, 26.0)),
+                        )
+                        .on_hover_text(crate::i18n::t("关闭侧栏"))
+                        .clicked()
+                    {
+                        clicked = Some(SideAction::CloseSidebar);
+                    }
+                    if ui
+                        .add(
                             egui::Button::new(RichText::new(crate::i18n::t("设置")).size(13.0).color(p.text_muted))
                                 .fill(p.tab_idle)
                                 .corner_radius(6.0)
@@ -1734,13 +1903,13 @@ fn draw_sidebar(
             });
 
             ui.add_space(6.0);
-            // 仅色点 + 源名；状态文案放悬停，避免四源挤成一团
             ui.horizontal(|ui| {
                 for (i, (name, st)) in [
                     ("Jian", snap.health_jian),
                     ("Wolfx", snap.health_wolfx),
                     ("P2P", snap.health_p2p),
                     ("Pancakes", snap.health_pancakes),
+                    ("FSSN", snap.health_fssn),
                 ]
                 .into_iter()
                 .enumerate()

@@ -147,6 +147,7 @@ fn run_app() -> Result<()> {
         jian = cfg.sources.jian.enabled,
         wolfx = cfg.sources.wolfx.enabled,
         p2p = cfg.sources.p2pquake.enabled,
+        fssn = cfg.sources.fssn.enabled,
         jian_at = cfg
             .sources
             .jian
@@ -320,12 +321,7 @@ fn run_app() -> Result<()> {
                 cinema_idx: 0,
                 cinema_next_at: Instant::now(),
                 cinema_seen_key: String::new(),
-                prev_health: (
-                    HealthStatus::Abnormal,
-                    HealthStatus::Abnormal,
-                    HealthStatus::Abnormal,
-                    HealthStatus::Abnormal,
-                ),
+                prev_health: [HealthStatus::Abnormal; 5],
                 prev_tsunami_key: String::new(),
                 window_geom_save_at: None,
                 last_window_geom: None,
@@ -512,7 +508,7 @@ struct JianApp {
     cinema_next_at: Instant,
     /// 已见过多震 id 签名，用于发现新震立刻跳转
     cinema_seen_key: String,
-    prev_health: (HealthStatus, HealthStatus, HealthStatus, HealthStatus),
+    prev_health: [HealthStatus; 5],
     prev_tsunami_key: String,
     /// 窗口几何变更后延迟写入用户配置
     window_geom_save_at: Option<Instant>,
@@ -913,12 +909,18 @@ impl eframe::App for JianApp {
             audio.tick_countdown(remain);
         }
 
-        if let Some(action) = self.shell.ui(
+        let (ui_action, persist_cfg) = self.shell.ui(
             ctx,
             &mut self.snap,
             self.travel.as_ref(),
-            &self.cfg,
-        ) {
+            &mut self.cfg,
+        );
+        if persist_cfg {
+            if let Err(e) = self.cfg.save_user_overlay() {
+                tracing::warn!("保存侧栏/图例偏好失败: {e:#}");
+            }
+        }
+        if let Some(action) = ui_action {
             match action {
                 SettingsAction::Saved { cfg, close } => {
                     match self.apply_saved_config(cfg) {
@@ -1015,6 +1017,7 @@ impl eframe::App for JianApp {
             i.pointer.any_down()
                 || i.pointer.button_clicked(egui::PointerButton::Primary)
                 || i.pointer.button_released(egui::PointerButton::Primary)
+                || i.pointer.button_clicked(egui::PointerButton::Secondary)
                 || i.smooth_scroll_delta.length_sq() > 0.0
         });
         let now_ms = chrono::Utc::now().timestamp_millis();
@@ -1128,12 +1131,13 @@ impl JianApp {
     }
 
     fn tick_health_audio(&mut self) {
-        let cur = (
+        let cur = [
             self.snap.health_jian,
             self.snap.health_wolfx,
             self.snap.health_p2p,
             self.snap.health_pancakes,
-        );
+            self.snap.health_fssn,
+        ];
         let prev = self.prev_health;
         if prev == cur {
             return;
@@ -1143,18 +1147,8 @@ impl JianApp {
             self.prev_health = cur;
             return;
         }
-        let any_ok = |h: (HealthStatus, HealthStatus, HealthStatus, HealthStatus)| {
-            matches!(h.0, HealthStatus::Normal)
-                || matches!(h.1, HealthStatus::Normal)
-                || matches!(h.2, HealthStatus::Normal)
-                || matches!(h.3, HealthStatus::Normal)
-        };
-        let all_bad = |h: (HealthStatus, HealthStatus, HealthStatus, HealthStatus)| {
-            matches!(h.0, HealthStatus::Abnormal)
-                && matches!(h.1, HealthStatus::Abnormal)
-                && matches!(h.2, HealthStatus::Abnormal)
-                && matches!(h.3, HealthStatus::Abnormal)
-        };
+        let any_ok = |h: [HealthStatus; 5]| h.iter().any(|s| matches!(s, HealthStatus::Normal));
+        let all_bad = |h: [HealthStatus; 5]| h.iter().all(|s| matches!(s, HealthStatus::Abnormal));
         if let Some(audio) = self.audio.as_mut() {
             if !any_ok(prev) && any_ok(cur) {
                 audio.play(AudioCue::UiConnectOk);

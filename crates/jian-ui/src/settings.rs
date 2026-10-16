@@ -199,10 +199,12 @@ pub struct SourceHealthView {
     pub wolfx: HealthStatus,
     pub p2p: HealthStatus,
     pub pancakes: HealthStatus,
+    pub fssn: HealthStatus,
     pub jian_enabled: bool,
     pub wolfx_enabled: bool,
     pub p2p_enabled: bool,
     pub pancakes_enabled: bool,
+    pub fssn_enabled: bool,
 }
 
 pub struct SettingsSession {
@@ -262,6 +264,19 @@ impl SettingsSession {
         self.opened_at = Some(std::time::Instant::now());
         self.open_gen = self.open_gen.wrapping_add(1);
         self.perf_diag = None;
+    }
+
+    /// 打开设置并切到关于页。
+    pub fn open_about(&mut self, cfg: &AppConfig) {
+        self.open_with(cfg);
+        self.tab = SettingsTab::About;
+    }
+
+    /// 进入本机位置地图选点（选点期间不挡地图；选完回到设置草稿）。
+    pub fn begin_local_pick(&mut self, cfg: &AppConfig) {
+        self.open_with(cfg);
+        self.tab = SettingsTab::General;
+        self.map_pick = Some(MapPickKind::LocalLocation);
     }
 
     pub fn set_save_note(&mut self, note: impl Into<String>) {
@@ -1071,6 +1086,8 @@ fn draw_sources(
         status_row(ui, "P2PQuake", health.p2p, health.p2p_enabled);
         row_divider(ui);
         status_row(ui, "PancakesAPI", health.pancakes, health.pancakes_enabled);
+        row_divider(ui);
+        status_row(ui, "FSSN", health.fssn, health.fssn_enabled);
     });
 
     section(ui, "Jian Project", "\u{25ce}", |ui| {
@@ -1182,6 +1199,12 @@ fn draw_sources(
         row_divider(ui);
         control_row(ui, "JMA 速报", "jma_eqlist", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.sources.wolfx.jma_eqlist);
+        });
+    });
+
+    section(ui, "FSSN", "\u{25ce}", |ui| {
+        control_row(ui, "启用 FSSN", "Fan Studio 地震信息", "\u{26a1}", |ui| {
+            toggle(ui, &mut draft.sources.fssn.enabled);
         });
     });
 
@@ -1603,6 +1626,10 @@ fn draw_general(
     });
 
     section(ui, "界面偏好", "\u{2630}", |ui| {
+        control_row(ui, "显示侧栏", "右侧列表；可向右拖关闭，关闭后右缘拉开或地图右键", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.ui.show_sidebar);
+        });
+        row_divider(ui);
         control_row(ui, "东京时间", "主界面额外显示东京时间", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_nied_clock);
         });
@@ -2008,7 +2035,7 @@ fn draw_about(ui: &mut Ui) {
         );
         ui.label(
             RichText::new(t(
-                "\u{00b7} Jian Project API（预警 / 速报 / 测站中转）\n\u{00b7} PancakesAPI（GQ + JMA-Atom）\n\u{00b7} Wolfx（all_eew 预警与速报）\n\u{00b7} P2PQuake（气象厅地震情报）\n\u{00b7} 台风路径（sismotide /get/typhoon）\n\u{00b7} NIED kmoni / lmoni 测站（可选）",
+                "\u{00b7} Jian Project API（预警 / 速报 / 测站中转）\n\u{00b7} PancakesAPI（GQ + JMA-Atom）\n\u{00b7} Wolfx（all_eew 预警与速报）\n\u{00b7} P2PQuake（气象厅地震情报）\n\u{00b7} FSSN（Fan Studio 地震信息）\n\u{00b7} 台风路径（sismotide /get/typhoon）\n\u{00b7} NIED kmoni / lmoni 测站（可选）",
             ))
             .size(12.0)
             .color(chrome().muted),

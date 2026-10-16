@@ -53,6 +53,7 @@ pub const RECORD_FILTER_FAMILIES: &[AgencyFamily] = &[
     AgencyFamily::Ga,
     AgencyFamily::Igepn,
     AgencyFamily::Peru,
+    AgencyFamily::Fssn,
     AgencyFamily::Other,
 ];
 
@@ -111,6 +112,7 @@ pub fn agency_bracket(agency: &str) -> String {
         AgencyFamily::Ga => "GA".into(),
         AgencyFamily::Igepn => "IGEPN".into(),
         AgencyFamily::Peru => "IGP".into(),
+        AgencyFamily::Fssn => "FSSN".into(),
         AgencyFamily::Other => "其他".into(),
     }
 }
@@ -187,6 +189,8 @@ pub enum AgencyFamily {
     Ga,
     Igepn,
     Peru,
+    /// Fan Studio Seismic Network 地震信息
+    Fssn,
     Other,
 }
 
@@ -236,6 +240,7 @@ impl AgencyFamily {
             Self::Ga => "ga",
             Self::Igepn => "igepn",
             Self::Peru => "peru",
+            Self::Fssn => "fssn",
             Self::Other => "other",
         }
     }
@@ -286,6 +291,7 @@ impl AgencyFamily {
             Self::Ga => "GA",
             Self::Igepn => "IGEPN",
             Self::Peru => "IGP",
+            Self::Fssn => "FSSN",
             Self::Other => "其他",
         }
     }
@@ -335,6 +341,7 @@ impl AgencyFamily {
             Self::Ga => "澳大利亚地质局",
             Self::Igepn => "厄瓜多尔地球物理研究所",
             Self::Peru => "秘鲁地球物理研究所",
+            Self::Fssn => "Fan Studio 地震信息 (FSSN)",
             Self::Other => "未适配机构",
         }
     }
@@ -496,6 +503,9 @@ pub fn agency_family(agency: &str) -> AgencyFamily {
     }
     if a == "peru" || a.contains("igp") {
         return AgencyFamily::Peru;
+    }
+    if a.contains("fssn") {
+        return AgencyFamily::Fssn;
     }
     AgencyFamily::Other
 }

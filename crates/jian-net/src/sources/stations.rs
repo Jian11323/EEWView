@@ -225,6 +225,12 @@ fn spawn_snet_original(
                             emit_health(&tx, "snet", jian_core::HealthStatus::Fluctuating);
                         }
                     }
+                } else {
+                    // 原版无秒级对时帧：validTime 未变也刷时钟，避免卡片 90s 误报断开
+                    let _ = tx.send(NetEvent::StationClock {
+                        network: "snet",
+                        ts_ms: None,
+                    });
                 }
             } else {
                 fail_streak = fail_streak.saturating_add(1);

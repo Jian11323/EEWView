@@ -15,6 +15,8 @@ theme = "dark"
 language = "zh-CN"
 show_nied_clock = false
 sidebar_default_tab = "eew"
+# 右侧情报列表；关闭后可从右缘拉开或地图右键菜单操作
+show_sidebar = true
 intensity_scale = "auto"
 always_on_top = false
 auto_follow_eew = true
@@ -118,6 +120,10 @@ cwa_eew = false
 cenc_eqlist = true
 jma_eqlist = true
 
+[sources.fssn]
+enabled = true
+ws_url = "wss://fssn-api.fanstudio.tech/fssn"
+
 [sources.p2pquake]
 enabled = true
 # HTTP 轮询间隔（秒）；最低 1，默认 1.5
@@ -140,6 +146,7 @@ other = false
 
 [filters.record_mag]
 cenc = 0.0
+fssn = 0.0
 usgs = 0.0
 cwa = 0.0
 jma = 0.0

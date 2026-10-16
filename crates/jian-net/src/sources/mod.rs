@@ -1,3 +1,4 @@
+pub mod fssn;
 pub mod jian;
 pub mod p2pquake;
 pub mod pancakes;

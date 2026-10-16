@@ -50,10 +50,22 @@ impl PaintQuality {
 }
 
 /// 地图一帧交互结果。
-#[derive(Debug, Default, Clone)]
+#[derive(Clone)]
 pub struct MapUiResult {
     pub click: Option<(f64, f64)>,
     pub typhoon_hover: Option<TyphoonHoverHit>,
+    /// 地图命中区响应（侧栏关闭时挂右键菜单）
+    pub map_response: Option<egui::Response>,
+}
+
+impl Default for MapUiResult {
+    fn default() -> Self {
+        Self {
+            click: None,
+            typhoon_hover: None,
+            map_response: None,
+        }
+    }
 }
 
 use egui::{Color32, Sense, Stroke, Ui};
@@ -679,6 +691,7 @@ impl MapViewport {
         MapUiResult {
             click,
             typhoon_hover,
+            map_response: Some(resp),
         }
     }
 }
