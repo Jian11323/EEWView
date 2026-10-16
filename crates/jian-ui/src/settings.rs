@@ -1738,7 +1738,7 @@ fn draw_general(
             },
         );
         row_divider(ui);
-        control_row(ui, "性能诊断", "按 CPU/内存/主屏刷新率推荐配置", "\u{25ce}", |ui| {
+        control_row(ui, "性能诊断", "按 CPU/GPU 天梯、内存与主屏刷新率推荐配置", "\u{25ce}", |ui| {
             if glass_btn(ui, "开始诊断", true).clicked() {
                 let d = jian_util::perf::diagnose();
                 draft.performance.device = d.device;

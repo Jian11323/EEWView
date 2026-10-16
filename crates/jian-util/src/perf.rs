@@ -1,6 +1,7 @@
-//! 性能诊断：根据 CPU / 内存 / 显示器刷新率粗分档，给出渲染与性能模式建议。
+//! 性能诊断：按 CPU / GPU 天梯、内存档和显示器刷新率给出渲染建议。
 //! 天梯分数为经验启发式，非精确跑分。
 
+use crate::ladder::{classify_cpu, classify_gpu, primary_gpu_name};
 use jian_config::recommend_target_fps;
 
 /// 诊断结果与推荐配置。
@@ -10,6 +11,12 @@ pub struct PerfDiagnosis {
     pub ram_gb: f64,
     /// 主屏当前刷新率（Hz）；读取失败则为 `None`
     pub display_hz: Option<u32>,
+    /// 识别到的显卡名；读不到则为空
+    pub gpu_name: String,
+    /// CPU 天梯说明
+    pub cpu_tier: String,
+    /// GPU 天梯说明
+    pub gpu_tier: String,
     pub gpu_hint: String,
     /// `cpu` | `gpu`。诊断一律建议 `gpu`（OpenGL）；软渲染只在画面无法创建时由用户手选。
     pub device: String,
@@ -20,7 +27,7 @@ pub struct PerfDiagnosis {
     pub summary: String,
 }
 
-/// 采集本机信息并给出建议（无 GPU 枚举时用 CPU/内存启发式）。
+/// 采集本机 CPU、显卡、内存与刷新率，对照天梯后给出建议。
 pub fn diagnose() -> PerfDiagnosis {
     let mut sys = sysinfo::System::new();
     sys.refresh_cpu_all();
@@ -32,43 +39,55 @@ pub fn diagnose() -> PerfDiagnosis {
         .map(|c| c.brand().trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "未知 CPU".into());
+    let gpu_name = primary_gpu_name().unwrap_or_default();
+    let cpu_hit = classify_cpu(&cpu_name);
+    let gpu_hit = if gpu_name.is_empty() {
+        classify_gpu("unknown")
+    } else {
+        classify_gpu(&gpu_name)
+    };
     let ram_gb = sys.total_memory() as f64 / (1024.0 * 1024.0 * 1024.0);
-    let cpu_score = score_cpu(&cpu_name);
+    let cpu_score = cpu_hit.score;
+    let gpu_score = if gpu_name.is_empty() {
+        cpu_score * 0.85
+    } else {
+        gpu_hit.score
+    };
     let ram_score = score_ram(ram_gb);
-    let total = cpu_score + ram_score;
     let display_hz = primary_display_hz();
 
     let ram_tier = MemoryTier::from_ram_gb(ram_gb);
     let slots = tile_cache_slots(ram_gb, false);
-    // 机器预算：能扛住的上限档；最终再与显示器刷新率取交并对齐档位。一律 OpenGL。
+    // 综合分：CPU 为主，核显/独显把帧率预算拉下来。2G/4G 内存强制节能。
+    let headroom = cpu_score * 0.62 + gpu_score * 0.38;
     let (device, profile, machine_budget, gpu_hint) =
-        if total < 35.0 || matches!(ram_tier, MemoryTier::G2 | MemoryTier::G4) {
+        if matches!(ram_tier, MemoryTier::G2 | MemoryTier::G4) || headroom < 32.0 {
             (
                 "gpu",
                 "eco",
                 30_u32,
                 format!(
-                    "内存档 {}：OpenGL + 节能，避免软渲染占满 CPU。空闲约 1.5 秒一帧，瓦片缓存 {slots} 张（约 {}）。画面无法显示时再改 CPU 模式。",
+                    "内存档 {}：OpenGL + 节能。空闲约 1.5 秒一帧，瓦片缓存 {slots} 张（约 {}）。画面无法显示时再改 CPU 模式。",
                     ram_tier.label(),
                     ram_tier.tile_budget_hint(),
                 ),
             )
-        } else if total < 70.0 || ram_tier == MemoryTier::G8 {
+        } else if headroom < 52.0 {
+            (
+                "gpu",
+                "normal",
+                60,
+                format!(
+                    "内存档 {}：OpenGL，正常模式，目标约 60 帧。空闲约 1 秒一帧，瓦片缓存 {slots} 张（约 {}）。",
+                    ram_tier.label(),
+                    ram_tier.tile_budget_hint(),
+                ),
+            )
+        } else if headroom < 75.0 {
             (
                 "gpu",
                 "normal",
                 90,
-                format!(
-                    "内存档 {}：OpenGL，正常模式。空闲约 1 秒一帧，瓦片缓存 {slots} 张（约 {}）。",
-                    ram_tier.label(),
-                    ram_tier.tile_budget_hint(),
-                ),
-            )
-        } else if total < 110.0 || ram_tier == MemoryTier::G16 {
-            (
-                "gpu",
-                "normal",
-                165,
                 format!(
                     "内存档 {}：OpenGL，正常模式（有余量可试极致）。瓦片缓存 {slots} 张（约 {}）。",
                     ram_tier.label(),
@@ -79,7 +98,7 @@ pub fn diagnose() -> PerfDiagnosis {
             (
                 "gpu",
                 "extreme",
-                300,
+                165,
                 format!(
                     "内存档 {}：OpenGL，极致模式（帧率跟主屏刷新率）。瓦片缓存 {slots} 张（约 {}）。",
                     ram_tier.label(),
@@ -94,8 +113,15 @@ pub fn diagnose() -> PerfDiagnosis {
         None => "主屏刷新率：未检测到（按 60 Hz 封顶）".into(),
     };
 
+    let gpu_line = if gpu_name.is_empty() {
+        "GPU：未检测到（按 CPU 档估算）".to_string()
+    } else {
+        format!("GPU：{gpu_name}")
+    };
     let summary = format!(
-        "CPU：{cpu_name}\n内存：{ram_gb:.1} GB → 档位 {}\n估分 CPU {cpu_score:.0} / 内存 {ram_score:.0}\n{hz_text}\n{gpu_hint}\n建议：OpenGL，档位={profile}，帧率={target_fps}，瓦片缓存={slots} 张\n（切换渲染设备需重启；性能档位与帧率立即生效）",
+        "CPU：{cpu_name}\nCPU 天梯：{}（{cpu_score:.0}）\n{gpu_line}\nGPU 天梯：{}（{gpu_score:.0}）\n内存：{ram_gb:.1} GB → 档位 {}（估分 {ram_score:.0}）\n{hz_text}\n{gpu_hint}\n建议：OpenGL，档位={profile}，帧率={target_fps}，瓦片缓存={slots} 张\n（切换渲染设备需重启；性能档位与帧率立即生效）",
+        cpu_hit.label,
+        gpu_hit.label,
         ram_tier.label(),
     );
 
@@ -103,6 +129,9 @@ pub fn diagnose() -> PerfDiagnosis {
         cpu_name,
         ram_gb,
         display_hz,
+        gpu_name,
+        cpu_tier: cpu_hit.label,
+        gpu_tier: gpu_hit.label,
         gpu_hint,
         device: device.into(),
         profile: profile.into(),
@@ -207,51 +236,6 @@ fn score_ram(gb: f64) -> f64 {
         MemoryTier::G16 => 45.0,
         MemoryTier::Gt16 => 55.0,
     }
-}
-
-fn score_cpu(name: &str) -> f64 {
-    let n = name.to_ascii_lowercase();
-    // 粗略天梯：旗舰 > 主流 > 低端；含 Apple / AMD / Intel 常见关键词
-    let mut s = 40.0;
-    if n.contains("i9") || n.contains("ryzen 9") || n.contains("m3 max") || n.contains("m2 max") {
-        s = 95.0;
-    } else if n.contains("i7")
-        || n.contains("ryzen 7")
-        || n.contains("m3 pro")
-        || n.contains("m2 pro")
-    {
-        s = 80.0;
-    } else if n.contains("i5")
-        || n.contains("ryzen 5")
-        || n.contains("m3")
-        || n.contains("m2")
-        || n.contains("m1")
-    {
-        s = 60.0;
-    } else if n.contains("i3")
-        || n.contains("ryzen 3")
-        || n.contains("pentium")
-        || n.contains("celeron")
-        || n.contains("athlon")
-    {
-        s = 25.0;
-    }
-    // 代数加成（很粗）
-    for (k, bonus) in [
-        ("14th", 8.0),
-        ("13th", 6.0),
-        ("12th", 4.0),
-        ("11th", 2.0),
-        ("9000", 8.0),
-        ("7000", 5.0),
-        ("5000", 2.0),
-    ] {
-        if n.contains(k) {
-            s += bonus;
-            break;
-        }
-    }
-    s
 }
 
 /// 读取主显示器当前刷新率（Hz）。

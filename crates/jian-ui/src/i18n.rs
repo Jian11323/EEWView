@@ -478,9 +478,9 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "打开目录"), "開啟目錄");
         m.insert((Lang::Ja, "打开目录"), "フォルダを開く");
         m.insert((Lang::En, "打开目录"), "Open folder");
-        m.insert((Lang::ZhTw, "按 CPU/内存/主屏刷新率推荐配置"), "按 CPU/記憶體/主螢幕刷新率推薦設定");
-        m.insert((Lang::Ja, "按 CPU/内存/主屏刷新率推荐配置"), "CPU/メモリ/ディスプレイ周波数から推奨");
-        m.insert((Lang::En, "按 CPU/内存/主屏刷新率推荐配置"), "Suggest settings from CPU/RAM/display refresh");
+        m.insert((Lang::ZhTw, "按 CPU/GPU 天梯、内存与主屏刷新率推荐配置"), "按 CPU/GPU 天梯、記憶體與主螢幕刷新率推薦設定");
+        m.insert((Lang::Ja, "按 CPU/GPU 天梯、内存与主屏刷新率推荐配置"), "CPU/GPU の階級・メモリ・リフレッシュレートから推奨");
+        m.insert((Lang::En, "按 CPU/GPU 天梯、内存与主屏刷新率推荐配置"), "Suggest settings from CPU/GPU tier, RAM, and refresh rate");
         m.insert((Lang::ZhTw, "按文件修改时间清理旧日志；0=不清理"), "按檔案修改時間清理舊日誌；0=不清理");
         m.insert((Lang::Ja, "按文件修改时间清理旧日志；0=不清理"), "更新日時で古いログを削除。0=しない");
         m.insert((Lang::En, "按文件修改时间清理旧日志；0=不清理"), "Prune by mtime; 0=never");

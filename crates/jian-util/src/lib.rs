@@ -1,6 +1,7 @@
 //! 公共小工具：地理距离、角度换算、性能诊断、日志脱敏等。
 
 pub mod log_sanitize;
+mod ladder;
 pub mod perf;
 
 pub use log_sanitize::{redact_secrets, redact_url};
