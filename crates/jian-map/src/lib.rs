@@ -174,7 +174,7 @@ impl MapViewport {
         self.cache.clear();
     }
 
-    /// 按本机内存调整瓦片张数上限（软渲染或小内存保持 256）。
+    /// 按本机内存五档调整瓦片张数上限（2G…大于16G → 64…800）。
     pub fn set_tile_capacity(&mut self, slots: usize) {
         self.cache.set_capacity(slots);
     }

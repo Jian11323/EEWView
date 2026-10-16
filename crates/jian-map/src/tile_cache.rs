@@ -66,7 +66,7 @@ impl TileCache {
         self.clear();
     }
 
-    /// 瓦片张数上限。内存宽裕时可到 800（约 200MB），否则保持 256。
+    /// 瓦片张数上限（内存五档：64…800）。
     pub fn set_capacity(&mut self, slots: usize) {
         self.max_cached = slots.clamp(64, MAX_CACHED_CAP);
         self.evict_overflow();

@@ -38,39 +38,55 @@ pub fn diagnose() -> PerfDiagnosis {
     let total = cpu_score + ram_score;
     let display_hz = primary_display_hz();
 
+    let ram_tier = MemoryTier::from_ram_gb(ram_gb);
     let slots = tile_cache_slots(ram_gb, false);
     // 机器预算：能扛住的上限档；最终再与显示器刷新率取交并对齐档位。一律 OpenGL。
-    let (device, profile, machine_budget, gpu_hint) = if total < 35.0 || ram_gb < 6.0 {
-        (
-            "gpu",
-            "eco",
-            30_u32,
-            format!(
-                "内存或处理器偏紧：OpenGL 硬件加速 + 节能，避免软渲染占满 CPU。空闲约 1.5 秒一帧，瓦片缓存 {slots} 张。画面无法显示时再改 CPU 模式。"
-            ),
-        )
-    } else if total < 70.0 {
-        (
-            "gpu",
-            "normal",
-            90,
-            format!("中端机：OpenGL，正常模式。空闲约 1 秒一帧，瓦片缓存 {slots} 张。"),
-        )
-    } else if total < 110.0 {
-        (
-            "gpu",
-            "normal",
-            165,
-            format!("中高端：OpenGL，正常模式（有余量可试极致）。瓦片缓存 {slots} 张。"),
-        )
-    } else {
-        (
-            "gpu",
-            "extreme",
-            300,
-            format!("高端：OpenGL，极致模式（帧率跟主屏刷新率）。瓦片缓存 {slots} 张。"),
-        )
-    };
+    let (device, profile, machine_budget, gpu_hint) =
+        if total < 35.0 || matches!(ram_tier, MemoryTier::G2 | MemoryTier::G4) {
+            (
+                "gpu",
+                "eco",
+                30_u32,
+                format!(
+                    "内存档 {}：OpenGL + 节能，避免软渲染占满 CPU。空闲约 1.5 秒一帧，瓦片缓存 {slots} 张（约 {}）。画面无法显示时再改 CPU 模式。",
+                    ram_tier.label(),
+                    ram_tier.tile_budget_hint(),
+                ),
+            )
+        } else if total < 70.0 || ram_tier == MemoryTier::G8 {
+            (
+                "gpu",
+                "normal",
+                90,
+                format!(
+                    "内存档 {}：OpenGL，正常模式。空闲约 1 秒一帧，瓦片缓存 {slots} 张（约 {}）。",
+                    ram_tier.label(),
+                    ram_tier.tile_budget_hint(),
+                ),
+            )
+        } else if total < 110.0 || ram_tier == MemoryTier::G16 {
+            (
+                "gpu",
+                "normal",
+                165,
+                format!(
+                    "内存档 {}：OpenGL，正常模式（有余量可试极致）。瓦片缓存 {slots} 张（约 {}）。",
+                    ram_tier.label(),
+                    ram_tier.tile_budget_hint(),
+                ),
+            )
+        } else {
+            (
+                "gpu",
+                "extreme",
+                300,
+                format!(
+                    "内存档 {}：OpenGL，极致模式（帧率跟主屏刷新率）。瓦片缓存 {slots} 张（约 {}）。",
+                    ram_tier.label(),
+                    ram_tier.tile_budget_hint(),
+                ),
+            )
+        };
 
     let target_fps = recommend_target_fps(machine_budget, display_hz);
     let hz_text = match display_hz {
@@ -79,7 +95,8 @@ pub fn diagnose() -> PerfDiagnosis {
     };
 
     let summary = format!(
-        "CPU：{cpu_name}\n内存：{ram_gb:.1} GB（估分 CPU {cpu_score:.0} / 内存 {ram_score:.0}）\n{hz_text}\n{gpu_hint}\n建议：OpenGL，档位={profile}，帧率={target_fps}，瓦片缓存={slots} 张\n（切换渲染设备需重启；性能档位与帧率立即生效）"
+        "CPU：{cpu_name}\n内存：{ram_gb:.1} GB → 档位 {}\n估分 CPU {cpu_score:.0} / 内存 {ram_score:.0}\n{hz_text}\n{gpu_hint}\n建议：OpenGL，档位={profile}，帧率={target_fps}，瓦片缓存={slots} 张\n（切换渲染设备需重启；性能档位与帧率立即生效）",
+        ram_tier.label(),
     );
 
     PerfDiagnosis {
@@ -94,13 +111,84 @@ pub fn diagnose() -> PerfDiagnosis {
     }
 }
 
-/// 瓦片张数。软渲染或内存不足 16GB 时 256 张（约 64MB）；否则 800 张（约 200MB）。
-pub fn tile_cache_slots(ram_gb: f64, software_raster: bool) -> usize {
-    if software_raster || ram_gb < 16.0 {
-        256
-    } else {
-        800
+/// 本机内存档：2G / 4G / 8G / 16G / 大于 16G。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryTier {
+    /// 约 2GB 及以下
+    G2,
+    /// 约 4GB
+    G4,
+    /// 约 8GB
+    G8,
+    /// 约 16GB
+    G16,
+    /// 大于 16GB
+    Gt16,
+}
+
+impl MemoryTier {
+    /// 按物理内存归档（边界留余量，避免 7.7GB 被判成 4G）。
+    pub fn from_ram_gb(ram_gb: f64) -> Self {
+        if ram_gb < 3.0 {
+            Self::G2
+        } else if ram_gb < 6.0 {
+            Self::G4
+        } else if ram_gb < 12.0 {
+            Self::G8
+        } else if ram_gb < 24.0 {
+            Self::G16
+        } else {
+            Self::Gt16
+        }
     }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::G2 => "2G",
+            Self::G4 => "4G",
+            Self::G8 => "8G",
+            Self::G16 => "16G",
+            Self::Gt16 => "大于16G",
+        }
+    }
+
+    /// 瓦片张数上限（约 0.25MB/张 RGBA）。
+    pub fn tile_slots(self) -> usize {
+        match self {
+            Self::G2 => 64,   // ~16MB
+            Self::G4 => 128,  // ~32MB
+            Self::G8 => 256,  // ~64MB
+            Self::G16 => 512, // ~128MB
+            Self::Gt16 => 800, // ~200MB
+        }
+    }
+
+    pub fn tile_budget_hint(self) -> &'static str {
+        match self {
+            Self::G2 => "16MB",
+            Self::G4 => "32MB",
+            Self::G8 => "64MB",
+            Self::G16 => "128MB",
+            Self::Gt16 => "200MB",
+        }
+    }
+}
+
+/// 瓦片张数：按内存五档；软渲染再压一档（最低 2G）。
+pub fn tile_cache_slots(ram_gb: f64, software_raster: bool) -> usize {
+    let tier = MemoryTier::from_ram_gb(ram_gb);
+    let slots = if software_raster {
+        match tier {
+            MemoryTier::G2 => MemoryTier::G2.tile_slots(),
+            MemoryTier::G4 => MemoryTier::G2.tile_slots(),
+            MemoryTier::G8 => MemoryTier::G4.tile_slots(),
+            MemoryTier::G16 => MemoryTier::G8.tile_slots(),
+            MemoryTier::Gt16 => MemoryTier::G16.tile_slots(),
+        }
+    } else {
+        tier.tile_slots()
+    };
+    slots
 }
 
 /// 读取本机内存后给出瓦片张数上限。
@@ -112,16 +200,12 @@ pub fn recommended_tile_slots(software_raster: bool) -> usize {
 }
 
 fn score_ram(gb: f64) -> f64 {
-    if gb < 4.0 {
-        5.0
-    } else if gb < 8.0 {
-        15.0
-    } else if gb < 16.0 {
-        30.0
-    } else if gb < 32.0 {
-        45.0
-    } else {
-        55.0
+    match MemoryTier::from_ram_gb(gb) {
+        MemoryTier::G2 => 5.0,
+        MemoryTier::G4 => 15.0,
+        MemoryTier::G8 => 30.0,
+        MemoryTier::G16 => 45.0,
+        MemoryTier::Gt16 => 55.0,
     }
 }
 
@@ -279,9 +363,21 @@ mod tests {
     }
 
     #[test]
-    fn tile_slots_follow_ram_and_software_raster() {
+    fn memory_tiers_and_tile_slots() {
+        use super::MemoryTier;
+        assert_eq!(MemoryTier::from_ram_gb(1.8), MemoryTier::G2);
+        assert_eq!(MemoryTier::from_ram_gb(3.9), MemoryTier::G4);
+        assert_eq!(MemoryTier::from_ram_gb(7.5), MemoryTier::G8);
+        assert_eq!(MemoryTier::from_ram_gb(15.5), MemoryTier::G16);
+        assert_eq!(MemoryTier::from_ram_gb(32.0), MemoryTier::Gt16);
+        assert_eq!(super::tile_cache_slots(2.0, false), 64);
+        assert_eq!(super::tile_cache_slots(4.0, false), 128);
         assert_eq!(super::tile_cache_slots(8.0, false), 256);
+        assert_eq!(super::tile_cache_slots(16.0, false), 512);
         assert_eq!(super::tile_cache_slots(32.0, false), 800);
-        assert_eq!(super::tile_cache_slots(32.0, true), 256);
+        // 软渲染压一档
+        assert_eq!(super::tile_cache_slots(32.0, true), 512);
+        assert_eq!(super::tile_cache_slots(8.0, true), 128);
+        assert_eq!(super::tile_cache_slots(2.0, true), 64);
     }
 }
