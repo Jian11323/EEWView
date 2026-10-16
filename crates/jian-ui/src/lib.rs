@@ -1390,7 +1390,7 @@ struct StationCardLayout {
 /// 点击卡片返回台网 key，供跳转到该网最大测站。
 fn draw_realtime_intensity_card(
     ui: &mut Ui,
-    _p: &ThemePalette,
+    p: &ThemePalette,
     snap: &AppSnapshot,
 ) -> StationCardLayout {
     let top_y = ui.max_rect().right_top().y + OVERLAY_TOP_Y;
@@ -1457,13 +1457,19 @@ fn draw_realtime_intensity_card(
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             for (k, label, val, is_kma, ts) in &cards {
+                let light = p.text.r() < 128;
+                let dash = if light {
+                    p.text_dim
+                } else {
+                    Color32::from_rgb(0x66, 0x66, 0x66)
+                };
                 let (value, value_color) = if *is_kma {
                     if *val >= 1.0 {
                         let lv = (*val).round().clamp(1.0, 12.0) as u8;
                         let rgb = jian_core::palette::cn_intensity_rgb(lv);
                         (format!("{lv}"), Color32::from_rgb(rgb.r, rgb.g, rgb.b))
                     } else {
-                        ("-".into(), Color32::from_rgb(0x66, 0x66, 0x66))
+                        ("-".into(), dash)
                     }
                 } else if *val >= -3.0 {
                     let rgb = jian_core::instrumental_rgb(*val);
@@ -1472,7 +1478,7 @@ fn draw_realtime_intensity_card(
                         Color32::from_rgb(rgb.r, rgb.g, rgb.b),
                     )
                 } else {
-                    ("-".into(), Color32::from_rgb(0x66, 0x66, 0x66))
+                    ("-".into(), dash)
                 };
                 let time_text = if *ts > 0 {
                     format_clock_hms(*ts)
@@ -1482,10 +1488,26 @@ fn draw_realtime_intensity_card(
                 let stale = if *k == "snet" { 90_000_i64 } else { STALE_MS };
                 let connected = *ts > 0 && (now_ms - *ts).abs() <= stale;
                 let time_color = if connected {
-                    Color32::WHITE
+                    if light { p.text_muted } else { Color32::WHITE }
                 } else {
-                    Color32::from_rgb(0xFF, 0x44, 0x44)
+                    p.danger
                 };
+                let card_fill = if light {
+                    p.panel_solid
+                } else {
+                    Color32::from_rgb(0x1A, 0x1A, 0x1A)
+                };
+                let head_fill = if light {
+                    p.tab_idle
+                } else {
+                    Color32::from_rgb(0x2D, 0x2D, 0x2D)
+                };
+                let stroke_c = if light {
+                    Color32::from_rgb(0xC5, 0xCB, 0xD3)
+                } else {
+                    Color32::from_rgb(0x40, 0x40, 0x40)
+                };
+                let title_color = if light { p.text } else { Color32::WHITE };
 
                 let (r, resp) =
                     ui.allocate_exact_size(Vec2::new(CARD_W, CARD_H), Sense::click());
@@ -1496,26 +1518,35 @@ fn draw_realtime_intensity_card(
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
                 let painter = ui.painter();
-                painter.rect_filled(r, 6.0, Color32::from_rgb(0x1A, 0x1A, 0x1A));
+                painter.rect_filled(r, 6.0, card_fill);
                 let head = egui::Rect::from_min_size(r.min, Vec2::new(r.width(), 20.0));
-                painter.rect_filled(head, 0.0, Color32::from_rgb(0x2D, 0x2D, 0x2D));
+                painter.rect_filled(
+                    head,
+                    egui::CornerRadius {
+                        nw: 6,
+                        ne: 6,
+                        sw: 0,
+                        se: 0,
+                    },
+                    head_fill,
+                );
                 painter.rect_stroke(
                     r,
                     6.0,
-                    Stroke::new(1.0_f32, Color32::from_rgb(0x40, 0x40, 0x40)),
+                    Stroke::new(1.0_f32, stroke_c),
                     egui::StrokeKind::Inside,
                 );
                 painter.hline(
                     r.x_range(),
                     head.bottom(),
-                    Stroke::new(1.0_f32, Color32::from_rgb(0x40, 0x40, 0x40)),
+                    Stroke::new(1.0_f32, stroke_c),
                 );
                 painter.text(
                     head.center(),
                     egui::Align2::CENTER_CENTER,
                     *label,
                     FontId::proportional(12.0),
-                    Color32::WHITE,
+                    title_color,
                 );
                 let body = egui::Rect::from_min_max(
                     egui::pos2(r.left(), head.bottom()),
