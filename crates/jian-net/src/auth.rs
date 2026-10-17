@@ -10,8 +10,10 @@ const UA: &str = "EEWView/0.1";
 #[derive(Debug, Clone)]
 pub struct TokenOk {
     pub token: String,
-    /// 过期时刻（unix 秒）；未知则为 0
+    /// 本响应令牌过期时刻（unix 秒）；未知则为 0
     pub expire_at: f64,
+    /// 所用/签发的长期 Token（rt_）过期时刻（unix 秒）；未知则为 0
+    pub refresh_expire_at: f64,
     pub message: String,
 }
 
@@ -24,6 +26,8 @@ struct AuthBody {
     code: Option<serde_json::Value>,
     expires_after_sec: Option<i64>,
     expires_after_min: Option<i64>,
+    refresh_expires_at: Option<i64>,
+    refresh_expires_after_min: Option<i64>,
 }
 
 fn now_unix() -> f64 {
@@ -46,6 +50,20 @@ fn classify(value: &str) -> &str {
     }
 }
 
+fn parse_refresh_expire(body: &AuthBody) -> f64 {
+    if let Some(at) = body.refresh_expires_at {
+        if at > 0 {
+            return at as f64;
+        }
+    }
+    if let Some(min) = body.refresh_expires_after_min {
+        if min > 0 {
+            return now_unix() + (min as f64) * 60.0;
+        }
+    }
+    0.0
+}
+
 fn parse_body(body: AuthBody) -> Result<TokenOk, String> {
     if body.ok == Some(false) {
         let mut err = body
@@ -64,16 +82,20 @@ fn parse_body(body: AuthBody) -> Result<TokenOk, String> {
             .or(body.message)
             .unwrap_or_else(|| "未返回令牌".into()));
     }
+    let refresh_expire_at = parse_refresh_expire(&body);
     let expire_at = if let Some(sec) = body.expires_after_sec {
         now_unix() + sec.max(0) as f64
     } else if let Some(min) = body.expires_after_min {
         now_unix() + (min.max(0) as f64) * 60.0
+    } else if refresh_expire_at > 0.0 {
+        refresh_expire_at
     } else {
         0.0
     };
     Ok(TokenOk {
         token,
         expire_at,
+        refresh_expire_at,
         message: "OK".into(),
     })
 }
@@ -114,10 +136,14 @@ pub fn exchange_login_key(login_key: &str) -> Result<TokenOk, String> {
     if !ok.token.starts_with("rt_") {
         return Err("期望 rt_ 长期 Token，收到非预期前缀".into());
     }
-    if ok.expire_at <= 0.0 {
-        // 文档默认 180 天
-        ok.expire_at = now_unix() + 259200.0 * 60.0;
+    if ok.refresh_expire_at <= 0.0 {
+        ok.refresh_expire_at = ok.expire_at;
     }
+    if ok.refresh_expire_at <= 0.0 {
+        // 文档默认 180 天
+        ok.refresh_expire_at = now_unix() + 259200.0 * 60.0;
+    }
+    ok.expire_at = ok.refresh_expire_at;
     ok.message = "鉴权成功，已保存长期 Token。".into();
     Ok(ok)
 }
@@ -140,10 +166,11 @@ pub fn exchange_access_token(refresh_token: &str) -> Result<TokenOk, String> {
 
 /// 验证已保存的 `rt_`（换一张 at_ 即视为有效）。
 pub fn verify_refresh_token(refresh_token: &str) -> Result<TokenOk, String> {
-    let _ = exchange_access_token(refresh_token)?;
+    let ok = exchange_access_token(refresh_token)?;
     Ok(TokenOk {
         token: refresh_token.trim().to_string(),
-        expire_at: 0.0,
+        expire_at: ok.refresh_expire_at,
+        refresh_expire_at: ok.refresh_expire_at,
         message: "长期 Token 有效。".into(),
     })
 }

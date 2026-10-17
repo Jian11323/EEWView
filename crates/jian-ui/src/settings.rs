@@ -442,7 +442,14 @@ impl SettingsSession {
             std::thread::spawn(move || {
                 let _ = tx.send(
                     exchange_login_key(&key)
-                        .map(|ok| (ok.token, ok.expire_at, ok.message)),
+                        .map(|ok| {
+                            let exp = if ok.refresh_expire_at > 0.0 {
+                                ok.refresh_expire_at
+                            } else {
+                                ok.expire_at
+                            };
+                            (ok.token, exp, ok.message)
+                        }),
                 );
             });
         }
