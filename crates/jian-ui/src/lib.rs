@@ -463,14 +463,19 @@ impl MainShell {
                 if cfg.ui.show_legend {
                     draw_legend_bar(ui, &p);
                 }
+                // 本地未设经纬度时，用当前地图中心估算日出日落
+                let (sun_lat, sun_lon) = match (self.local_lat, self.local_lon) {
+                    (Some(lat), Some(lon)) => (Some(lat), Some(lon)),
+                    _ => (Some(self.map.center_lat), Some(self.map.center_lon)),
+                };
                 draw_countdown_hud(
                     ui,
                     &p,
                     snap,
                     self.show_nied_clock,
                     map_rect,
-                    self.local_lat,
-                    self.local_lon,
+                    sun_lat,
+                    sun_lon,
                 );
 
                 // 侧栏关闭时：地图右键菜单（开着侧栏时不挂，避免挡列表）

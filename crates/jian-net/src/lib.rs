@@ -3,6 +3,7 @@
 pub mod adapter;
 pub mod bus;
 pub mod auth;
+pub mod ip_locate;
 pub mod notice;
 pub mod place;
 pub mod sources;
@@ -10,6 +11,7 @@ pub mod sources;
 pub use auth::{
     exchange_access_token, exchange_login_key, format_expire_date, verify_refresh_token, TokenOk,
 };
+pub use ip_locate::{locate_by_public_ip, IpLocateOk};
 pub use notice::{notice_from_server, parse_server_error};
 pub mod time_parse;
 

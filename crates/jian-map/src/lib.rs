@@ -533,19 +533,6 @@ impl MapViewport {
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
         }
 
-        if !globe {
-            self.radar_tiles
-                .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
-            self.cloud_tiles
-                .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
-            if self.show_terminator {
-                weather_paint::paint_terminator(ui, &view, now_ms);
-            }
-            if let Some(grid) = self.wind.as_ref() {
-                weather_paint::paint_wind(ui, &view, grid);
-            }
-        }
-
         if still_hit {
             // 波圈/空闲重绘：直接贴已镶嵌底图+断层，跳过矢量路径与 tessellate
             let painter = ui.painter_at(rect);
@@ -610,6 +597,16 @@ impl MapViewport {
             if !t.cancelled && !t.grade.eq_ignore_ascii_case("Cancel") {
                 self.tsunami_coast.paint(ui, &view, &t.areas_list, now_ms);
             }
+        }
+
+        // 气象叠层：在底图/断层之上、测站与事件之下；平面与球体均绘制
+        self.radar_tiles.paint(ui, &view);
+        self.cloud_tiles.paint(ui, &view);
+        if self.show_terminator {
+            weather_paint::paint_terminator(ui, &view, now_ms);
+        }
+        if let Some(grid) = self.wind.as_ref() {
+            weather_paint::paint_wind(ui, &view, grid);
         }
 
         let mut typhoon_hover = None;

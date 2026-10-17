@@ -177,6 +177,28 @@ mod tests {
     }
 
     #[test]
+    fn polar_day_has_no_terminator_lon() {
+        // 夏至附近北极应极昼，晨昏经度无解
+        assert!(terminator_lon_at_lat(89.0, 1_718_841_600_000).is_none());
+    }
+
+    #[test]
+    fn night_and_day_are_opposite() {
+        let t = 1_700_000_000_000i64;
+        let night = is_night(0.0, 0.0, t);
+        assert_ne!(is_night(180.0, 0.0, t), night);
+    }
+
+    #[test]
+    fn sunrise_sunset_are_ordered_for_mid_latitude() {
+        // 2023-11-14 12:00 UTC 附近，东京应有日出早于日落
+        let t = 1_700_000_000_000i64;
+        let (rise, set) = sunrise_sunset_local_hm(35.68, 139.76, t).expect("sun times");
+        assert!(rise < set, "rise {rise} set {set}");
+        assert_eq!(format_hm_minutes(rise).len(), 5);
+    }
+
+    #[test]
     fn wind_sample_center() {
         let g = WindGrid {
             time_text: String::new(),

@@ -197,3 +197,32 @@ fn parse_component(
     }
     Ok((nx, ny, lo1, la1, dx, dy, out))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_small_wind_grid() {
+        let raw = r#"{
+            "status":"success",
+            "time":"2026-10-17 20:00:00",
+            "data":[
+              {"header":{"nx":2,"ny":1,"lo1":0,"la1":90,"dx":1,"dy":1},"data":[1.5,null]},
+              {"header":{"nx":2,"ny":1,"lo1":0,"la1":90,"dx":1,"dy":1},"data":[-0.5,2.0]}
+            ]
+        }"#;
+        let v: Value = serde_json::from_str(raw).unwrap();
+        let g = parse_wind_json(&v).unwrap();
+        assert_eq!(g.nx, 2);
+        assert_eq!(g.time_text, "2026-10-17 20:00:00");
+        assert_eq!(g.sample(0.2, 89.5), Some((1.5, -0.5)));
+        assert!(g.sample(1.2, 89.5).is_none());
+    }
+
+    #[test]
+    fn reject_short_wind() {
+        let v: Value = serde_json::json!({"status":"success","data":[]});
+        assert!(parse_wind_json(&v).is_err());
+    }
+}

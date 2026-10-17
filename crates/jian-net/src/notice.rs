@@ -207,6 +207,7 @@ pub fn is_conn_limit_text(text: &str) -> bool {
 pub fn is_ban_text(text: &str) -> bool {
     text.contains("account_banned")
         || text.contains("\"banned\"")
+        || text.contains("已被封禁")
         || text.contains("\"code\":4006")
         || text.contains("\"code\": 4006")
         || text.contains("http_denied")
@@ -214,6 +215,51 @@ pub fn is_ban_text(text: &str) -> bool {
         || text.contains("\"code\": 4403")
         || text.contains("自动封禁")
         || text.contains("黑名单")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jian_core::UserNoticeKind;
+
+    #[test]
+    fn conn_limit_and_ban_titles() {
+        let lim = notice_from_server(4005, "conn_limit", "您已超过服务器连接限制");
+        assert_eq!(lim.kind, UserNoticeKind::ConnLimit);
+        assert_eq!(lim.dedupe_key, "conn_limit");
+        assert!(lim.title.contains("连接超限"));
+
+        let ban = notice_from_server(4006, "account_banned", "账号已封禁");
+        assert_eq!(ban.kind, UserNoticeKind::Banned);
+        assert_eq!(ban.dedupe_key, "account_banned");
+
+        let ip = notice_from_server(4403, "http_denied", "拒绝访问");
+        assert_eq!(ip.kind, UserNoticeKind::Banned);
+        assert_eq!(ip.dedupe_key, "ip_banned");
+    }
+
+    #[test]
+    fn auth_codes_map() {
+        for code in [4001, 4002, 4003, 4004, 4102, 4202] {
+            let n = notice_from_server(code, "", "");
+            assert_eq!(n.kind, UserNoticeKind::Auth, "{code}");
+            assert!(n.body.contains(&code.to_string()));
+        }
+    }
+
+    #[test]
+    fn parse_error_json_and_plain_ban_text() {
+        let (code, err, msg) = parse_server_error(
+            r#"{"ok":false,"error":"expired_access_token","code":4004,"message":"访问令牌过期"}"#,
+        )
+        .expect("json");
+        assert_eq!(code, 4004);
+        assert_eq!(err, "expired_access_token");
+        assert!(msg.contains("过期"));
+        assert!(is_conn_limit_text(r#"{"type":"error","message":"您已超过服务器连接限制"}"#));
+        assert!(is_ban_text(r#"{"type":"error","message":"您的IP已被封禁，请联系管理员进行处理"}"#));
+        assert!(is_auth_error_text(r#"{"type":"error","code":4004,"error":"expired_access_token"}"#));
+    }
 }
 
 pub fn is_auth_error_text(text: &str) -> bool {

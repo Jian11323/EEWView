@@ -1,7 +1,10 @@
 //! 气象叠层 XYZ 瓦片（RainViewer 等），与底图缓存分离。
 
-use crate::projection::{self, TILE_SIZE};
-use egui::{Color32, ColorImage, Context, Rect, TextureHandle, TextureOptions, Ui};
+use crate::projection::{self, ViewCtx, TILE_SIZE};
+use egui::{
+    Color32, ColorImage, Context, Mesh, Pos2, Rect, TextureHandle, TextureOptions, Ui,
+};
+use egui::epaint::Vertex;
 use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -103,8 +106,10 @@ impl OverlayTileCache {
     }
 
     fn poll(&mut self, ctx: &Context) {
+        let mut got = false;
         while let Ok(decoded) = self.rx.try_recv() {
             self.in_flight = self.in_flight.saturating_sub(1);
+            got = true;
             match decoded.image {
                 Some(img) => {
                     let tex = ctx.load_texture(
@@ -135,26 +140,28 @@ impl OverlayTileCache {
             }
         }
         self.spawn_jobs();
+        if got || self.in_flight > 0 || !self.want.is_empty() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
     }
 
-    pub fn paint(
-        &mut self,
-        ui: &mut Ui,
-        rect: Rect,
-        center_lon: f64,
-        center_lat: f64,
-        zoom: f64,
-    ) {
+    pub fn paint(&mut self, ui: &mut Ui, view: &ViewCtx) {
         if self.prefix.is_empty() {
             return;
         }
         self.poll(ui.ctx());
+        let zoom = view.zoom;
         let z = zoom.floor().clamp(0.0, 7.0) as u8;
         let zf = z as f64;
         let scale = (2f64.powf(zoom - zf)) as f32;
         let tile_px = (TILE_SIZE as f32) * scale;
-        let (_, x0, y0, x1, y1) =
-            projection::visible_tiles(center_lon, center_lat, zoom, rect, 0);
+        let (_, x0, y0, x1, y1) = projection::visible_tiles(
+            view.center_lon,
+            view.center_lat,
+            zoom,
+            view.rect,
+            if view.mode.is_globe() { 1 } else { 0 },
+        );
         for y in y0..=y1 {
             for x in x0..=x1 {
                 self.enqueue(TileId {
@@ -165,9 +172,9 @@ impl OverlayTileCache {
             }
         }
         self.spawn_jobs();
-        let painter = ui.painter_at(rect);
-        let (cx, cy) = projection::lonlat_to_world(center_lon, center_lat, zf);
-        let origin = rect.center();
+        let painter = ui.painter_at(view.rect);
+        let (cx, cy) = projection::lonlat_to_world(view.center_lon, view.center_lat, zf);
+        let origin = view.rect.center();
         for y in y0..=y1 {
             for x in x0..=x1 {
                 let id = TileId {
@@ -175,17 +182,66 @@ impl OverlayTileCache {
                     x: projection::wrap_tile_x(x, z),
                     y: y as u32,
                 };
-                let (twx, twy) = projection::tile_world_origin(x, y, z);
-                let screen_min = egui::pos2(
-                    origin.x + ((twx - cx) as f32) * scale,
-                    origin.y + ((twy - cy) as f32) * scale,
-                );
-                let tile_rect = Rect::from_min_size(screen_min, egui::vec2(tile_px, tile_px));
-                if let Some(TileState::Ready(tex)) = self.entries.get(&id) {
+                let Some(TileState::Ready(tex)) = self.entries.get(&id) else {
+                    continue;
+                };
+                let tid = tex.id();
+                if view.mode.is_globe() {
+                    // 四角经纬投影为纹理四边形；少于 3 角在地平上则跳过
+                    let (ox, oy) = projection::tile_world_origin(x, y, z);
+                    let (ox1, oy1) = projection::tile_world_origin(x + 1, y + 1, z);
+                    let corners_ll = [
+                        projection::world_to_lonlat(ox, oy, zf),
+                        projection::world_to_lonlat(ox1, oy, zf),
+                        projection::world_to_lonlat(ox1, oy1, zf),
+                        projection::world_to_lonlat(ox, oy1, zf),
+                    ];
+                    let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+                    let mut pts = [None; 4];
+                    let mut n_ok = 0usize;
+                    for (i, (lon, lat)) in corners_ll.iter().enumerate() {
+                        pts[i] = view.project(*lon, *lat);
+                        if pts[i].is_some() {
+                            n_ok += 1;
+                        }
+                    }
+                    if n_ok < 3 {
+                        continue;
+                    }
+                    let mut mesh = Mesh::with_texture(tid);
+                    for i in 0..4 {
+                        let pos = pts[i].unwrap_or_else(|| {
+                            // 缺角用对角邻点中点近似，避免拉到视口中心
+                            let a = pts[(i + 3) % 4];
+                            let b = pts[(i + 1) % 4];
+                            match (a, b) {
+                                (Some(pa), Some(pb)) => Pos2::new(
+                                    (pa.x + pb.x) * 0.5,
+                                    (pa.y + pb.y) * 0.5,
+                                ),
+                                (Some(pa), None) | (None, Some(pa)) => pa,
+                                _ => origin,
+                            }
+                        });
+                        mesh.vertices.push(Vertex {
+                            pos,
+                            uv: egui::pos2(uvs[i][0], uvs[i][1]),
+                            color: self.tint,
+                        });
+                    }
+                    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+                    painter.add(egui::Shape::mesh(mesh));
+                } else {
+                    let (twx, twy) = projection::tile_world_origin(x, y, z);
+                    let screen_min = Pos2::new(
+                        origin.x + ((twx - cx) as f32) * scale,
+                        origin.y + ((twy - cy) as f32) * scale,
+                    );
+                    let tile_rect = Rect::from_min_size(screen_min, egui::vec2(tile_px, tile_px));
                     painter.image(
-                        tex.id(),
+                        tid,
                         tile_rect,
-                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
                         self.tint,
                     );
                 }

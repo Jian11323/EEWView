@@ -132,6 +132,18 @@ fn gl_context_unsupported(err: &str) -> bool {
     e.contains("es context") || e.contains("wgl")
 }
 
+#[cfg(test)]
+mod gl_fallback_tests {
+    use super::gl_context_unsupported;
+
+    #[test]
+    fn detects_wgl_es_failure() {
+        let log = "glutin error: extension to create ES context with wgl is not present";
+        assert!(gl_context_unsupported(log));
+        assert!(!gl_context_unsupported("eframe: other"));
+    }
+}
+
 fn run_app_inner(force_soft: bool) -> Result<()> {
     let root = resource_root();
     let media = media_root();

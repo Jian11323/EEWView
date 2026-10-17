@@ -39,8 +39,8 @@
 - 台风路径、风圈与多源预报（可开关）
 - 地图气象叠层（设置 → 地图显示，默认关）：
 - 全球雷达与红外云图（[RainViewer](https://www.rainviewer.com/)）；
-- ①全球近地面风场（[sismotide 风场](https://api.sismotide.top/get/wind.php)）、晨昏线；设置本机经纬度后在右下角显示预估日出与日落
-- ②配置本机经纬度后估算本地 S 波倒计时，并支持音效播报
+  ①全球近地面风场（[sismotide 风场](https://api.sismotide.top/get/wind.php)）、晨昏线；设置本机经纬度后在右下角显示预估日出与日落
+  ②配置本机经纬度（地图选点或按公网 IP 定位）后估算本地 S 波倒计时，并支持音效播报
 - 各数据源健康状态：**正常** / **波动** / **异常**
 - 界面语言切换：简体中文 / 繁体中文 / 日本語 / English（设置 → 通用）
 - 右侧情报侧栏可开关（设置、向右拖关闭或右缘拉开）；关闭后地图右键可打开设置、跳转所在地、图例、设置所在地与关于
@@ -59,6 +59,7 @@
 - 亮色海洋地形瓦片：[sismotide tilemap](https://tilemap.sismotide.top/)
 - 全球雷达 / 红外云图：[RainViewer](https://www.rainviewer.com/)
 - 全球近地面风场：[sismotide GET 风场](https://api.sismotide.top/get/wind.php)
+- IP 归属定位：[sismotide GET IP](https://api.sismotide.top/get/ip.php)
 - 中国大陆地图：[阿里云 DataV.GeoAtlas](https://datav.aliyun.com/portal/school/atlas/area_selector)
 - 中国台湾地图：[GeoJSON.cn](https://geojson.cn/)
 - 日本地图：[日本气象厅](https://www.data.jma.go.jp/developer/gis.html)（注意钓鱼岛地区处理）

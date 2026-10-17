@@ -7,7 +7,7 @@ use egui::{
 use crate::i18n::{t, Lang};
 use jian_config::AppConfig;
 use jian_core::HealthStatus;
-use jian_net::{exchange_login_key, format_expire_date};
+use jian_net::{exchange_login_key, format_expire_date, locate_by_public_ip, IpLocateOk};
 use std::sync::mpsc;
 
 mod filters_ui;
@@ -219,6 +219,10 @@ pub struct SettingsSession {
     auth_rx: Option<mpsc::Receiver<Result<(String, f64, u32, String), String>>>,
     /// 换票失败弹窗
     auth_alert: Option<(String, String)>,
+    /// IP 归属定位进行中
+    ip_locate_busy: bool,
+    /// 后台 IP 定位结果
+    ip_locate_rx: Option<mpsc::Receiver<Result<IpLocateOk, String>>>,
     /// 主地图单击选点目标
     pub map_pick: Option<MapPickKind>,
     /// 下一帧用主地图中心写入默认视口
@@ -243,6 +247,8 @@ impl Default for SettingsSession {
             auth_busy: false,
             auth_rx: None,
             auth_alert: None,
+            ip_locate_busy: false,
+            ip_locate_rx: None,
             map_pick: None,
             capture_view: false,
             opened_at: None,
@@ -263,6 +269,8 @@ impl SettingsSession {
         self.auth_busy = false;
         self.auth_rx = None;
         self.auth_alert = None;
+        self.ip_locate_busy = false;
+        self.ip_locate_rx = None;
         self.map_pick = None;
         self.capture_view = false;
         self.opened_at = Some(std::time::Instant::now());
@@ -352,6 +360,7 @@ impl SettingsSession {
         let mut action = None;
         let mut restore = false;
         let mut do_exchange = false;
+        let mut do_ip_locate = false;
         let mut close_requested = false;
 
         // 主窗口内嵌设置（勿再用独立 viewport：会抢焦点，表现为鼠标被隔离）
@@ -421,6 +430,7 @@ impl SettingsSession {
                     &mut action,
                     &mut restore,
                     &mut do_exchange,
+                    &mut do_ip_locate,
                 );
             });
         if !still_open {
@@ -456,6 +466,16 @@ impl SettingsSession {
                             (ok.token, exp, ok.max_connections, ok.message)
                         }),
                 );
+            });
+        }
+
+        if do_ip_locate && !self.ip_locate_busy {
+            let (tx, rx) = mpsc::channel();
+            self.ip_locate_busy = true;
+            self.ip_locate_rx = Some(rx);
+            self.save_note = Some(t("正在按 IP 定位…").into());
+            std::thread::spawn(move || {
+                let _ = tx.send(locate_by_public_ip());
             });
         }
 
@@ -501,6 +521,46 @@ impl SettingsSession {
                 self.auth_rx = None;
                 self.auth_busy = false;
                 self.save_note = Some(t("鉴权失败：换票线程中断").into());
+            }
+            None => {}
+        }
+
+        let ip_poll = self.ip_locate_rx.as_ref().map(|rx| rx.try_recv());
+        match ip_poll {
+            Some(Ok(Ok(ok))) => {
+                self.ip_locate_rx = None;
+                self.ip_locate_busy = false;
+                if let Some(draft) = self.draft.as_mut() {
+                    draft.local.latitude = Some(ok.lat);
+                    draft.local.longitude = Some(ok.lon);
+                }
+                let place = if ok.location.is_empty() {
+                    format!("{:.4}, {:.4}", ok.lat, ok.lon)
+                } else {
+                    ok.location.clone()
+                };
+                let ip_hint = if ok.ip.is_empty() {
+                    String::new()
+                } else {
+                    format!("（{}）", ok.ip)
+                };
+                self.save_note = Some(format!(
+                    "{}{place}{ip_hint}",
+                    t("已按 IP 写入本机位置：")
+                ));
+            }
+            Some(Ok(Err(e))) => {
+                self.ip_locate_rx = None;
+                self.ip_locate_busy = false;
+                self.save_note = Some(format!("{}{e}", t("IP 定位失败：")));
+            }
+            Some(Err(mpsc::TryRecvError::Empty)) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(50));
+            }
+            Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                self.ip_locate_rx = None;
+                self.ip_locate_busy = false;
+                self.save_note = Some(t("IP 定位失败：查询线程中断").into());
             }
             None => {}
         }
@@ -582,6 +642,7 @@ fn draw_shell(
     action: &mut Option<SettingsAction>,
     restore: &mut bool,
     do_exchange: &mut bool,
+    do_ip_locate: &mut bool,
 ) {
     // RQ .shell inset
     Frame::NONE
@@ -639,7 +700,7 @@ fn draw_shell(
                                 ui.allocate_exact_size(Vec2::new(1.0, body_h), Sense::hover());
                             ui.painter().rect_filled(line, 0.0, chrome().divider);
 
-                            draw_main(ui, session, health, action, do_exchange, body_h);
+                            draw_main(ui, session, health, action, do_exchange, do_ip_locate, body_h);
                         },
                     );
                 });
@@ -809,6 +870,7 @@ fn draw_main(
     health: &SourceHealthView,
     action: &mut Option<SettingsAction>,
     do_exchange: &mut bool,
+    do_ip_locate: &mut bool,
     body_h: f32,
 ) {
     let w = ui.available_width();
@@ -869,7 +931,7 @@ fn draw_main(
                     Frame::NONE
                         .inner_margin(Margin::symmetric(16, 8))
                         .show(ui, |ui| {
-                            draw_content(ui, session, health, action, do_exchange);
+                            draw_content(ui, session, health, action, do_exchange, do_ip_locate);
                         });
                     ui.add_space(16.0);
                 });
@@ -909,9 +971,11 @@ fn draw_content(
     health: &SourceHealthView,
     action: &mut Option<SettingsAction>,
     do_exchange: &mut bool,
+    do_ip_locate: &mut bool,
 ) {
     let tab = session.tab;
     let auth_busy = session.auth_busy;
+    let ip_locate_busy = session.ip_locate_busy;
     let mut map_pick = session.map_pick;
     let mut capture_view = session.capture_view;
     let mut perf_diag = session.perf_diag.take();
@@ -925,7 +989,16 @@ fn draw_content(
                 }
             }
             SettingsTab::General => {
-                draw_general(ui, draft, &mut map_pick, &mut capture_view, &mut perf_diag);
+                if draw_general(
+                    ui,
+                    draft,
+                    &mut map_pick,
+                    &mut capture_view,
+                    &mut perf_diag,
+                    ip_locate_busy,
+                ) {
+                    *do_ip_locate = true;
+                }
             }
             SettingsTab::Audio => {
                 if draw_audio(ui, draft) {
@@ -1532,7 +1605,9 @@ fn draw_general(
     map_pick: &mut Option<MapPickKind>,
     capture_view: &mut bool,
     perf_diag: &mut Option<String>,
-) {
+    ip_locate_busy: bool,
+) -> bool {
+    let mut want_ip = false;
     section(ui, "外观", "\u{25d0}", |ui| {
         control_row(ui, "界面主题", "切换后设置页立即跟随；保存后应用到主界面", "\u{25d0}", |ui| {
             egui::ComboBox::from_id_salt("set_theme")
@@ -1860,6 +1935,23 @@ fn draw_general(
                 }
             }
         });
+        row_divider(ui);
+        control_row(
+            ui,
+            "IP 定位",
+            "按公网出口查城市级经纬度（仅供参考）",
+            "\u{25ce}",
+            |ui| {
+                let label = if ip_locate_busy {
+                    "定位中…"
+                } else {
+                    "按 IP 定位"
+                };
+                if glass_btn(ui, label, ip_locate_busy).clicked() && !ip_locate_busy {
+                    want_ip = true;
+                }
+            },
+        );
         if has_local {
             row_divider(ui);
             let mut lat = draft.local.latitude.unwrap_or(35.68);
@@ -1886,6 +1978,7 @@ fn draw_general(
             });
         }
     });
+    want_ip
 }
 
 fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<SettingsAction>) {
