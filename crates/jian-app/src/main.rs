@@ -124,6 +124,15 @@ fn main() {
 }
 
 fn run_app() -> Result<()> {
+    run_app_inner(false)
+}
+
+fn gl_context_unsupported(err: &str) -> bool {
+    let e = err.to_ascii_lowercase();
+    e.contains("es context") || e.contains("wgl")
+}
+
+fn run_app_inner(force_soft: bool) -> Result<()> {
     let root = resource_root();
     let media = media_root();
     let cfg = AppConfig::load_merged(root.join("config/default.toml"));
@@ -213,16 +222,21 @@ fn run_app() -> Result<()> {
     }
 
     let rt = Runtime::new()?;
-    let net_rx = if live {
+    let net_rx = {
         let _enter = rt.enter();
         let stations_dir = media.join("stations");
-        Some(spawn_hub_with_assets(
+        let mut hub = spawn_hub_with_assets(
             &cfg.sources,
             stations_dir.is_dir().then_some(stations_dir),
-        ))
-    } else {
-        None
+        );
+        hub.set_weather_overlay(
+            cfg.ui.show_global_radar,
+            cfg.ui.show_global_cloud,
+            cfg.ui.show_global_wind,
+        );
+        Some(hub)
     };
+    let _ = live;
 
     refresh_countdown(
         &mut snap,
@@ -284,13 +298,13 @@ fn run_app() -> Result<()> {
         viewport = viewport.with_always_on_top();
     }
 
-    // 固定 OpenGL（Glow）。软渲染仅在用户选择 CPU 模式时关闭硬件加速。
-    let options = build_native_options(viewport, &cfg.performance);
+    // 固定 OpenGL（Glow）。WGL 无法创建 ES 上下文时自动改软渲染再试一次。
+    let options = build_native_options(viewport, &cfg.performance, force_soft);
 
     let started = Instant::now();
     let has_local = cfg.local.latitude.is_some() && cfg.local.longitude.is_some();
     snap.show_wave_rings = cfg.ui.show_wave_rings;
-    eframe::run_native(
+    let run_err = eframe::run_native(
         jian_ui::APP_DISPLAY_NAME,
         options,
         Box::new(move |cc| {
@@ -328,18 +342,26 @@ fn run_app() -> Result<()> {
                 splash: SplashGate::default(),
             }))
         }),
-    )
-    .map_err(|e| anyhow::anyhow!("eframe: {e}"))?;
+    );
+    if let Err(e) = run_err {
+        let msg = e.to_string();
+        if !force_soft && gl_context_unsupported(&msg) {
+            tracing::warn!("OpenGL ES/WGL 不可用，回退 CPU 软渲染后重试");
+            return run_app_inner(true);
+        }
+        return Err(anyhow::anyhow!("eframe: {msg}"));
+    }
     Ok(())
 }
 
 fn build_native_options(
     viewport: egui::ViewportBuilder,
     perf: &jian_config::PerformanceConfig,
+    force_soft: bool,
 ) -> eframe::NativeOptions {
     let device = perf.device.to_ascii_lowercase();
     let profile = perf.profile.to_ascii_lowercase();
-    let hw = if device == "cpu" {
+    let hw = if force_soft || device == "cpu" {
         eframe::HardwareAcceleration::Off
     } else {
         eframe::HardwareAcceleration::Preferred
@@ -1210,6 +1232,9 @@ impl JianApp {
         jian_ui::set_lang_from_config(&new_cfg.ui.language);
 
         let sources_same = self.cfg.sources_runtime_equal(&new_cfg);
+        let weather_same = self.cfg.ui.show_global_radar == new_cfg.ui.show_global_radar
+            && self.cfg.ui.show_global_cloud == new_cfg.ui.show_global_cloud
+            && self.cfg.ui.show_global_wind == new_cfg.ui.show_global_wind;
         let travel_same = self.cfg.travel.primary == new_cfg.travel.primary
             && self.cfg.travel.fallback == new_cfg.travel.fallback
             && self.cfg.travel.linear_last_resort == new_cfg.travel.linear_last_resort;
@@ -1270,13 +1295,21 @@ impl JianApp {
         if !sources_same {
             tracing::info!("数据源已变更，正在重连");
             drop(self.net_rx.take());
-            if self.cfg.any_source_enabled() {
+            let _enter = self.rt.enter();
+            let stations_dir = self.media_dir.join("stations");
+            self.net_rx = Some(spawn_hub_with_assets(
+                &self.cfg.sources,
+                stations_dir.is_dir().then_some(stations_dir),
+            ));
+        }
+        if !sources_same || !weather_same {
+            if let Some(hub) = self.net_rx.as_mut() {
                 let _enter = self.rt.enter();
-                let stations_dir = self.media_dir.join("stations");
-                self.net_rx = Some(spawn_hub_with_assets(
-                    &self.cfg.sources,
-                    stations_dir.is_dir().then_some(stations_dir),
-                ));
+                hub.set_weather_overlay(
+                    self.cfg.ui.show_global_radar,
+                    self.cfg.ui.show_global_cloud,
+                    self.cfg.ui.show_global_wind,
+                );
             }
         }
 

@@ -106,6 +106,18 @@ pub struct UiConfig {
     /// 地图绘制活动断层（全球 GEM + 中国 CAFD）
     #[serde(default = "default_false")]
     pub show_faults: bool,
+    /// 全球雷达叠层（RainViewer）
+    #[serde(default = "default_false")]
+    pub show_global_radar: bool,
+    /// 全球红外云图叠层（RainViewer；无时次则不画）
+    #[serde(default = "default_false")]
+    pub show_global_cloud: bool,
+    /// 全球近地面风场箭头（本站 /get/wind）
+    #[serde(default = "default_false")]
+    pub show_global_wind: bool,
+    /// 全球晨昏线与夜侧遮罩
+    #[serde(default = "default_false")]
+    pub show_terminator: bool,
     /// 预报机构：全部 / 中国 / 中国台湾 / 日本 / 美国 / 中国香港
     #[serde(default = "default_typhoon_forecast_agency")]
     pub typhoon_forecast_agency: String,
@@ -512,6 +524,9 @@ pub struct JianSourceConfig {
     /// 长期 Token 过期 unix 秒；0 表示未知
     #[serde(default)]
     pub refresh_expire_at: f64,
+    /// 每把长期 Token 最大并发连接数（服务器返回；未知为 0）
+    #[serde(default)]
+    pub max_connections: u32,
     /// 兼容旧键：与 `stations.jma_enabled` 对齐；实际由 stations 模块拉 `/kmoni`（测站中转无需令牌）
     #[serde(default = "default_true")]
     pub station_enabled: bool,
@@ -777,6 +792,10 @@ impl Default for AppConfig {
                 show_volcanoes: true,
                 show_typhoons: true,
                 show_faults: false,
+                show_global_radar: false,
+                show_global_cloud: false,
+                show_global_wind: false,
+                show_terminator: false,
                 typhoon_forecast_agency: default_typhoon_forecast_agency(),
             },
             performance: PerformanceConfig::default(),
@@ -824,6 +843,7 @@ impl Default for AppConfig {
                     access_token: None,
                     refresh_token: None,
                     refresh_expire_at: 0.0,
+                    max_connections: 0,
                     station_enabled: true,
                     station_ws_url: default_jian_station_ws(),
                 },

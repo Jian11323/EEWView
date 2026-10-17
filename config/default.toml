@@ -26,6 +26,11 @@ show_legend = true
 show_volcanoes = true
 show_typhoons = true
 show_faults = false
+# 全球气象叠层（默认关）
+show_global_radar = false
+show_global_cloud = false
+show_global_wind = false
+show_terminator = false
 # 全部 | 中国 | 中国台湾 | 日本 | 美国 | 中国香港
 typhoon_forecast_agency = "中国"
 

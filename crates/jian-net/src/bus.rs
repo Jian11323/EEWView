@@ -1,6 +1,9 @@
 //! 网络事件总线（tokio mpsc）。
 
-use jian_core::{EewReport, EqRecord, HealthStatus, StationSample, TsunamiInfo, TyphoonInfo, VolcanoNotice};
+use jian_core::{
+    EewReport, EqRecord, HealthStatus, StationSample, TsunamiInfo, TyphoonInfo, UserNotice,
+    VolcanoNotice, WindGrid,
+};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
@@ -28,6 +31,16 @@ pub enum NetEvent {
     Volcano(VolcanoNotice),
     /// 活跃台风快照（整表替换）
     Typhoons(Vec<TyphoonInfo>),
+    /// RainViewer 瓦片 host + path
+    WeatherTiles {
+        host: String,
+        radar_path: Option<String>,
+        cloud_path: Option<String>,
+    },
+    /// 全球风场格点
+    WeatherWind(WindGrid),
+    /// 需弹窗提醒用户（鉴权 / 超限 / 封禁）
+    UserNotice(UserNotice),
 }
 
 pub type NetTx = mpsc::UnboundedSender<NetEvent>;

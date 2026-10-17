@@ -3,12 +3,14 @@
 pub mod adapter;
 pub mod bus;
 pub mod auth;
+pub mod notice;
 pub mod place;
 pub mod sources;
 
 pub use auth::{
     exchange_access_token, exchange_login_key, format_expire_date, verify_refresh_token, TokenOk,
 };
+pub use notice::{notice_from_server, parse_server_error};
 pub mod time_parse;
 
 use jian_config::{FiltersConfig, SourcesConfig};
@@ -22,7 +24,9 @@ pub use place::{fix_place, load_from_dir as load_place_fix};
 /// 三源任务句柄：丢弃或 `shutdown` 会中止连接循环，便于设置页热切换。
 pub struct NetHub {
     rx: NetRx,
+    tx: NetTx,
     tasks: Vec<JoinHandle<()>>,
+    weather: Vec<JoinHandle<()>>,
 }
 
 impl NetHub {
@@ -30,7 +34,21 @@ impl NetHub {
         self.rx.try_recv()
     }
 
+    /// 按开关重启气象轮询（关则停任务）。
+    pub fn set_weather_overlay(&mut self, radar: bool, cloud: bool, wind: bool) {
+        for t in self.weather.drain(..) {
+            t.abort();
+        }
+        if radar || cloud || wind {
+            self.weather
+                .extend(spawn_weather_overlay(self.tx.clone(), radar, cloud, wind));
+        }
+    }
+
     pub fn shutdown(&mut self) {
+        for t in self.weather.drain(..) {
+            t.abort();
+        }
         for t in self.tasks.drain(..) {
             t.abort();
         }
@@ -101,8 +119,30 @@ pub fn spawn_hub_with_assets(
         sources.stations.clone(),
         assets_stations,
     ));
-    tasks.extend(sources::typhoon::spawn(tx, sources.typhoon.clone()));
-    NetHub { rx, tasks }
+    tasks.extend(sources::typhoon::spawn(tx.clone(), sources.typhoon.clone()));
+    NetHub {
+        rx,
+        tx,
+        tasks,
+        weather: Vec::new(),
+    }
+}
+
+/// 按 UI 开关启动气象叠层轮询（可与 `spawn_hub` 并列追加任务）。
+pub fn spawn_weather_overlay(
+    tx: NetTx,
+    want_radar: bool,
+    want_cloud: bool,
+    want_wind: bool,
+) -> Vec<tokio::task::JoinHandle<()>> {
+    sources::weather::spawn(
+        tx,
+        sources::weather::WeatherPollOpts {
+            want_radar,
+            want_cloud,
+            want_wind,
+        },
+    )
 }
 
 /// 将 `NetEvent` 合并进 `AppSnapshot`（供 UI 帧循环调用）。
@@ -140,6 +180,19 @@ pub fn apply_event_filtered(
         NetEvent::Tsunami(t) => snap.upsert_tsunami(t),
         NetEvent::Volcano(v) => snap.upsert_volcano(v),
         NetEvent::Typhoons(list) => snap.replace_typhoons(list),
+        NetEvent::WeatherTiles {
+            host,
+            radar_path,
+            cloud_path,
+        } => {
+            if !host.is_empty() {
+                snap.weather.rainviewer_host = host;
+            }
+            snap.weather.radar_path = radar_path;
+            snap.weather.cloud_path = cloud_path;
+        }
+        NetEvent::WeatherWind(w) => snap.set_weather_wind(w),
+        NetEvent::UserNotice(n) => snap.push_notice(n),
     }
 }
 

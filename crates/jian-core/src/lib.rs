@@ -4,6 +4,7 @@ pub mod agency;
 pub mod estimate;
 pub mod intensity;
 pub mod palette;
+pub mod sun;
 pub mod tts;
 
 use serde::{Deserialize, Serialize};
@@ -25,6 +26,10 @@ pub use intensity::{
     jma_from_instrumental, jma_shindo_level, jma_shindo_text, prefer_intensity_scale,
 };
 pub use palette::{instrumental_band_level, instrumental_band_rgb, instrumental_rgb};
+pub use sun::{
+    format_hm_minutes, is_night, sun_geometry, sunrise_sunset_local_hm, terminator_lon_at_lat,
+    UserNotice, UserNoticeKind, WeatherOverlay, WindGrid,
+};
 
 // tsunami_official_rgb / tsunami_grade_zh 定义于本文件
 
@@ -633,6 +638,10 @@ pub struct AppSnapshot {
     pub volcanoes: Vec<VolcanoNotice>,
     /// 活跃台风（路径 / 风圈 / 预报）
     pub typhoons: Vec<TyphoonInfo>,
+    /// 全球气象叠层（雷达 / 云图 path、风场）
+    pub weather: WeatherOverlay,
+    /// 待弹窗用户提示（鉴权 / 超限 / 封禁）；主循环 take
+    pub pending_notices: Vec<UserNotice>,
     /// 台风列表指纹；用于判定「有更新」再播提示音 / 跟焦（对齐 eewcn）
     pub typhoon_fingerprint: String,
     /// 台风指纹变化后待飞跃：(lon, lat, radius_km)；主循环换算 zoom 后 take
@@ -834,6 +843,8 @@ impl AppSnapshot {
             tsunami: None,
             volcanoes: Vec::new(),
             typhoons: Vec::new(),
+            weather: WeatherOverlay::default(),
+            pending_notices: Vec::new(),
             typhoon_fingerprint: String::new(),
             pending_typhoon_fly: None,
             pending_typhoon_hint: false,
@@ -917,6 +928,8 @@ impl AppSnapshot {
             tsunami: None,
             volcanoes: Vec::new(),
             typhoons: Vec::new(),
+            weather: WeatherOverlay::default(),
+            pending_notices: Vec::new(),
             typhoon_fingerprint: String::new(),
             pending_typhoon_fly: None,
             pending_typhoon_hint: false,
@@ -925,6 +938,42 @@ impl AppSnapshot {
             pending_tts_record: None,
             wave_spread_km: Vec::new(),
         }
+    }
+
+    pub fn push_notice(&mut self, notice: UserNotice) {
+        if self
+            .pending_notices
+            .iter()
+            .any(|n| n.dedupe_key == notice.dedupe_key)
+        {
+            return;
+        }
+        self.pending_notices.push(notice);
+    }
+
+    pub fn take_notices(&mut self) -> Vec<UserNotice> {
+        std::mem::take(&mut self.pending_notices)
+    }
+
+    pub fn set_weather_tiles(
+        &mut self,
+        host: String,
+        radar_path: Option<String>,
+        cloud_path: Option<String>,
+    ) {
+        if !host.is_empty() {
+            self.weather.rainviewer_host = host;
+        }
+        if let Some(p) = radar_path {
+            self.weather.radar_path = Some(p);
+        }
+        if let Some(p) = cloud_path {
+            self.weather.cloud_path = Some(p);
+        }
+    }
+
+    pub fn set_weather_wind(&mut self, wind: WindGrid) {
+        self.weather.wind = Some(wind);
     }
 
     pub fn set_tsunami(&mut self, info: Option<TsunamiInfo>) {

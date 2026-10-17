@@ -10,9 +10,32 @@ use tokio::time::{interval, sleep, MissedTickBehavior};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
 
-use crate::bus::{emit_health, NetTx};
+use crate::bus::{emit_health, NetEvent, NetTx};
+use crate::notice::{
+    is_auth_error_text, is_ban_text, is_conn_limit_text, notice_from_server, parse_server_error,
+};
 
 pub use jian_util::{redact_secrets, redact_url};
+
+fn emit_notice_from_text(tx: &NetTx, text: &str) {
+    if let Some((code, error, message)) = parse_server_error(text) {
+        let _ = tx.send(NetEvent::UserNotice(notice_from_server(code, &error, &message)));
+        return;
+    }
+    if is_conn_limit_text(text) {
+        let _ = tx.send(NetEvent::UserNotice(notice_from_server(
+            4005,
+            "conn_limit",
+            "您已超过服务器连接限制",
+        )));
+    } else if is_ban_text(text) {
+        let _ = tx.send(NetEvent::UserNotice(notice_from_server(
+            0,
+            "banned",
+            "您的IP已被封禁，请联系管理员进行处理",
+        )));
+    }
+}
 
 /// 每次连接前解析 URL（例如用 rt_ 换新 at_ 再拼 key=）。
 pub type ResolveUrl = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
@@ -128,10 +151,22 @@ where
                                     last_msg = Instant::now();
                                     got_first = true;
                                     let text = t.as_str();
+                                    if is_server_reject_frame(text) {
+                                        emit_notice_from_text(&tx, text);
+                                    }
                                     if is_conn_limit_error(text) {
                                         warn!(
                                             source = opts.source,
                                             "服务器连接数超限，请关闭其它占用同令牌或同 IP 的客户端后重试"
+                                        );
+                                        emit_health(&tx, opts.source, HealthStatus::Abnormal);
+                                        rate_limited = true;
+                                        break;
+                                    }
+                                    if is_ban_error(text) {
+                                        warn!(
+                                            source = opts.source,
+                                            "IP 或账号封禁"
                                         );
                                         emit_health(&tx, opts.source, HealthStatus::Abnormal);
                                         rate_limited = true;
@@ -222,11 +257,21 @@ where
                 emit_health(&tx, opts.source, HealthStatus::Fluctuating);
             }
             Err(e) => {
+                let es = e.to_string();
                 warn!(
                     source = opts.source,
                     "connect failed: {}",
-                    redact_secrets(&e.to_string())
+                    redact_secrets(&es)
                 );
+                if is_conn_limit_text(&es) || is_ban_text(&es) || es.contains("403") || es.contains("429")
+                {
+                    emit_notice_from_text(&tx, &es);
+                    if is_conn_limit_text(&es) || es.contains("429") {
+                        backoff = backoff.max(45);
+                    } else {
+                        backoff = backoff.max(60);
+                    }
+                }
                 emit_health(&tx, opts.source, HealthStatus::Abnormal);
             }
         }
@@ -249,32 +294,38 @@ fn is_error_frame(text: &str) -> bool {
     text.contains("\"type\":\"error\"") || text.contains("\"type\": \"error\"")
 }
 
+fn is_server_reject_frame(text: &str) -> bool {
+    is_error_frame(text)
+        || (text.contains("\"ok\":false") || text.contains("\"ok\": false"))
+            && (text.contains("\"code\"") || text.contains("\"error\""))
+}
+
 fn is_conn_limit_error(text: &str) -> bool {
-    if !is_error_frame(text) {
-        return false;
-    }
-    text.contains("连接限制")
-        || text.contains("conn_limit")
-        || text.contains("超过服务器连接")
-        || text.contains("max_connections")
+    is_conn_limit_text(text)
+        && (is_error_frame(text)
+            || text.contains("\"ok\":false")
+            || text.contains("\"ok\": false")
+            || text.contains("连接限制")
+            || text.contains("超过服务器连接"))
+}
+
+fn is_ban_error(text: &str) -> bool {
+    is_ban_text(text)
+        && (is_error_frame(text)
+            || text.contains("\"ok\":false")
+            || text.contains("\"ok\": false")
+            || text.contains("已被封禁")
+            || text.contains("黑名单"))
 }
 
 fn is_auth_error(text: &str) -> bool {
-    if !is_error_frame(text) {
+    if !(is_error_frame(text)
+        || text.contains("\"ok\":false")
+        || text.contains("\"ok\": false"))
+    {
         return false;
     }
-    text.contains("expired_access_token")
-        || text.contains("invalid_api_key")
-        || text.contains("missing_api_key")
-        || text.contains("invalid_token_format")
-        || text.contains("invalid_refresh_token")
-        || text.contains("expired_refresh_token")
-        || text.contains("\"code\":4001")
-        || text.contains("\"code\":4002")
-        || text.contains("\"code\":4003")
-        || text.contains("\"code\":4004")
-        || text.contains("\"code\":4201")
-        || text.contains("\"code\":4202")
+    is_auth_error_text(text)
 }
 
 fn error_message(text: &str) -> Option<&str> {

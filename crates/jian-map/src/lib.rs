@@ -5,8 +5,10 @@ mod fault_lines;
 mod globe;
 mod marker_icons;
 mod overlay;
+mod overlay_tiles;
 mod projection;
 mod tile_cache;
+mod weather_paint;
 mod topojson;
 mod tsunami_coast;
 mod vector_basemap;
@@ -75,6 +77,7 @@ use marker_icons::MarkerIcons;
 use projection::ViewCtx;
 use fault_lines::FaultLines;
 use tsunami_coast::TsunamiCoast;
+use overlay_tiles::OverlayTileCache;
 use tile_cache::TileCache as Cache;
 use std::sync::Arc;
 
@@ -113,6 +116,10 @@ pub struct MapViewport {
     station_cache: overlay::StationPaintCache,
     /// 非交互时合成底图层，避免波圈动画每帧再走一遍矢量/断层/测站路径
     still_static: Option<StillStatic>,
+    radar_tiles: OverlayTileCache,
+    cloud_tiles: OverlayTileCache,
+    show_terminator: bool,
+    wind: Option<jian_core::WindGrid>,
 }
 
 impl Default for MapViewport {
@@ -140,6 +147,16 @@ impl Default for MapViewport {
             paint_quality: PaintQuality::Normal,
             station_cache: overlay::StationPaintCache::default(),
             still_static: None,
+            radar_tiles: OverlayTileCache::new(
+                "/2/1_0.png",
+                Color32::from_rgba_unmultiplied(255, 255, 255, 200),
+            ),
+            cloud_tiles: OverlayTileCache::new(
+                "/0/0_0.png",
+                Color32::from_rgba_unmultiplied(255, 255, 255, 140),
+            ),
+            show_terminator: false,
+            wind: None,
         }
     }
 }
@@ -369,6 +386,20 @@ impl MapViewport {
         self.paint_quality = q;
     }
 
+    /// 全球雷达 / 云图瓦片前缀（空则不画）。云图无 path 时传空串。
+    pub fn set_weather_tile_prefixes(&mut self, radar_prefix: &str, cloud_prefix: &str) {
+        self.radar_tiles.set_prefix(radar_prefix);
+        self.cloud_tiles.set_prefix(cloud_prefix);
+    }
+
+    pub fn set_wind_grid(&mut self, wind: Option<jian_core::WindGrid>) {
+        self.wind = wind;
+    }
+
+    pub fn set_show_terminator(&mut self, on: bool) {
+        self.show_terminator = on;
+    }
+
     /// 绘制地图交互；若单击（非拖拽）则返回点击处经纬度。
     /// `wave_events`：仍在传播的多震；`eew_markers`：各源最新预警叉标；`active` 高亮选中。
     pub fn ui(
@@ -500,6 +531,19 @@ impl MapViewport {
         if !globe && self.basemap.show_tiles() {
             self.cache
                 .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
+        }
+
+        if !globe {
+            self.radar_tiles
+                .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
+            self.cloud_tiles
+                .paint(ui, rect, self.center_lon, self.center_lat, self.zoom);
+            if self.show_terminator {
+                weather_paint::paint_terminator(ui, &view, now_ms);
+            }
+            if let Some(grid) = self.wind.as_ref() {
+                weather_paint::paint_wind(ui, &view, grid);
+            }
         }
 
         if still_hit {

@@ -215,8 +215,10 @@ pub struct SettingsSession {
     save_note: Option<String>,
     login_key: String,
     auth_busy: bool,
-    /// 后台换票结果（避免阻塞 UI 帧）
-    auth_rx: Option<mpsc::Receiver<Result<(String, f64, String), String>>>,
+    /// 后台换票结果（避免阻塞 UI 帧）：token, expire, max_connections, message
+    auth_rx: Option<mpsc::Receiver<Result<(String, f64, u32, String), String>>>,
+    /// 换票失败弹窗
+    auth_alert: Option<(String, String)>,
     /// 主地图单击选点目标
     pub map_pick: Option<MapPickKind>,
     /// 下一帧用主地图中心写入默认视口
@@ -240,6 +242,7 @@ impl Default for SettingsSession {
             login_key: String::new(),
             auth_busy: false,
             auth_rx: None,
+            auth_alert: None,
             map_pick: None,
             capture_view: false,
             opened_at: None,
@@ -259,6 +262,7 @@ impl SettingsSession {
         self.login_key.clear();
         self.auth_busy = false;
         self.auth_rx = None;
+        self.auth_alert = None;
         self.map_pick = None;
         self.capture_view = false;
         self.opened_at = Some(std::time::Instant::now());
@@ -333,6 +337,7 @@ impl SettingsSession {
         live: &AppConfig,
         health: &SourceHealthView,
     ) -> Option<SettingsAction> {
+        self.draw_auth_alert(ctx);
         // 选点时不挡地图；设置保持 open，选完自动回来
         if self.map_pick.is_some() {
             return None;
@@ -448,7 +453,7 @@ impl SettingsSession {
                             } else {
                                 ok.expire_at
                             };
-                            (ok.token, exp, ok.message)
+                            (ok.token, exp, ok.max_connections, ok.message)
                         }),
                 );
             });
@@ -456,17 +461,25 @@ impl SettingsSession {
 
         let auth_poll = self.auth_rx.as_ref().map(|rx| rx.try_recv());
         match auth_poll {
-            Some(Ok(Ok((token, expire_at, message)))) => {
+            Some(Ok(Ok((token, expire_at, max_conn, message)))) => {
                 self.auth_rx = None;
                 self.auth_busy = false;
                 if let Some(draft) = self.draft.as_mut() {
                     draft.sources.jian.refresh_token = Some(token);
                     draft.sources.jian.refresh_expire_at = expire_at;
+                    if max_conn > 0 {
+                        draft.sources.jian.max_connections = max_conn;
+                    }
                 }
                 let expire = format_expire_date(expire_at)
-                    .map(|d| format!("，约至 {d}"))
+                    .map(|d| format!("，长期 Token 过期：{d}"))
                     .unwrap_or_default();
-                self.save_note = Some(format!("{message}{expire}"));
+                let cap = if max_conn > 0 {
+                    format!("，并发上限 {max_conn}")
+                } else {
+                    String::new()
+                };
+                self.save_note = Some(format!("{message}{expire}{cap}"));
                 self.login_key.clear();
                 if let Some(draft) = self.draft.clone() {
                     action = Some(SettingsAction::Saved {
@@ -479,6 +492,7 @@ impl SettingsSession {
                 self.auth_rx = None;
                 self.auth_busy = false;
                 self.save_note = Some(format!("{}{e}", t("鉴权失败：")));
+                self.auth_alert = Some((t("鉴权失败").into(), e));
             }
             Some(Err(mpsc::TryRecvError::Empty)) => {
                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
@@ -495,10 +509,12 @@ impl SettingsSession {
             let token = live.sources.jian.access_token.clone();
             let refresh = live.sources.jian.refresh_token.clone();
             let refresh_exp = live.sources.jian.refresh_expire_at;
+            let max_conn = live.sources.jian.max_connections;
             let mut d = AppConfig::default();
             d.sources.jian.access_token = token;
             d.sources.jian.refresh_token = refresh;
             d.sources.jian.refresh_expire_at = refresh_exp;
+            d.sources.jian.max_connections = max_conn;
             self.draft = Some(d);
             self.save_note = Some(t("已恢复默认（令牌保留）；点「保存全部」写入").into());
         }
@@ -533,6 +549,29 @@ impl SettingsSession {
             return action;
         }
         None
+    }
+
+    fn draw_auth_alert(&mut self, ctx: &egui::Context) {
+        let Some((title, body)) = self.auth_alert.clone() else {
+            return;
+        };
+        let mut close = false;
+        egui::Window::new(title)
+            .id(egui::Id::new("auth_alert"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_min_width(280.0);
+                ui.label(body);
+                ui.add_space(8.0);
+                if ui.button(t("知道了")).clicked() {
+                    close = true;
+                }
+            });
+        if close {
+            self.auth_alert = None;
+        }
     }
 }
 
@@ -1137,10 +1176,15 @@ fn draw_sources(
                 rt.to_string()
             };
             let exp = format_expire_date(draft.sources.jian.refresh_expire_at)
-                .map(|d| format!("（约至 {d}）"))
+                .map(|d| format!("（过期 {d}）"))
                 .unwrap_or_default();
+            let cap = if draft.sources.jian.max_connections > 0 {
+                format!(" · 并发 {}", draft.sources.jian.max_connections)
+            } else {
+                String::new()
+            };
             ui.label(
-                RichText::new(format!("{}", t("长期 Token：{short}{exp}").replace("{short}", &short).replace("{exp}", &exp)))
+                RichText::new(format!("{}", t("长期 Token：{short}{exp}").replace("{short}", &short).replace("{exp}", &format!("{exp}{cap}"))))
                     .size(11.5)
                     .color(chrome().muted),
             );
@@ -1614,6 +1658,22 @@ fn draw_general(
         row_divider(ui);
         control_row(ui, "活动断层", "默认关；开启后才加载并绘制 GEM/CAFD 迹线", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_faults);
+        });
+        row_divider(ui);
+        control_row(ui, "全球雷达", "RainViewer 全球降水雷达叠层", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.ui.show_global_radar);
+        });
+        row_divider(ui);
+        control_row(ui, "全球云图", "RainViewer 红外云图；上游无时次则不画", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.ui.show_global_cloud);
+        });
+        row_divider(ui);
+        control_row(ui, "全球风场", "近地面风场箭头（本站风场接口）", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.ui.show_global_wind);
+        });
+        row_divider(ui);
+        control_row(ui, "晨昏线", "按本机时间绘制夜侧与晨昏分界", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.ui.show_terminator);
         });
         row_divider(ui);
         control_row(ui, "台风预报源", "地图预报路径所用机构", "\u{25ce}", |ui| {

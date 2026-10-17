@@ -1755,6 +1755,7 @@ dependencies = [
 name = "jian-core"
 version = "1.5.1"
 dependencies = [
+ "chrono",
  "jian-util",
  "serde",
  "serde_json",

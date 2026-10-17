@@ -3,6 +3,8 @@
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::notice::{notice_from_server, parse_server_error};
+
 const REFRESH_URL: &str = "https://auth.sismotide.top/api/refresh";
 const ACCESS_URL: &str = "https://auth.sismotide.top/api/access";
 const UA: &str = "EEWView/0.1";
@@ -14,6 +16,8 @@ pub struct TokenOk {
     pub expire_at: f64,
     /// 所用/签发的长期 Token（rt_）过期时刻（unix 秒）；未知则为 0
     pub refresh_expire_at: f64,
+    /// 每把长期 Token 最大并发；未知为 0
+    pub max_connections: u32,
     pub message: String,
 }
 
@@ -28,6 +32,7 @@ struct AuthBody {
     expires_after_min: Option<i64>,
     refresh_expires_at: Option<i64>,
     refresh_expires_after_min: Option<i64>,
+    max_connections: Option<u32>,
 }
 
 fn now_unix() -> f64 {
@@ -64,23 +69,41 @@ fn parse_refresh_expire(body: &AuthBody) -> f64 {
     0.0
 }
 
+fn code_i32(code: &Option<serde_json::Value>) -> i32 {
+    match code {
+        Some(serde_json::Value::Number(n)) => n.as_i64().unwrap_or(0) as i32,
+        Some(serde_json::Value::String(s)) => s.parse().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn format_auth_err(error: Option<String>, message: Option<String>, code: Option<serde_json::Value>) -> String {
+    let c = code_i32(&code);
+    let err = error.unwrap_or_default();
+    let msg = message.unwrap_or_default();
+    let n = notice_from_server(c, &err, &msg);
+    if c > 0 {
+        format!("{}：{} (code={c})", n.title, n.body.lines().next().unwrap_or(""))
+    } else if !msg.is_empty() {
+        if !err.is_empty() {
+            format!("{msg} ({err})")
+        } else {
+            msg
+        }
+    } else if !err.is_empty() {
+        err
+    } else {
+        "鉴权失败".into()
+    }
+}
+
 fn parse_body(body: AuthBody) -> Result<TokenOk, String> {
     if body.ok == Some(false) {
-        let mut err = body
-            .error
-            .or(body.message)
-            .unwrap_or_else(|| "鉴权失败".into());
-        if let Some(code) = body.code {
-            err = format!("{err} (code={code})");
-        }
-        return Err(err);
+        return Err(format_auth_err(body.error, body.message, body.code));
     }
-    let token = body.token.unwrap_or_default().trim().to_string();
+    let token = body.token.clone().unwrap_or_default().trim().to_string();
     if token.is_empty() {
-        return Err(body
-            .error
-            .or(body.message)
-            .unwrap_or_else(|| "未返回令牌".into()));
+        return Err(format_auth_err(body.error, body.message, body.code));
     }
     let refresh_expire_at = parse_refresh_expire(&body);
     let expire_at = if let Some(sec) = body.expires_after_sec {
@@ -96,6 +119,7 @@ fn parse_body(body: AuthBody) -> Result<TokenOk, String> {
         token,
         expire_at,
         refresh_expire_at,
+        max_connections: body.max_connections.unwrap_or(0),
         message: "OK".into(),
     })
 }
@@ -113,14 +137,21 @@ fn post_bearer(url: &str, token: &str) -> Result<TokenOk, String> {
         .send()
         .map_err(|e| e.to_string())?;
     let status = resp.status();
-    let body: AuthBody = resp.json().map_err(|e| {
-        if !status.is_success() {
-            format!("HTTP {status}")
-        } else {
-            e.to_string()
-        }
-    })?;
-    parse_body(body)
+    let text = resp.text().map_err(|e| e.to_string())?;
+    if let Ok(body) = serde_json::from_str::<AuthBody>(&text) {
+        return parse_body(body);
+    }
+    if let Some((code, error, message)) = parse_server_error(&text) {
+        return Err(format_auth_err(
+            Some(error),
+            Some(message),
+            Some(serde_json::json!(code)),
+        ));
+    }
+    if !status.is_success() {
+        return Err(format!("HTTP {status}"));
+    }
+    Err("鉴权响应无法解析".into())
 }
 
 /// 用邮件登录密钥 `lk_` 换取长期 Token `rt_`（约 180 天）。
@@ -171,6 +202,7 @@ pub fn verify_refresh_token(refresh_token: &str) -> Result<TokenOk, String> {
         token: refresh_token.trim().to_string(),
         expire_at: ok.refresh_expire_at,
         refresh_expire_at: ok.refresh_expire_at,
+        max_connections: ok.max_connections,
         message: "长期 Token 有效。".into(),
     })
 }

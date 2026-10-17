@@ -17,9 +17,9 @@ use intensity_icons::IntensityIcons;
 use jian_core::palette::color_for;
 use jian_core::{
     agency_bracket, dedupe_same_eew_events, eew_sidebar_entries, eew_sidebar_group_key,
-    eew_wave_active_spread, is_wave_candidate, max_s_spread_km, place_with_agency,
-    prefer_intensity_scale, same_eew_event, AppSnapshot, EewReport, IntensityKind, ListSelection,
-    OverlayMode, SidebarTab,
+    eew_wave_active_spread, format_hm_minutes, is_wave_candidate, max_s_spread_km, place_with_agency,
+    prefer_intensity_scale, same_eew_event, sunrise_sunset_local_hm, AppSnapshot, EewReport,
+    IntensityKind, ListSelection, OverlayMode, SidebarTab, UserNotice,
 };
 use jian_core::palette::{cn_intensity_rgb, instrumental_band_rgb};
 use jian_map::{
@@ -27,7 +27,9 @@ use jian_map::{
     ProjectionMode, TyphoonHoverHit, VectorStyle, OCEAN,
 };
 use jian_travel::{max_s_wave_spread_km, s_wave_still_spreading_to, TravelEngine, Wave};
+use std::collections::HashMap;
 use std::path::Path;
+use std::time::{Duration, Instant};
 use theme::{ThemePalette, UiTheme};
 
 pub use settings::{MapPickKind, SettingsAction, SettingsSession, SourceHealthView};
@@ -95,6 +97,10 @@ pub struct MainShell {
     pub intensity_scale: String,
     pub settings: SettingsSession,
     intensity_icons: IntensityIcons,
+    /// 待确认的服务器提示
+    notices: Vec<UserNotice>,
+    /// 同类提示冷却，避免重连刷屏
+    notice_seen: HashMap<String, Instant>,
 }
 
 impl Default for MainShell {
@@ -111,6 +117,8 @@ impl Default for MainShell {
             intensity_scale: "auto".into(),
             settings: SettingsSession::default(),
             intensity_icons: IntensityIcons::default(),
+            notices: Vec::new(),
+            notice_seen: HashMap::new(),
         }
     }
 }
@@ -168,6 +176,7 @@ impl MainShell {
         cfg: &mut jian_config::AppConfig,
     ) -> (Option<SettingsAction>, bool) {
         crate::i18n::set_lang_from_config(&cfg.ui.language);
+        self.absorb_notices(snap);
         let ui_theme = UiTheme::from_config(&cfg.ui.theme);
         ui_theme.apply_egui(ctx);
         let p = ui_theme.palette();
@@ -318,6 +327,35 @@ impl MainShell {
                 };
                 let show_typhoons_map =
                     cfg.ui.show_typhoons && cfg.sources.typhoon.enabled;
+                let host = snap.weather.rainviewer_host.trim_end_matches('/');
+                let radar_prefix = if cfg.ui.show_global_radar {
+                    snap.weather
+                        .radar_path
+                        .as_ref()
+                        .filter(|_| !host.is_empty())
+                        .map(|p| format!("{host}{p}/256"))
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let cloud_prefix = if cfg.ui.show_global_cloud {
+                    snap.weather
+                        .cloud_path
+                        .as_ref()
+                        .filter(|_| !host.is_empty())
+                        .map(|p| format!("{host}{p}/256"))
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                self.map
+                    .set_weather_tile_prefixes(&radar_prefix, &cloud_prefix);
+                self.map.set_show_terminator(cfg.ui.show_terminator);
+                self.map.set_wind_grid(if cfg.ui.show_global_wind {
+                    snap.weather.wind.clone()
+                } else {
+                    None
+                });
                 map_ui = self.map.ui(
                     ui,
                     snap.active.as_ref(),
@@ -425,7 +463,15 @@ impl MainShell {
                 if cfg.ui.show_legend {
                     draw_legend_bar(ui, &p);
                 }
-                draw_countdown_hud(ui, &p, snap, self.show_nied_clock, map_rect);
+                draw_countdown_hud(
+                    ui,
+                    &p,
+                    snap,
+                    self.show_nied_clock,
+                    map_rect,
+                    self.local_lat,
+                    self.local_lon,
+                );
 
                 // 侧栏关闭时：地图右键菜单（开着侧栏时不挂，避免挡列表）
                 let allow_ctx = !show_sidebar
@@ -616,8 +662,55 @@ impl MainShell {
             pancakes_enabled: cfg.sources.pancakes.enabled,
             fssn_enabled: cfg.sources.fssn.enabled,
         };
+        self.draw_user_notice(ctx);
         let settings_action = self.settings.ui(ctx, cfg, &health);
         (settings_action, persist_cfg)
+    }
+
+    fn absorb_notices(&mut self, snap: &mut AppSnapshot) {
+        let now = Instant::now();
+        self.notice_seen
+            .retain(|_, t| now.duration_since(*t) < Duration::from_secs(180));
+        for n in snap.take_notices() {
+            if self.notices.iter().any(|x| x.dedupe_key == n.dedupe_key) {
+                continue;
+            }
+            if self
+                .notice_seen
+                .get(&n.dedupe_key)
+                .is_some_and(|t| now.duration_since(*t) < Duration::from_secs(90))
+            {
+                continue;
+            }
+            self.notices.push(n);
+        }
+    }
+
+    fn draw_user_notice(&mut self, ctx: &egui::Context) {
+        let Some(n) = self.notices.first().cloned() else {
+            return;
+        };
+        let mut close = false;
+        egui::Window::new(crate::i18n::t(&n.title))
+            .id(egui::Id::new("server_notice"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_min_width(280.0);
+                ui.label(n.body);
+                ui.add_space(8.0);
+                if ui.button(crate::i18n::t("知道了")).clicked() {
+                    close = true;
+                }
+            });
+        if close {
+            if let Some(gone) = self.notices.first() {
+                self.notice_seen
+                    .insert(gone.dedupe_key.clone(), Instant::now());
+            }
+            self.notices.remove(0);
+        }
     }
 
     fn apply_map_pick(&mut self, lon: f64, lat: f64) {
@@ -1699,6 +1792,8 @@ fn draw_countdown_hud(
     snap: &AppSnapshot,
     show_nied: bool,
     map_rect: egui::Rect,
+    local_lat: Option<f64>,
+    local_lon: Option<f64>,
 ) {
     let local = Local::now();
     let clock = local.format("%Y/%m/%d %H:%M:%S").to_string();
@@ -1718,7 +1813,20 @@ fn draw_countdown_hud(
     let br = map_rect.right_bottom() + Vec2::new(-4.0, -4.0);
     let hud_w = 280.0_f32;
     let clock_block_h = 36.0_f32;
-    let n_clocks = 1 + usize::from(show_nied);
+    let sun_line = match (local_lat, local_lon) {
+        (Some(lat), Some(lon)) => sunrise_sunset_local_hm(lat, lon, local.timestamp_millis())
+            .map(|(rise, set)| {
+                format!(
+                    "{} {}  {} {}",
+                    crate::i18n::t("日出"),
+                    format_hm_minutes(rise),
+                    crate::i18n::t("日落"),
+                    format_hm_minutes(set)
+                )
+            }),
+        _ => None,
+    };
+    let n_clocks = 1 + usize::from(show_nied) + usize::from(sun_line.is_some());
     let countdown_h = if snap.countdown_s.is_some() { 72.0 } else { 0.0 };
     let gap = 6.0_f32;
     let hud_h = countdown_h + clock_block_h * n_clocks as f32 + gap + 8.0;
@@ -1734,6 +1842,9 @@ fn draw_countdown_hud(
 
         // 自下而上：北京时间 →（可选）东京时间
         y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, crate::i18n::t("北京时间"), &clock);
+        if let Some(sun) = sun_line.as_ref() {
+            y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, crate::i18n::t("所在地"), sun);
+        }
         if let Some(jst) = jst_clock.as_ref() {
             y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, crate::i18n::t("东京时间"), jst);
         }
