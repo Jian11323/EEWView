@@ -37,13 +37,13 @@ impl NetHub {
     }
 
     /// 按开关重启气象轮询（关则停任务）。
-    pub fn set_weather_overlay(&mut self, radar: bool, cloud: bool, wind: bool) {
+    pub fn set_weather_overlay(&mut self, radar: bool, cloud: bool) {
         for t in self.weather.drain(..) {
             t.abort();
         }
-        if radar || cloud || wind {
+        if radar || cloud {
             self.weather
-                .extend(spawn_weather_overlay(self.tx.clone(), radar, cloud, wind));
+                .extend(spawn_weather_overlay(self.tx.clone(), radar, cloud));
         }
     }
 
@@ -135,14 +135,12 @@ pub fn spawn_weather_overlay(
     tx: NetTx,
     want_radar: bool,
     want_cloud: bool,
-    want_wind: bool,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     sources::weather::spawn(
         tx,
         sources::weather::WeatherPollOpts {
             want_radar,
             want_cloud,
-            want_wind,
         },
     )
 }
@@ -193,7 +191,6 @@ pub fn apply_event_filtered(
             snap.weather.radar_path = radar_path;
             snap.weather.cloud_path = cloud_path;
         }
-        NetEvent::WeatherWind(w) => snap.set_weather_wind(w),
         NetEvent::UserNotice(n) => snap.push_notice(n),
     }
 }

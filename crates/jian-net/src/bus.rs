@@ -2,7 +2,7 @@
 
 use jian_core::{
     EewReport, EqRecord, HealthStatus, StationSample, TsunamiInfo, TyphoonInfo, UserNotice,
-    VolcanoNotice, WindGrid,
+    VolcanoNotice,
 };
 use tokio::sync::mpsc;
 
@@ -37,8 +37,6 @@ pub enum NetEvent {
         radar_path: Option<String>,
         cloud_path: Option<String>,
     },
-    /// 全球风场格点
-    WeatherWind(WindGrid),
     /// 需弹窗提醒用户（鉴权 / 超限 / 封禁）
     UserNotice(UserNotice),
 }

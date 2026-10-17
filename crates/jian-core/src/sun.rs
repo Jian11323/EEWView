@@ -2,49 +2,6 @@
 
 use std::f64::consts::PI;
 
-/// 全球风场格点（U/V，m/s；缺测为 NaN）。
-#[derive(Debug, Clone, Default)]
-pub struct WindGrid {
-    pub time_text: String,
-    pub nx: usize,
-    pub ny: usize,
-    /// 西北角经度（度）
-    pub lo1: f64,
-    /// 西北角纬度（度）
-    pub la1: f64,
-    pub dx: f64,
-    pub dy: f64,
-    pub u: Vec<f32>,
-    pub v: Vec<f32>,
-}
-
-impl WindGrid {
-    pub fn sample(&self, lon: f64, lat: f64) -> Option<(f32, f32)> {
-        if self.nx == 0 || self.ny == 0 || self.u.len() != self.nx * self.ny {
-            return None;
-        }
-        let mut lon = lon;
-        while lon < self.lo1 {
-            lon += 360.0;
-        }
-        while lon >= self.lo1 + self.dx * self.nx as f64 {
-            lon -= 360.0;
-        }
-        let ix = ((lon - self.lo1) / self.dx).floor() as isize;
-        let iy = ((self.la1 - lat) / self.dy).floor() as isize;
-        if ix < 0 || iy < 0 || ix as usize >= self.nx || iy as usize >= self.ny {
-            return None;
-        }
-        let i = iy as usize * self.nx + ix as usize;
-        let u = self.u[i];
-        let v = self.v[i];
-        if !u.is_finite() || !v.is_finite() {
-            return None;
-        }
-        Some((u, v))
-    }
-}
-
 /// 气象叠层运行时状态（上游有则写，无则空）。
 #[derive(Debug, Clone, Default)]
 pub struct WeatherOverlay {
@@ -54,7 +11,6 @@ pub struct WeatherOverlay {
     pub radar_path: Option<String>,
     /// 最新红外云图 path；上游空则 None
     pub cloud_path: Option<String>,
-    pub wind: Option<WindGrid>,
 }
 
 /// 用户提示（鉴权 / 连接限制等），供 UI 弹窗。
@@ -93,14 +49,18 @@ pub fn sun_geometry(unix_ms: i64) -> (f64, f64) {
     (dec, ha)
 }
 
+/// 太阳高度角（度）。`dec_rad` / `ha0_rad` 来自 [`sun_geometry`]。
+pub fn solar_altitude_deg(lon_deg: f64, lat_deg: f64, dec_rad: f64, ha0_rad: f64) -> f64 {
+    let lat = lat_deg.to_radians();
+    let ha = ha0_rad + lon_deg.to_radians();
+    let sin_alt = lat.sin() * dec_rad.sin() + lat.cos() * dec_rad.cos() * ha.cos();
+    sin_alt.clamp(-1.0, 1.0).asin().to_degrees()
+}
+
 /// 给定经纬度是否为夜侧（太阳高度角 < 0）。
 pub fn is_night(lon_deg: f64, lat_deg: f64, unix_ms: i64) -> bool {
     let (dec, ha0) = sun_geometry(unix_ms);
-    let lat = lat_deg.to_radians();
-    let lon = lon_deg.to_radians();
-    let ha = ha0 + lon;
-    let sin_alt = lat.sin() * dec.sin() + lat.cos() * dec.cos() * ha.cos();
-    sin_alt < 0.0
+    solar_altitude_deg(lon_deg, lat_deg, dec, ha0) < 0.0
 }
 
 /// 晨昏线上纬度对应的经度（度）；极昼/极夜返回 None。
@@ -177,6 +137,15 @@ mod tests {
     }
 
     #[test]
+    fn altitude_is_zero_on_terminator() {
+        let t = 1_700_000_000_000i64;
+        let (dec, ha) = sun_geometry(t);
+        let lon = terminator_lon_at_lat(20.0, t).expect("lon");
+        let alt = solar_altitude_deg(lon, 20.0, dec, ha);
+        assert!(alt.abs() < 0.05, "alt {alt}");
+    }
+
+    #[test]
     fn polar_day_has_no_terminator_lon() {
         // 夏至附近北极应极昼，晨昏经度无解
         assert!(terminator_lon_at_lat(89.0, 1_718_841_600_000).is_none());
@@ -196,21 +165,5 @@ mod tests {
         let (rise, set) = sunrise_sunset_local_hm(35.68, 139.76, t).expect("sun times");
         assert!(rise < set, "rise {rise} set {set}");
         assert_eq!(format_hm_minutes(rise).len(), 5);
-    }
-
-    #[test]
-    fn wind_sample_center() {
-        let g = WindGrid {
-            time_text: String::new(),
-            nx: 2,
-            ny: 2,
-            lo1: 0.0,
-            la1: 90.0,
-            dx: 90.0,
-            dy: 90.0,
-            u: vec![1.0, 2.0, 3.0, 4.0],
-            v: vec![0.0, 0.0, 0.0, 0.0],
-        };
-        assert_eq!(g.sample(10.0, 80.0), Some((1.0, 0.0)));
     }
 }

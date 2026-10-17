@@ -241,11 +241,7 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
             &cfg.sources,
             stations_dir.is_dir().then_some(stations_dir),
         );
-        hub.set_weather_overlay(
-            cfg.ui.show_global_radar,
-            cfg.ui.show_global_cloud,
-            cfg.ui.show_global_wind,
-        );
+        hub.set_weather_overlay(cfg.ui.show_global_radar, cfg.ui.show_global_cloud);
         Some(hub)
     };
     let _ = live;
@@ -1245,8 +1241,7 @@ impl JianApp {
 
         let sources_same = self.cfg.sources_runtime_equal(&new_cfg);
         let weather_same = self.cfg.ui.show_global_radar == new_cfg.ui.show_global_radar
-            && self.cfg.ui.show_global_cloud == new_cfg.ui.show_global_cloud
-            && self.cfg.ui.show_global_wind == new_cfg.ui.show_global_wind;
+            && self.cfg.ui.show_global_cloud == new_cfg.ui.show_global_cloud;
         let travel_same = self.cfg.travel.primary == new_cfg.travel.primary
             && self.cfg.travel.fallback == new_cfg.travel.fallback
             && self.cfg.travel.linear_last_resort == new_cfg.travel.linear_last_resort;
@@ -1320,7 +1315,6 @@ impl JianApp {
                 hub.set_weather_overlay(
                     self.cfg.ui.show_global_radar,
                     self.cfg.ui.show_global_cloud,
-                    self.cfg.ui.show_global_wind,
                 );
             }
         }

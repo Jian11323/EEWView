@@ -351,11 +351,6 @@ impl MainShell {
                 self.map
                     .set_weather_tile_prefixes(&radar_prefix, &cloud_prefix);
                 self.map.set_show_terminator(cfg.ui.show_terminator);
-                self.map.set_wind_grid(if cfg.ui.show_global_wind {
-                    snap.weather.wind.clone()
-                } else {
-                    None
-                });
                 map_ui = self.map.ui(
                     ui,
                     snap.active.as_ref(),

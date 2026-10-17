@@ -1743,10 +1743,6 @@ fn draw_general(
             toggle(ui, &mut draft.ui.show_global_cloud);
         });
         row_divider(ui);
-        control_row(ui, "全球风场", "近地面风场箭头（本站风场接口）", "\u{25ce}", |ui| {
-            toggle(ui, &mut draft.ui.show_global_wind);
-        });
-        row_divider(ui);
         control_row(ui, "晨昏线", "按本机时间绘制夜侧与晨昏分界", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_terminator);
         });

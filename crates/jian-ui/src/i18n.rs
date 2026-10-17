@@ -677,9 +677,6 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "全球云图"), "全球雲圖");
         m.insert((Lang::Ja, "全球云图"), "全球雲画像");
         m.insert((Lang::En, "全球云图"), "Global clouds");
-        m.insert((Lang::ZhTw, "全球风场"), "全球風場");
-        m.insert((Lang::Ja, "全球风场"), "全球風");
-        m.insert((Lang::En, "全球风场"), "Global wind");
         m.insert((Lang::ZhTw, "晨昏线"), "晨昏線");
         m.insert((Lang::Ja, "晨昏线"), "昼夜境界線");
         m.insert((Lang::En, "晨昏线"), "Terminator");
@@ -703,7 +700,6 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::En, "连接超限"), "Connection limit");
         m.insert((Lang::En, "RainViewer 全球降水雷达叠层"), "RainViewer global precipitation radar");
         m.insert((Lang::En, "RainViewer 红外云图；上游无时次则不画"), "RainViewer infrared clouds; hidden if no frame");
-        m.insert((Lang::En, "近地面风场箭头（本站风场接口）"), "Near-surface wind barbs (site wind API)");
         m.insert((Lang::En, "按本机时间绘制夜侧与晨昏分界"), "Night shade and terminator from local time");
         m.insert((Lang::ZhTw, "活跃台风路径、风圈与预报线"), "活躍颱風路徑、風圈與預報線");
         m.insert((Lang::Ja, "活跃台风路径、风圈与预报线"), "活動台風の経路・風円・予報線");

@@ -119,7 +119,6 @@ pub struct MapViewport {
     radar_tiles: OverlayTileCache,
     cloud_tiles: OverlayTileCache,
     show_terminator: bool,
-    wind: Option<jian_core::WindGrid>,
 }
 
 impl Default for MapViewport {
@@ -156,7 +155,6 @@ impl Default for MapViewport {
                 Color32::from_rgba_unmultiplied(255, 255, 255, 140),
             ),
             show_terminator: false,
-            wind: None,
         }
     }
 }
@@ -392,10 +390,6 @@ impl MapViewport {
         self.cloud_tiles.set_prefix(cloud_prefix);
     }
 
-    pub fn set_wind_grid(&mut self, wind: Option<jian_core::WindGrid>) {
-        self.wind = wind;
-    }
-
     pub fn set_show_terminator(&mut self, on: bool) {
         self.show_terminator = on;
     }
@@ -604,9 +598,6 @@ impl MapViewport {
         self.cloud_tiles.paint(ui, &view);
         if self.show_terminator {
             weather_paint::paint_terminator(ui, &view, now_ms);
-        }
-        if let Some(grid) = self.wind.as_ref() {
-            weather_paint::paint_wind(ui, &view, grid);
         }
 
         let mut typhoon_hover = None;

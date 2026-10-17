@@ -27,8 +27,8 @@ pub use intensity::{
 };
 pub use palette::{instrumental_band_level, instrumental_band_rgb, instrumental_rgb};
 pub use sun::{
-    format_hm_minutes, is_night, sun_geometry, sunrise_sunset_local_hm, terminator_lon_at_lat,
-    UserNotice, UserNoticeKind, WeatherOverlay, WindGrid,
+    format_hm_minutes, is_night, solar_altitude_deg, sun_geometry, sunrise_sunset_local_hm,
+    terminator_lon_at_lat, UserNotice, UserNoticeKind, WeatherOverlay,
 };
 
 // tsunami_official_rgb / tsunami_grade_zh 定义于本文件
@@ -638,7 +638,7 @@ pub struct AppSnapshot {
     pub volcanoes: Vec<VolcanoNotice>,
     /// 活跃台风（路径 / 风圈 / 预报）
     pub typhoons: Vec<TyphoonInfo>,
-    /// 全球气象叠层（雷达 / 云图 path、风场）
+    /// 全球气象叠层（雷达 / 云图 path）
     pub weather: WeatherOverlay,
     /// 待弹窗用户提示（鉴权 / 超限 / 封禁）；主循环 take
     pub pending_notices: Vec<UserNotice>,
@@ -970,10 +970,6 @@ impl AppSnapshot {
         if let Some(p) = cloud_path {
             self.weather.cloud_path = Some(p);
         }
-    }
-
-    pub fn set_weather_wind(&mut self, wind: WindGrid) {
-        self.weather.wind = Some(wind);
     }
 
     pub fn set_tsunami(&mut self, info: Option<TsunamiInfo>) {

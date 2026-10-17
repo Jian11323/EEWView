@@ -112,9 +112,6 @@ pub struct UiConfig {
     /// 全球红外云图叠层（RainViewer；无时次则不画）
     #[serde(default = "default_false")]
     pub show_global_cloud: bool,
-    /// 全球近地面风场箭头（本站 /get/wind）
-    #[serde(default = "default_false")]
-    pub show_global_wind: bool,
     /// 全球晨昏线与夜侧遮罩
     #[serde(default = "default_false")]
     pub show_terminator: bool,
@@ -794,7 +791,6 @@ impl Default for AppConfig {
                 show_faults: false,
                 show_global_radar: false,
                 show_global_cloud: false,
-                show_global_wind: false,
                 show_terminator: false,
                 typhoon_forecast_agency: default_typhoon_forecast_agency(),
             },
