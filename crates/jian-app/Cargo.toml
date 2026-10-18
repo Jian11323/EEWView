@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "eewview"
+name = "starquake"
 path = "src/main.rs"
 
 [build-dependencies]
@@ -27,3 +27,6 @@ tracing-appender = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+zip = { version = "2", default-features = false, features = ["deflate"] }

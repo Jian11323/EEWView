@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Windows 安装包：基于已组装的 dist/EEWView + NSIS → setup.exe。"""
+"""Windows 安装包：基于已组装的 dist/StarQuake + NSIS → setup.exe。"""
 from __future__ import annotations
 
 import os
@@ -50,7 +50,7 @@ def ensure_nsis() -> Path:
         log(f"download NSIS -> {zip_path.name}")
         req = urllib.request.Request(
             NSIS_URL,
-            headers={"User-Agent": "EEWView-packager"},
+            headers={"User-Agent": "StarQuake-packager"},
         )
         with urllib.request.urlopen(req, timeout=180) as resp, zip_path.open("wb") as f:
             shutil.copyfileobj(resp, f)
@@ -76,8 +76,8 @@ def ensure_nsis() -> Path:
 
 
 def ensure_portable(*, force: bool) -> Path:
-    dist = ROOT / "dist" / "EEWView"
-    exe = dist / "eewview.exe"
+    dist = ROOT / "dist" / "StarQuake"
+    exe = dist / "starquake.exe"
     splash = dist / "icon" / "brand" / "splash_bg.png"
     need = force or (not exe.is_file()) or (not splash.is_file()) or (not (dist / "media").is_dir() and (dist / "icon").is_dir())
     if not need:
@@ -100,18 +100,18 @@ def main() -> int:
         force = True
 
     ver = workspace_version(ROOT)
-    log(f"EEW View Beta {ver} Windows installer")
+    log(f"StarQuake {ver} Windows installer")
     assert_brand_assets(ROOT)
     dist = ensure_portable(force=force)
     makensis = ensure_nsis()
-    out = ROOT / "dist" / f"EEWView_Beta_{ver}_setup.exe"
+    out = ROOT / "dist" / f"StarQuake_{ver}_setup.exe"
     if out.exists():
         out.unlink()
 
     # ASCII staging paths — avoid NSIS/cmdline Unicode path issues
-    stage_root = Path(os.environ.get("TEMP", tempfile.gettempdir())) / "eewview_nsis"
-    stage_dist = stage_root / "EEWView"
-    stage_out = stage_root / f"EEWView_Beta_{ver}_setup.exe"
+    stage_root = Path(os.environ.get("TEMP", tempfile.gettempdir())) / "starquake_nsis"
+    stage_dist = stage_root / "StarQuake"
+    stage_out = stage_root / f"StarQuake_{ver}_setup.exe"
     if stage_root.exists():
         shutil.rmtree(stage_root, ignore_errors=True)
     stage_root.mkdir(parents=True, exist_ok=True)

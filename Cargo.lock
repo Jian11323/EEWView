@@ -109,6 +109,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "arbitrary"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
+dependencies = [
+ "derive_arbitrary",
+]
+
+[[package]]
 name = "arboard"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -507,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "convert_travel_tables"
-version = "1.6.1"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -709,6 +718,17 @@ name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
+
+[[package]]
+name = "derive_arbitrary"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b034bd7d5f032402a2479444dcc6f74e36a03f31854d41680fb240ef682a1ac"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
+]
 
 [[package]]
 name = "digest"
@@ -1514,7 +1534,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -1707,7 +1727,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jian-app"
-version = "1.6.1"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1721,16 +1741,19 @@ dependencies = [
  "jian-travel",
  "jian-ui",
  "jian-util",
+ "reqwest",
+ "serde",
  "tokio",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "winres",
+ "zip",
 ]
 
 [[package]]
 name = "jian-audio"
-version = "1.6.1"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "rodio",
@@ -1742,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "jian-config"
-version = "1.6.1"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "directories",
@@ -1753,7 +1776,7 @@ dependencies = [
 
 [[package]]
 name = "jian-core"
-version = "1.6.1"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "jian-util",
@@ -1763,7 +1786,7 @@ dependencies = [
 
 [[package]]
 name = "jian-map"
-version = "1.6.1"
+version = "2.0.0"
 dependencies = [
  "earcutr",
  "egui",
@@ -1780,7 +1803,7 @@ dependencies = [
 
 [[package]]
 name = "jian-net"
-version = "1.6.1"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1799,7 +1822,7 @@ dependencies = [
 
 [[package]]
 name = "jian-travel"
-version = "1.6.1"
+version = "2.0.0"
 dependencies = [
  "jian-util",
  "serde",
@@ -1809,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "jian-ui"
-version = "1.6.1"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "egui",
@@ -1826,7 +1849,7 @@ dependencies = [
 
 [[package]]
 name = "jian-util"
-version = "1.6.1"
+version = "2.0.0"
 dependencies = [
  "jian-config",
  "sysinfo",
@@ -5394,6 +5417,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "zip"
+version = "2.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dcb24d0152526ae49b9b96c1dcf71850ca1e0b882e4e28ed898a93c41334744"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "crossbeam-utils",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "zopfli",
+]
+
+[[package]]
 name = "zlib-rs"
 version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5404,6 +5442,18 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zopfli"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaf7fc5d30c28483d93805c4a5e12b05bbb52407fa67c5f8bd552374cd01fb11"
+dependencies = [
+ "bumpalo",
+ "crc32fast",
+ "log",
+ "simd-adler32",
+]
 
 [[package]]
 name = "zune-core"

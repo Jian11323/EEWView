@@ -12,6 +12,8 @@ pub struct Player {
     _handle: OutputStreamHandle,
     event_sink: Sink,
     loop_sink: Sink,
+    /// 倒计时语音，不打断事件音
+    speech_sink: Sink,
     master: f32,
     countdown_vol: f32,
     mute: bool,
@@ -23,11 +25,13 @@ impl Player {
             OutputStream::try_default().context("打开默认音频输出失败（无声卡/权限？）")?;
         let event_sink = Sink::try_new(&handle).context("event sink")?;
         let loop_sink = Sink::try_new(&handle).context("loop sink")?;
+        let speech_sink = Sink::try_new(&handle).context("speech sink")?;
         let player = Self {
             _stream: stream,
             _handle: handle,
             event_sink,
             loop_sink,
+            speech_sink,
             master: master.clamp(0.0, 1.0),
             countdown_vol: countdown_vol.clamp(0.0, 1.0),
             mute,
@@ -52,9 +56,11 @@ impl Player {
         if self.mute {
             self.event_sink.set_volume(0.0);
             self.loop_sink.set_volume(0.0);
+            self.speech_sink.set_volume(0.0);
         } else {
             self.event_sink.set_volume(self.master);
             self.loop_sink.set_volume(self.countdown_vol);
+            self.speech_sink.set_volume(self.countdown_vol);
         }
     }
 
@@ -67,6 +73,18 @@ impl Player {
                 self.event_sink.play();
             }
             Err(e) => warn!(path = %path.display(), "play oneshot: {e:#}"),
+        }
+    }
+
+    /// 倒计时语音（地牛 10s/9s…），不占用事件轨
+    pub fn play_speech(&self, path: &Path) {
+        self.speech_sink.stop();
+        match decode(path) {
+            Ok(source) => {
+                self.speech_sink.append(source);
+                self.speech_sink.play();
+            }
+            Err(e) => warn!(path = %path.display(), "countdown speech: {e:#}"),
         }
     }
 

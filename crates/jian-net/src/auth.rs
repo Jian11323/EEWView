@@ -7,7 +7,7 @@ use crate::notice::{notice_from_server, parse_server_error};
 
 const REFRESH_URL: &str = "https://auth.sismotide.top/api/refresh";
 const ACCESS_URL: &str = "https://auth.sismotide.top/api/access";
-const UA: &str = "EEWView/0.1";
+const UA: &str = "StarQuake/0.1";
 
 #[derive(Debug, Clone)]
 pub struct TokenOk {

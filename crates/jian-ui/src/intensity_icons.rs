@@ -91,10 +91,10 @@ impl IntensityIcons {
         }
         self.tried = true;
         // 启动只加载侧栏常用的 JMA / CSIS；MMI·LPGM 首次取用时再栅格化
-        load_set(ctx, "eewview/shindo", &SHINDO_SVG, &mut self.jma);
-        load_set(ctx, "eewview/shindo_inst", &SHINDO_INST_SVG, &mut self.jma_inst);
-        load_set(ctx, "eewview/csis", &CSIS_SVG, &mut self.csis);
-        load_set(ctx, "eewview/csis_inst", &CSIS_INST_SVG, &mut self.csis_inst);
+        load_set(ctx, "starquake/shindo", &SHINDO_SVG, &mut self.jma);
+        load_set(ctx, "starquake/shindo_inst", &SHINDO_INST_SVG, &mut self.jma_inst);
+        load_set(ctx, "starquake/csis", &CSIS_SVG, &mut self.csis);
+        load_set(ctx, "starquake/csis_inst", &CSIS_INST_SVG, &mut self.csis_inst);
         if self.jma.len() < 10 || self.csis.len() < 12 {
             tracing::warn!("部分烈度/震度 SVG 未能加载，将回退为色块文字");
         }

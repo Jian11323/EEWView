@@ -1,9 +1,10 @@
-//! EEW View（地震视监器）桌面客户端入口。
+//! StarQuake 桌面客户端入口。
 
 // GUI 子系统：无控制台窗口；logging 永不 AllocConsole，仅可选写 stderr。
 #![windows_subsystem = "windows"]
 
 mod logging;
+mod update;
 
 use anyhow::Result;
 use eframe::egui;
@@ -22,8 +23,10 @@ use jian_travel::{s_wave_still_spreading_to, TravelEngine};
 use jian_map::{zoom_to_fit_radius_km, BasemapMode, ProjectionMode};
 use jian_ui::{draw_splash, MainShell, SettingsAction, SplashGate, AppUiTheme};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::Instant;
 use tokio::runtime::Runtime;
+use update::{AvailableUpdate, check_latest, download_asset, apply_and_relaunch, open_release_page};
 
 fn looks_like_resource_root(dir: &Path) -> bool {
     dir.join("media").is_dir()
@@ -31,12 +34,15 @@ fn looks_like_resource_root(dir: &Path) -> bool {
         && (dir.join("geodata").is_dir() || dir.join("config").is_dir())
 }
 
-/// 发行包：exe 同目录；开发：`cargo run` 时沿路径找到仓库根。可用 `EEWVIEW_ROOT` 覆盖。
+/// 发行包：exe 同目录；开发：`cargo run` 时沿路径找到仓库根。
+/// 可用 `STARQUAKE_ROOT` 覆盖（兼容旧名 `EEWVIEW_ROOT`）。
 fn resource_root() -> PathBuf {
-    if let Ok(p) = std::env::var("EEWVIEW_ROOT") {
-        let p = PathBuf::from(p);
-        if p.is_dir() {
-            return p;
+    for key in ["STARQUAKE_ROOT", "EEWVIEW_ROOT"] {
+        if let Ok(p) = std::env::var(key) {
+            let p = PathBuf::from(p);
+            if p.is_dir() {
+                return p;
+            }
         }
     }
     if let Ok(exe) = std::env::current_exe() {
@@ -99,17 +105,10 @@ fn install_cjk_fonts(ctx: &egui::Context) {
     tracing::info!(bytes = LXGW_WENKAI.len(), "embedded LXGW WenKai as CJK fallback");
 }
 
-fn window_title_for_lang(language: &str) -> String {
-    let monitor = match jian_config::normalize_ui_language(language).as_str() {
-        "zh-TW" => "地震視監器",
-        "ja" => "地震モニター",
-        "en" => "Quake Monitor",
-        _ => "地震视监器",
-    };
+fn window_title() -> String {
     format!(
-        "{} \u{00b7} {}  [Beta] v{}",
+        "{} v{}",
         jian_ui::APP_DISPLAY_NAME,
-        monitor,
         env!("CARGO_PKG_VERSION")
     )
 }
@@ -117,7 +116,7 @@ fn window_title_for_lang(language: &str) -> String {
 fn main() {
     if let Err(e) = run_app() {
         let msg = format!("{e:#}");
-        logging::show_fatal_dialog("EEW View", &format!("启动失败：\n{msg}"));
+        logging::show_fatal_dialog(jian_ui::APP_DISPLAY_NAME, &format!("启动失败：\n{msg}"));
         std::process::exit(1);
     }
 }
@@ -223,7 +222,19 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
         cfg.audio.countdown_volume,
         cfg.audio.mute,
     ) {
-        Ok(a) => Some(a),
+        Ok(a) => {
+            let cd = media.join("sound/countdown");
+            let has = cd.join("0s.mp3").is_file() && cd.join("countdown.wav").is_file();
+            if has {
+                tracing::info!(path = %cd.display(), "倒计时素材已加载");
+            } else {
+                tracing::warn!(
+                    path = %cd.display(),
+                    "未找到倒计时素材（0s.mp3 / countdown.wav），倒计时语音将静默"
+                );
+            }
+            Some(a)
+        }
         Err(e) => {
             tracing::warn!("音效引擎未启动: {e:#}");
             None
@@ -295,7 +306,7 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
             win.width.clamp(640.0, 7680.0),
             win.height.clamp(480.0, 4320.0),
         ])
-        .with_title(window_title_for_lang(&cfg.ui.language));
+        .with_title(window_title());
     if let (Some(x), Some(y)) = (win.x, win.y) {
         viewport = viewport.with_position([x, y]);
     }
@@ -350,6 +361,11 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
                 window_geom_save_at: None,
                 last_window_geom: None,
                 splash: SplashGate::default(),
+                update_rx: None,
+                update_available: None,
+                update_status: String::new(),
+                update_busy: false,
+                update_checked: false,
             }))
         }),
     );
@@ -405,6 +421,15 @@ fn repaint_ms(perf: &jian_config::PerformanceConfig, need: RepaintNeed) -> u64 {
         RepaintNeed::Waves => perf.wave_repaint_ms(),
         RepaintNeed::Soft => perf.soft_repaint_ms(),
         RepaintNeed::Idle => perf.idle_repaint_ms(),
+    }
+}
+
+/// 要石「仅强有感」：日本震度 ≥3，中国烈度 ≥5。
+fn countdown_is_intense(snap: &AppSnapshot) -> bool {
+    use jian_core::IntensityKind;
+    match snap.countdown_local_kind {
+        IntensityKind::JmaShindo => snap.countdown_local_level >= 3,
+        IntensityKind::CnIntensity => snap.countdown_local_level >= 5,
     }
 }
 
@@ -544,12 +569,19 @@ struct JianApp {
     window_geom_save_at: Option<Instant>,
     last_window_geom: Option<(f32, f32, Option<f32>, Option<f32>, bool)>,
     splash: SplashGate,
+    /// 后台检查更新结果
+    update_rx: Option<mpsc::Receiver<Result<Option<AvailableUpdate>, String>>>,
+    update_available: Option<AvailableUpdate>,
+    update_status: String,
+    update_busy: bool,
+    update_checked: bool,
 }
 
 impl eframe::App for JianApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.set_embed_viewports(true);
         self.tick_window_geometry(ctx);
+        self.tick_update_check(ctx);
 
         if let Some(rx) = self.net_rx.as_mut() {
             while let Ok(ev) = rx.try_recv() {
@@ -929,14 +961,23 @@ impl eframe::App for JianApp {
             }
         }
 
-        // 倒计时播报：仅本机位置有效时（禁止无位置假播）
+        // 地牛倒计时：本机位置有效、开关打开、启动画面结束后才播
         if let Some(audio) = self.audio.as_mut() {
-            let remain = if self.has_local {
+            let intense_ok = !self.cfg.audio.countdown_only_intense || countdown_is_intense(&self.snap);
+            let remain = if self.has_local
+                && self.cfg.audio.play_countdown
+                && !self.splash.active()
+                && intense_ok
+            {
                 self.snap.countdown_s
             } else {
                 None
             };
-            audio.tick_countdown(remain);
+            audio.tick_countdown(
+                remain,
+                self.cfg.audio.countdown_start,
+                self.cfg.audio.countdown_speech,
+            );
         }
 
         let (ui_action, persist_cfg) = self.shell.ui(
@@ -962,9 +1003,7 @@ impl eframe::App for JianApp {
                                     egui::WindowLevel::Normal
                                 },
                             ));
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Title(
-                                window_title_for_lang(&self.cfg.ui.language),
-                            ));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Title(window_title()));
                             self.snap.show_wave_rings = self.cfg.ui.show_wave_rings;
                             let mut note = format!("已保存到 {}", path.display());
                             if renderer_changed {
@@ -1025,6 +1064,9 @@ impl eframe::App for JianApp {
                             .set_save_note(format!("打开日志目录失败：{e}")),
                     }
                 }
+                SettingsAction::CheckForUpdate => {
+                    self.begin_update_check(true);
+                }
             }
         }
 
@@ -1041,6 +1083,8 @@ impl eframe::App for JianApp {
             );
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
+
+        self.draw_update_dialog(ctx);
 
         // 有指针活动立即重绘，避免空闲降频把点击「吃掉」
         let pointer_busy = ctx.input(|i| {
@@ -1073,6 +1117,177 @@ impl eframe::App for JianApp {
 }
 
 impl JianApp {
+
+    fn begin_update_check(&mut self, _manual: bool) {
+        if self.update_busy {
+            return;
+        }
+        self.update_busy = true;
+        self.update_checked = true;
+        self.update_status = "正在检查更新…".into();
+        let (tx, rx) = mpsc::channel();
+        self.update_rx = Some(rx);
+        let local = env!("CARGO_PKG_VERSION").to_string();
+        std::thread::spawn(move || {
+            let res = check_latest(&local).map_err(|e| format!("{e:#}"));
+            let _ = tx.send(res);
+        });
+    }
+
+    fn tick_update_check(&mut self, ctx: &egui::Context) {
+        if !self.update_checked && !self.splash.active() && self.cfg.update.check_on_startup {
+            self.begin_update_check(false);
+        }
+        let Some(rx) = self.update_rx.as_ref() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(Ok(Some(info))) => {
+                self.update_busy = false;
+                self.update_rx = None;
+                self.update_status.clear();
+                self.update_available = Some(info);
+                ctx.request_repaint();
+            }
+            Ok(Ok(None)) => {
+                self.update_busy = false;
+                self.update_rx = None;
+                self.update_status = "已是最新版本".into();
+                self.update_available = None;
+                ctx.request_repaint();
+            }
+            Ok(Err(e)) => {
+                self.update_busy = false;
+                self.update_rx = None;
+                // 启动静默检查失败只打日志；有「正在检查」文案时展示错误
+                if e.contains("更新失败") || e.contains("下载") || e.contains("应用") {
+                    self.update_status = e;
+                } else {
+                    tracing::warn!("检查更新失败: {e}");
+                    self.update_status = format!("检查更新失败：{e}");
+                }
+                ctx.request_repaint();
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.update_busy = false;
+                self.update_rx = None;
+            }
+        }
+    }
+
+    fn draw_update_dialog(&mut self, ctx: &egui::Context) {
+        if self.update_busy && self.update_available.is_none() {
+            egui::Window::new("StarQuake")
+                .id(egui::Id::new("starquake_update_busy"))
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_TOP, [0.0, 48.0])
+                .show(ctx, |ui| {
+                    ui.label(&self.update_status);
+                });
+            return;
+        }
+
+        if self.update_available.is_none() {
+            if self.update_status.is_empty() {
+                return;
+            }
+            // 最新 / 失败提示
+            let mut clear = false;
+            egui::Window::new("StarQuake")
+                .id(egui::Id::new("starquake_update_note"))
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_TOP, [0.0, 48.0])
+                .show(ctx, |ui| {
+                    ui.label(&self.update_status);
+                    if ui.button("知道了").clicked() {
+                        clear = true;
+                    }
+                });
+            if clear {
+                self.update_status.clear();
+            }
+            return;
+        }
+
+        let info = self.update_available.as_ref().unwrap().clone();
+        let mut dismiss = false;
+        let mut do_install = false;
+        let mut open_page = false;
+        egui::Window::new(format!("发现新版本 {}", info.version))
+            .id(egui::Id::new("starquake_update_prompt"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_min_width(360.0);
+                if !info.name.is_empty() {
+                    ui.label(egui::RichText::new(&info.name).strong());
+                    ui.add_space(4.0);
+                }
+                let body = info.body.trim();
+                if !body.is_empty() {
+                    egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+                        ui.label(body);
+                    });
+                    ui.add_space(8.0);
+                }
+                ui.label(format!("资源：{}", info.asset_name));
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new("立即更新")
+                                .fill(egui::Color32::from_rgb(0x25, 0x63, 0xEB)),
+                        )
+                        .clicked()
+                    {
+                        do_install = true;
+                    }
+                    if ui.button("打开发布页").clicked() {
+                        open_page = true;
+                    }
+                    if ui.button("稍后").clicked() {
+                        dismiss = true;
+                    }
+                });
+            });
+
+        if open_page {
+            open_release_page(&info.html_url);
+        }
+        if dismiss {
+            self.update_available = None;
+            self.update_status.clear();
+        }
+        if do_install {
+            if !self.cfg.update.auto_install {
+                open_release_page(&info.html_url);
+                self.update_available = None;
+                return;
+            }
+            self.update_available = None;
+            self.update_busy = true;
+            self.update_status = "正在下载更新…".into();
+            let (tx, rx) = mpsc::channel();
+            self.update_rx = Some(rx);
+            std::thread::spawn(move || {
+                match download_asset(&info) {
+                    Ok(path) => {
+                        if let Err(e) = apply_and_relaunch(&path) {
+                            let _ = tx.send(Err(format!("应用更新失败：{e:#}")));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(format!("下载失败：{e:#}")));
+                    }
+                }
+            });
+        }
+    }
+
     fn tick_window_geometry(&mut self, ctx: &egui::Context) {
         let (w, h, x, y, maximized) = ctx.input(|i| {
             let v = i.viewport();

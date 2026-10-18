@@ -47,7 +47,7 @@ DEFAULTS = {
     "typhoon": "https://api.sismotide.top/get/typhoon.php",
 }
 
-UA = "EEWView-stress/1.3 (+https://github.com/Jian11323/EEWView)"
+UA = "StarQuake-stress/2.0 (+https://github.com/Jian11323/StarQuake)"
 
 
 def _truthy(v: str | None) -> bool:

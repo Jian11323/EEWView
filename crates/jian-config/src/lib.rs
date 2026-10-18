@@ -26,6 +26,29 @@ pub struct AppConfig {
     /// 文件日志（便携版无控制台时仍写入资源根下 logs/）
     #[serde(default)]
     pub log: LogConfig,
+    /// 自动更新（GitHub Releases）
+    #[serde(default)]
+    pub update: UpdateConfig,
+}
+
+/// 启动检查与一键安装更新。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateConfig {
+    /// 启动后检查 GitHub 最新 Release
+    #[serde(default = "default_true")]
+    pub check_on_startup: bool,
+    /// 用户确认后自动下载并应用（退出后替换便携包 / 启动安装包）
+    #[serde(default = "default_true")]
+    pub auto_install: bool,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            check_on_startup: true,
+            auto_install: true,
+        }
+    }
 }
 
 /// 运行日志：等级、目录、是否同时打 stderr、保留天数。
@@ -314,6 +337,22 @@ pub struct AudioConfig {
     /// Windows TTS 语音播报（预警/速报文案）
     #[serde(default)]
     pub tts_enabled: bool,
+    /// 本地 S 波倒计时音（地牛语音 + 滴答）
+    #[serde(default = "default_true")]
+    pub play_countdown: bool,
+    /// 播报「十、九…」语音；关闭则只留滴答
+    #[serde(default = "default_true")]
+    pub countdown_speech: bool,
+    /// 从剩余该秒开始播（对齐要石 countdownStart，默认 10）
+    #[serde(default = "default_countdown_start")]
+    pub countdown_start: i32,
+    /// 仅本机预估达强有感（震度≥3 / 烈度≥5）时播
+    #[serde(default)]
+    pub countdown_only_intense: bool,
+}
+
+fn default_countdown_start() -> i32 {
+    10
 }
 
 /// 自定义震级区间 → 最大 S 波传播距离。
@@ -736,7 +775,7 @@ fn default_pancakes_ws() -> String {
     "wss://api.aloys23.link".into()
 }
 fn default_pancakes_client() -> String {
-    "eewview".into()
+    "starquake".into()
 }
 fn default_gq_min_mag() -> f64 {
     3.0
@@ -805,6 +844,10 @@ impl Default for AppConfig {
                 countdown_volume: 1.0,
                 mute: false,
                 tts_enabled: false,
+                play_countdown: true,
+                countdown_speech: true,
+                countdown_start: default_countdown_start(),
+                countdown_only_intense: false,
             },
             travel: TravelConfig {
                 primary: "jma2001".into(),
@@ -863,6 +906,7 @@ impl Default for AppConfig {
             },
             filters: FiltersConfig::default(),
             log: LogConfig::default(),
+            update: UpdateConfig::default(),
         }
     }
 }
@@ -892,9 +936,10 @@ impl AppConfig {
     }
 
     /// 仓库默认 + 用户目录覆盖 + 环境变量（令牌仍以环境变量优先）。
-    /// Windows 用户覆盖：`%APPDATA%\eew view\settings.json`。
+    /// Windows 用户覆盖：`%APPDATA%\StarQuake\settings.json`。
     pub fn load_merged(repo_config: impl AsRef<Path>) -> Self {
         let mut cfg = Self::load_default_or_builtin(repo_config);
+        Self::migrate_legacy_app_dir();
         if let Some(path) = Self::user_config_path() {
             if path.is_file() {
                 match Self::apply_user_overlay_file(&mut cfg, &path) {
@@ -902,13 +947,13 @@ impl AppConfig {
                     Err(e) => eprintln!("用户配置无效，已忽略 {}: {e:#}", path.display()),
                 }
             } else {
-                // 一次性迁移旧路径（sismotide / config.toml）
+                // 一次性迁移更早路径（sismotide / config.toml）
                 for legacy in Self::legacy_user_config_paths() {
                     if legacy.is_file() {
                         match Self::apply_user_overlay_file(&mut cfg, &legacy) {
                             Ok(()) => {
                                 tracing_log(&format!(
-                                    "已从旧配置迁移 {} → settings.json",
+                                    "已从旧配置迁移 {} \u{2192} settings.json",
                                     legacy.display()
                                 ));
                                 let _ = cfg.save_user_overlay();
@@ -923,7 +968,15 @@ impl AppConfig {
         cfg.apply_env_overrides();
         cfg.filters.migrate_legacy_record_off();
         cfg.migrate_removed_station_sources();
+        cfg.migrate_legacy_client_id();
         cfg
+    }
+
+    /// 旧默认 Pancakes clientId `eewview` → `starquake`。
+    fn migrate_legacy_client_id(&mut self) {
+        if self.sources.pancakes.client_id.trim().eq_ignore_ascii_case("eewview") {
+            self.sources.pancakes.client_id = default_pancakes_client();
+        }
     }
 
     fn apply_user_overlay_file(cfg: &mut Self, path: &Path) -> Result<()> {
@@ -961,6 +1014,7 @@ impl AppConfig {
         let mut sanitized = self.clone();
         sanitized.filters.migrate_legacy_record_off();
         sanitized.migrate_removed_station_sources();
+        sanitized.migrate_legacy_client_id();
         sanitized.sources.jian.access_token = None;
         let text = serde_json::to_string_pretty(&sanitized).context("serialize settings.json")?;
         fs::write(&path, text).with_context(|| format!("write {}", path.display()))?;
@@ -1005,7 +1059,7 @@ impl AppConfig {
     }
 
     /// 用户数据根目录。
-    /// Windows：`%APPDATA%\eew view`（配置 `settings.json`、日志 `log.txt`）。
+    /// Windows：`%APPDATA%\StarQuake`（配置 `settings.json`、日志 `log.txt`）。
     pub fn user_config_dir() -> Option<PathBuf> {
         Self::user_app_dir()
     }
@@ -1015,21 +1069,93 @@ impl AppConfig {
         Self::user_app_dir()
     }
 
-    /// 平台用户目录：`eew view`。
+    /// 平台用户目录：`StarQuake`。
     pub fn user_app_dir() -> Option<PathBuf> {
         #[cfg(windows)]
         {
-            env::var_os("APPDATA").map(|p| PathBuf::from(p).join("eew view"))
+            env::var_os("APPDATA").map(|p| PathBuf::from(p).join("StarQuake"))
         }
         #[cfg(not(windows))]
         {
-            directories::BaseDirs::new().map(|b| b.config_dir().join("eew view"))
+            directories::BaseDirs::new().map(|b| b.config_dir().join("StarQuake"))
         }
     }
 
-    /// 旧版配置路径（仅迁移读取，不再写入）。
+    /// 旧版用户数据目录名（仅迁移读取）。
+    fn legacy_user_app_dirs() -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        #[cfg(windows)]
+        {
+            if let Some(appdata) = env::var_os("APPDATA") {
+                let base = PathBuf::from(appdata);
+                out.push(base.join("eew view"));
+                out.push(base.join("EEW View"));
+                out.push(base.join("EEWView"));
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            if let Some(b) = directories::BaseDirs::new() {
+                let cfg = b.config_dir();
+                out.push(cfg.join("eew view"));
+                out.push(cfg.join("EEW View"));
+                out.push(cfg.join("eewview"));
+                out.push(cfg.join("eew-view"));
+            }
+        }
+        out
+    }
+
+    /// 若新目录尚无 `settings.json`，从旧 `eew view` 等目录复制配置与日志。
+    fn migrate_legacy_app_dir() {
+        let Some(dest) = Self::user_app_dir() else {
+            return;
+        };
+        let dest_settings = dest.join("settings.json");
+        if dest_settings.is_file() {
+            return;
+        }
+        for src in Self::legacy_user_app_dirs() {
+            if !src.is_dir() || src == dest {
+                continue;
+            }
+            let src_settings = src.join("settings.json");
+            if !src_settings.is_file() {
+                continue;
+            }
+            if let Err(e) = fs::create_dir_all(&dest) {
+                eprintln!("无法创建 {}: {e}", dest.display());
+                return;
+            }
+            if let Err(e) = fs::copy(&src_settings, &dest_settings) {
+                eprintln!(
+                    "迁移配置失败 {} \u{2192} {}: {e}",
+                    src_settings.display(),
+                    dest_settings.display()
+                );
+                return;
+            }
+            let src_log = src.join("log.txt");
+            let dest_log = dest.join("log.txt");
+            if src_log.is_file() && !dest_log.is_file() {
+                let _ = fs::copy(&src_log, &dest_log);
+            }
+            tracing_log(&format!(
+                "已从旧目录迁移 {} \u{2192} {}",
+                src.display(),
+                dest.display()
+            ));
+            return;
+        }
+    }
+
+    /// 更早的 sismotide / jian-project 配置路径（仅迁移读取，不再写入）。
     fn legacy_user_config_paths() -> Vec<PathBuf> {
         let mut out = Vec::new();
+        for dir in Self::legacy_user_app_dirs() {
+            out.push(dir.join("settings.json"));
+            out.push(dir.join("config.toml"));
+        }
         if let Some(proj) = directories::ProjectDirs::from("top", "sismotide", "jian-project") {
             let base = proj.config_dir().to_path_buf();
             out.push(base.join("config.toml"));

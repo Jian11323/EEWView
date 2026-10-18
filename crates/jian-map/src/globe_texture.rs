@@ -53,7 +53,7 @@ impl GlobeTexture {
                     "loaded globe land texture"
                 );
                 // 文件名带像素尺寸，避免 egui 纹理缓存命中旧低清图
-                let key = format!("eewview/globe_dark_{}x{}", img.size[0], img.size[1]);
+                let key = format!("starquake/globe_dark_{}x{}", img.size[0], img.size[1]);
                 self.tex = Some(ctx.load_texture(
                     key,
                     img,

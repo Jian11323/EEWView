@@ -102,9 +102,9 @@ fn wolfx_on_open_texts(url: &str, cfg: &WolfxSourceConfig) -> Vec<String> {
 async fn poll_eqlist(tx: NetTx, url: String, ws_also: bool) {
     let client = match reqwest::Client::builder()
         .user_agent(concat!(
-            "EEWView/",
+            "StarQuake/",
             env!("CARGO_PKG_VERSION"),
-            " (+https://github.com/Jian11323/EEWView)"
+            " (+https://github.com/Jian11323/StarQuake)"
         ))
         .timeout(Duration::from_secs(20))
         .build()

@@ -18,7 +18,7 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
     let mut tasks = Vec::new();
     let base = cfg.base_url.trim_end_matches('/').to_string();
     let client_id = if cfg.client_id.trim().is_empty() {
-        "eewview".into()
+        "starquake".into()
     } else {
         cfg.client_id.trim().to_string()
     };
@@ -65,9 +65,9 @@ pub fn spawn(tx: NetTx, cfg: PancakesSourceConfig) -> Vec<JoinHandle<()>> {
 async fn cold_start(tx: NetTx, base: String, cfg: PancakesSourceConfig) {
     let client = match reqwest::Client::builder()
         .user_agent(concat!(
-            "EEWView/",
+            "StarQuake/",
             env!("CARGO_PKG_VERSION"),
-            " (+https://github.com/Jian11323/EEWView)"
+            " (+https://github.com/Jian11323/StarQuake)"
         ))
         .timeout(Duration::from_secs(20))
         .build()

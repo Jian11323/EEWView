@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="icon/brand/app.png" alt="EEW View" width="128" />
+  <img src="icon/brand/app.png" alt="StarQuake" width="128" />
 </p>
 
-<h1 align="center">StarQuake · 地震实时监看</h1>
+<h1 align="center">StarQuake</h1>
 
 <p align="center">
   纯 Rust 桌面端 · 多源预警 / 速报视监
@@ -12,18 +12,18 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
   <img src="https://img.shields.io/badge/Rust-1.70%2B-orange.svg" alt="Rust" />
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6.svg" alt="Windows" />
-  <img src="https://img.shields.io/badge/Release-Beta%201.6.1-informational.svg" alt="Beta 1.6.1" />
+  <img src="https://img.shields.io/badge/Release-2.0.0-informational.svg" alt="2.0.0" />
 </p>
 
 <p align="center">
-  <img src="https://socialify.git.ci/Jian11323/EEWView/image?description=1&amp;font=Inter&amp;language=1&amp;name=1&amp;owner=1&amp;pattern=Solid&amp;theme=Auto" alt="EEWView" width="640" />
+  <img src="https://socialify.git.ci/Jian11323/StarQuake/image?description=1&amp;font=Inter&amp;language=1&amp;name=1&amp;owner=1&amp;pattern=Solid&amp;theme=Auto" alt="StarQuake" width="640" />
 </p>
 
 ---
 
 ## 简介
 
-**EEW View** 是一款面向桌面的地震预警与速报视监客户端。  
+**StarQuake** 是一款面向桌面的地震预警与速报视监客户端。  
 聚合多源实时情报，在地图上展示震中、走时波圈与测站烈度，并提供本机倒计时与音效播报。
 
 ---

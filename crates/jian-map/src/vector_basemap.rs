@@ -378,7 +378,7 @@ impl VectorBasemap {
         self.rx = Some(rx);
 
         let _ = thread::Builder::new()
-            .name("eewview-geodata".into())
+            .name("starquake-geodata".into())
             .spawn(move || {
                 let (world_lods, world_n, w_files, w_skip, gq) =
                     load_world_lods(&dir, for_globe);
@@ -657,11 +657,18 @@ impl VectorBasemap {
             viewport_bounds(view.center_lon, view.center_lat, zoom, rect)
         };
         let max_jump_px = world_px * (80.0 / 360.0);
-        // 飞跃轻量：只画一份世界，避免 ±360 副本把 mesh 撑大
-        let half_copies = if interacting {
-            0
-        } else {
-            ((rect.width() * 0.5 / world_px.max(1.0)).ceil() as i32 + 1).clamp(1, 6)
+        // 宽窗需要 ±360 副本；飞跃中至少保留 1 份副本，避免两侧空白
+        let half_copies = {
+            let need = ((rect.width() * 0.5 / world_px.max(1.0)).ceil() as i32 + 1).clamp(1, 6);
+            if interacting {
+                if full_wrap || rect.width() > world_px * 0.65 {
+                    need.min(2)
+                } else {
+                    0
+                }
+            } else {
+                need
+            }
         };
 
         for k in -half_copies..=half_copies {

@@ -380,10 +380,34 @@ AUDIO_BODY = r'''fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> bool {
             ui.add(egui::Slider::new(&mut draft.audio.master_volume, 0.0..=1.0).show_value(true));
         });
         row_divider(ui);
-        control_row(ui, "倒计时音量", "", "\u{25ce}", |ui| {
+        control_row(ui, "倒计时音量", "语音与滴答", "\u{25ce}", |ui| {
             ui.add(
                 egui::Slider::new(&mut draft.audio.countdown_volume, 0.0..=1.0).show_value(true),
             );
+        });
+        row_divider(ui);
+        control_row(ui, "倒计时音效", "本机 S 波剩余时播倒计时", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.audio.play_countdown);
+        });
+        row_divider(ui);
+        control_row(ui, "倒计时语音", "播报十、九…；关闭则只留滴答", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.audio.countdown_speech);
+        });
+        row_divider(ui);
+        control_row(ui, "开始播报秒数", "剩余秒数降到此值后开始", "\u{25ce}", |ui| {
+            ui.add(
+                egui::DragValue::new(&mut draft.audio.countdown_start)
+                    .range(0..=60)
+                    .speed(1.0),
+            );
+        });
+        row_divider(ui);
+        control_row(ui, "仅强有感时播", "本机预估震度≥3 或烈度≥5 时播倒计时", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.audio.countdown_only_intense);
+        });
+        row_divider(ui);
+        control_row(ui, "Windows TTS", "预警/速报语音播报（系统朗读）", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.audio.tts_enabled);
         });
         row_divider(ui);
         control_row(ui, "试听", "按草稿音量立即试听（无需先保存）", "\u{25b6}", |ui| {
@@ -651,7 +675,7 @@ ADVANCED_BODY = r'''fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action:
 
 ABOUT_BODY = (
     "fn draw_about(ui: &mut Ui) {\n"
-    f'    section(ui, "EEW View {MD} 地震视监器", "\\u{{24d8}}", |ui| {{\n'
+    f'    section(ui, crate::APP_DISPLAY_NAME, "\\u{{24d8}}", |ui| {{\n'
     '        ui.label(\n'
     '            RichText::new(format!("版本 {}", env!("CARGO_PKG_VERSION")))\n'
     "                .size(14.0)\n"
@@ -810,7 +834,7 @@ def main() -> int:
     )
     sub(
         r'\.with_title\("EEWView [^"]*"\)',
-        f'.with_title("EEW View {MD} 设置")',
+        f'.with_title("StarQuake {MD} 设置")',
     )
     sub(
         r"// .*RQ .*1180.660 .*",
@@ -830,7 +854,7 @@ def main() -> int:
     )
     sub(
         r'RichText::new\("EEWView [^"]*"\)',
-        f'RichText::new("EEW View {MD} ·侧分类与右侧内容合并为同一玻璃面板")',
+        f'RichText::new("StarQuake {MD} 左侧分类与右侧内容合并为同一玻璃面板")',
     )
     sub(r"// \?+RQ \.panel\??", "// 统一面板（RQ .panel）")
     sub(r"// \?+\n                            let \(line, _\)", "// 竖分割线\n                            let (line, _)")

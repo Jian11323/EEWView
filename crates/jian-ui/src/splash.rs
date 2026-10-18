@@ -87,14 +87,14 @@ fn with_alpha(c: Color32, opacity: f32) -> Color32 {
 }
 
 fn splash_bg_texture(ctx: &Context) -> Option<TextureHandle> {
-    let id = egui::Id::new("eewview/splash_bg_tex");
+    let id = egui::Id::new("starquake/splash_bg_tex");
     if let Some(tex) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
         return Some(tex);
     }
     let img = image::load_from_memory(SPLASH_BG_PNG).ok()?.into_rgba8();
     let size = [img.width() as usize, img.height() as usize];
     let color = ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-    let tex = ctx.load_texture("eewview/splash_bg", color, TextureOptions::LINEAR);
+    let tex = ctx.load_texture("starquake/splash_bg", color, TextureOptions::LINEAR);
     ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
     Some(tex)
 }
@@ -112,7 +112,7 @@ pub fn draw_splash(
     }
     let screen = ctx.screen_rect();
     // 启动遮罩故意挡操作；淡出结束后卸掉
-    egui::Area::new(egui::Id::new("eewview_splash"))
+    egui::Area::new(egui::Id::new("starquake_splash"))
         .order(egui::Order::Foreground)
         .fixed_pos(screen.min)
         .show(ctx, |ui| {
@@ -166,7 +166,7 @@ pub fn draw_splash(
             painter.text(
                 c + Vec2::new(0.0, 56.0),
                 Align2::CENTER_CENTER,
-                format!("{}", crate::i18n::t("地震监视器  v{}").replace("{}", env!("CARGO_PKG_VERSION"))),
+                crate::i18n::t("版本 {}").replace("{}", env!("CARGO_PKG_VERSION")),
                 FontId::proportional(14.0),
                 with_alpha(p.text_muted, opacity),
             );

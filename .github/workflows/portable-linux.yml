@@ -17,8 +17,8 @@ jobs:
       - name: Build
         run: cargo build -p jian-app --release
       - name: Pack
-        run: python3 tools/pack_linux.py --skip-build --bin target/release/eewview
+        run: python3 tools/pack_linux.py --skip-build --bin target/release/starquake
       - uses: actions/upload-artifact@v4
         with:
-          name: EEWView-linux-x86_64
-          path: dist/EEWView_Beta_*_linux_x86_64.tar.gz
+          name: StarQuake-linux-x86_64
+          path: dist/StarQuake_*_linux_x86_64.tar.gz

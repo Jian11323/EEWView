@@ -3,7 +3,7 @@
 use egui::{ColorImage, Context, IconData, TextureHandle, TextureOptions};
 
 /// 面向用户的软件名称。
-pub const APP_DISPLAY_NAME: &str = "EEW View";
+pub const APP_DISPLAY_NAME: &str = "StarQuake";
 
 const APP_PNG: &[u8] = include_bytes!("../../../icon/brand/app.png");
 
@@ -20,14 +20,14 @@ pub fn app_icon_data() -> Option<IconData> {
 
 /// 关于页 / 启动画面 logo（按 Context 缓存，避免每帧解码上传）。
 pub fn logo_texture(ctx: &Context) -> Option<TextureHandle> {
-    let id = egui::Id::new("eewview/brand_logo_tex");
+    let id = egui::Id::new("starquake/brand_logo_tex");
     if let Some(tex) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
         return Some(tex);
     }
     let img = image::load_from_memory(APP_PNG).ok()?.into_rgba8();
     let size = [img.width() as usize, img.height() as usize];
     let color = ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-    let tex = ctx.load_texture("eewview/brand_logo", color, TextureOptions::LINEAR);
+    let tex = ctx.load_texture("starquake/brand_logo", color, TextureOptions::LINEAR);
     ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
     Some(tex)
 }

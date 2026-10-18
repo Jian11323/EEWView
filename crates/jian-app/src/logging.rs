@@ -1,6 +1,6 @@
 //! 文件 + 可选控制台的 tracing 初始化。
 //!
-//! Windows 默认写入 `%APPDATA%\eew view\log.txt`（安装到 Program Files 时资源根不可写，
+//! Windows 默认写入 `%APPDATA%\StarQuake\log.txt`（安装到 Program Files 时资源根不可写，
 //! 若仍向安装目录建 logs/ 会令 tracing-appender panic，表现为双击无反应）。
 //!
 //! 格式约定：本地时间、UTF-8 BOM、CRLF（记事本可读）；写入前统一脱敏令牌。
@@ -29,7 +29,7 @@ pub fn set_console_output(want: bool) {
     sync_windows_console(want);
 }
 
-/// 用户目录下的单一日志文件：`…/eew view/log.txt`。
+/// 用户目录下的单一日志文件：`…/StarQuake/log.txt`。
 fn user_log_file() -> Option<PathBuf> {
     AppConfig::user_app_dir().map(|d| d.join("log.txt"))
 }
@@ -64,7 +64,7 @@ fn ensure_parent_writable(file: &Path) -> bool {
     if fs::create_dir_all(dir).is_err() {
         return false;
     }
-    let probe = dir.join(".eewview_write_probe");
+    let probe = dir.join(".starquake_write_probe");
     match fs::write(&probe, b"ok") {
         Ok(()) => {
             let _ = fs::remove_file(&probe);
@@ -124,7 +124,10 @@ fn prune_old_logs(dir: &Path, keep_days: u64) {
         let path = ent.path();
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         // 清理历史按日滚动文件；保留现行 log.txt
-        if !(name.starts_with("eewview.log") || (name.starts_with("log.") && name != "log.txt")) {
+        if !(name.starts_with("starquake.log")
+            || name.starts_with("eewview.log")
+            || (name.starts_with("log.") && name != "log.txt"))
+        {
             continue;
         }
         let Ok(meta) = ent.metadata() else {
@@ -473,7 +476,7 @@ pub fn init_logging(resource_root: &Path, cfg: &LogConfig) -> WorkerGuard {
         tracing::error!(%loc, %payload, "panic");
         eprintln!("panic at {loc}: {payload}");
         show_fatal_dialog(
-            "EEW View",
+            "StarQuake",
             &format!("程序异常退出：\n{payload}\n\n位置：{loc}"),
         );
     }));

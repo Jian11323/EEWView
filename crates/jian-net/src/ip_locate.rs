@@ -4,9 +4,9 @@ use serde::Deserialize;
 
 const IP_URL: &str = "https://api.sismotide.top/get/ip.php";
 const UA: &str = concat!(
-    "EEWView/",
+    "StarQuake/",
     env!("CARGO_PKG_VERSION"),
-    " (+https://github.com/Jian11323/EEWView)"
+    " (+https://github.com/Jian11323/StarQuake)"
 );
 
 #[derive(Debug, Clone)]

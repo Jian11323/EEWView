@@ -1,5 +1,5 @@
 {
-  description = "EEW View — earthquake early-warning desktop client";
+  description = "StarQuake — earthquake early-warning desktop client";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
@@ -10,10 +10,10 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        version = "1.3.0";
+        version = "2.0.0";
       in {
         packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "eew-view";
+          pname = "starquake";
           inherit version;
           src = ./.;
 
@@ -43,21 +43,21 @@
           doCheck = false;
 
           postInstall = ''
-            mkdir -p $out/share/eew-view
-            cp -r media icon config geodata $out/share/eew-view/
-            rm -rf $out/share/eew-view/media/travel/raw || true
-            rm -f $out/share/eew-view/config/local.toml || true
-            rm -f $out/share/eew-view/media/fonts/lxgw-wenkai-v1.522/LXGWWenKai-Light.ttf || true
-            rm -f $out/share/eew-view/media/fonts/lxgw-wenkai-v1.522/LXGWWenKai-Medium.ttf || true
-            rm -f $out/share/eew-view/media/fonts/lxgw-wenkai-v1.522/LXGWWenKaiMono-*.ttf || true
+            mkdir -p $out/share/starquake
+            cp -r media icon config geodata $out/share/starquake/
+            rm -rf $out/share/starquake/media/travel/raw || true
+            rm -f $out/share/starquake/config/local.toml || true
+            rm -f $out/share/starquake/media/fonts/lxgw-wenkai-v1.522/LXGWWenKai-Light.ttf || true
+            rm -f $out/share/starquake/media/fonts/lxgw-wenkai-v1.522/LXGWWenKai-Medium.ttf || true
+            rm -f $out/share/starquake/media/fonts/lxgw-wenkai-v1.522/LXGWWenKaiMono-*.ttf || true
 
             if [ -f icon/brand/app.png ]; then
               install -Dm644 icon/brand/app.png \
-                $out/share/icons/hicolor/256x256/apps/eew-view.png
+                $out/share/icons/hicolor/256x256/apps/starquake.png
             fi
 
-            makeWrapper $out/bin/eewview $out/bin/eew-view \
-              --set EEWVIEW_ROOT $out/share/eew-view \
+            makeWrapper $out/bin/starquake $out/bin/starquake-run \
+              --set STARQUAKE_ROOT $out/share/starquake \
               --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath [
                 pkgs.alsa-lib
                 pkgs.libxkbcommon
@@ -65,32 +65,33 @@
                 pkgs.wayland
                 pkgs.gtk3
               ]}"
+            ln -sf starquake-run $out/bin/starquake-app || true
           '';
 
           desktopItems = [
             (pkgs.makeDesktopItem {
-              name = "eew-view";
-              desktopName = "EEW View";
+              name = "starquake";
+              desktopName = "StarQuake";
               comment = "Earthquake early-warning monitor";
-              exec = "eew-view";
-              icon = "eew-view";
+              exec = "starquake-run";
+              icon = "starquake";
               categories = [ "Science" "Network" ];
               terminal = false;
             })
           ];
 
           meta = with pkgs.lib; {
-            description = "EEW View desktop client";
-            homepage = "https://github.com/Jian11323/EEWView";
+            description = "StarQuake desktop client";
+            homepage = "https://github.com/Jian11323/StarQuake";
             license = licenses.asl20;
             platforms = platforms.linux;
-            mainProgram = "eew-view";
+            mainProgram = "starquake-run";
           };
         };
 
         apps.default = {
           type = "app";
-          program = "${self.packages.${system}.default}/bin/eew-view";
+          program = "${self.packages.${system}.default}/bin/starquake-run";
         };
 
         devShells.default = pkgs.mkShell {

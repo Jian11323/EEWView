@@ -49,11 +49,11 @@ def copy_tree(src: Path, dst: Path) -> None:
 
 
 def write_usage(out: Path, ver: str) -> None:
-    usage = f"""EEW View 便携测试包（Linux x86_64）
+    usage = f"""StarQuake 便携包（Linux x86_64）
 ================================
 
-版本：Beta {ver}
-解压后：chmod +x eewview && ./eewview
+版本：{ver}
+解压后：chmod +x starquake && ./starquake
 （勿拆散 media / icon / geodata / config）
 启动时会显示启动界面，底图就绪后进入主界面。
 
@@ -69,12 +69,12 @@ def write_usage(out: Path, ver: str) -> None:
 【版本规则】
 - PATCH：修 bug / 微调
 - MINOR：新功能或行为变更
-- MAJOR：不兼容，或结束 Beta 转正
+- MAJOR：不兼容变更
 """
     (out / "使用说明.txt").write_bytes(usage.encode("utf-8"))
     run_sh = out / "run.sh"
     run_sh.write_text(
-        '#!/bin/sh\ncd "$(dirname "$0")"\nexec ./eewview "$@"\n',
+        '#!/bin/sh\ncd "$(dirname "$0")"\nexec ./starquake "$@"\n',
         encoding="utf-8",
         newline="\n",
     )
@@ -91,8 +91,8 @@ def find_bin(cli_bin: str | None) -> Path:
             raise SystemExit(f"binary not found: {p}")
         return p
     for c in (
-        ROOT / "target" / LINUX_TARGET / "release" / "eewview",
-        ROOT / "target" / "release" / "eewview",
+        ROOT / "target" / LINUX_TARGET / "release" / "starquake",
+        ROOT / "target" / "release" / "starquake",
     ):
         if c.is_file():
             return c
@@ -126,7 +126,7 @@ def main() -> int:
         cli_bin = args[args.index("--bin") + 1]
 
     ver = workspace_version(ROOT)
-    log(f"EEW View Beta {ver} Linux x86_64 portable")
+    log(f"StarQuake {ver} Linux x86_64 portable")
     assert_brand_assets(ROOT)
 
     if not skip_build and cli_bin is None:
@@ -147,11 +147,11 @@ def main() -> int:
     bin_src = find_bin(cli_bin)
     log(f"binary: {bin_src}")
 
-    out = ROOT / "dist" / "EEWView-linux"
+    out = ROOT / "dist" / "StarQuake-linux"
     rm_tree(out)
     out.mkdir(parents=True)
 
-    dst = out / "eewview"
+    dst = out / "starquake"
     shutil.copy2(bin_src, dst)
     try:
         dst.chmod(0o755)
@@ -177,12 +177,12 @@ def main() -> int:
     copy_tree(ROOT / "geodata", out / "geodata")
     write_usage(out, ver)
 
-    tar_path = ROOT / "dist" / f"EEWView_Beta_{ver}_linux_x86_64.tar.gz"
+    tar_path = ROOT / "dist" / f"StarQuake_{ver}_linux_x86_64.tar.gz"
     if tar_path.exists():
         tar_path.unlink()
     log(f"tar -> {tar_path.name}")
     with tarfile.open(tar_path, "w:gz") as tf:
-        tf.add(out, arcname="EEWView")
+        tf.add(out, arcname="StarQuake")
     mb = tar_path.stat().st_size / (1024 * 1024)
     log(f"DIR {out}")
     log(f"TAR {tar_path} ({mb:.1f} MB)")

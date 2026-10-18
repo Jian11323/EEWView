@@ -24,9 +24,9 @@ pub fn spawn(tx: NetTx, cfg: TyphoonSourceConfig) -> Vec<JoinHandle<()>> {
     vec![tokio::spawn(async move {
         let client = match reqwest::Client::builder()
             .user_agent(concat!(
-                "EEWView/",
+                "StarQuake/",
                 env!("CARGO_PKG_VERSION"),
-                " (+https://github.com/Jian11323/EEWView)"
+                " (+https://github.com/Jian11323/StarQuake)"
             ))
             .timeout(Duration::from_secs(45))
             .build()

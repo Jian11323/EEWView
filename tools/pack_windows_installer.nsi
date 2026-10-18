@@ -1,4 +1,4 @@
-; EEW View Windows installer (NSIS)
+; StarQuake Windows installer (NSIS)
 Unicode true
 RequestExecutionLevel admin
 
@@ -6,19 +6,19 @@ RequestExecutionLevel admin
   !define VERSION "1.4.3"
 !endif
 !ifndef DIST_DIR
-  !define DIST_DIR "..\dist\EEWView"
+  !define DIST_DIR "..\dist\StarQuake"
 !endif
 !ifndef OUT_FILE
-  !define OUT_FILE "..\dist\EEWView_Beta_${VERSION}_setup.exe"
+  !define OUT_FILE "..\dist\StarQuake_${VERSION}_setup.exe"
 !endif
 !ifndef SPLASH_BMP
   !define SPLASH_BMP "${DIST_DIR}\icon\brand\splash_installer.bmp"
 !endif
 
-Name "EEW View"
+Name "StarQuake"
 OutFile "${OUT_FILE}"
-InstallDir "$PROGRAMFILES32\eew view"
-InstallDirRegKey HKLM "Software\eew view" "InstallDir"
+InstallDir "$PROGRAMFILES32\StarQuake"
+InstallDirRegKey HKLM "Software\StarQuake" "InstallDir"
 SetCompressor /SOLID lzma
 
 !include "MUI2.nsh"
@@ -40,37 +40,44 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
 
-Section "EEW View" SecMain
+Section "StarQuake" SecMain
   SetOutPath "$INSTDIR"
   File /r "${DIST_DIR}\*.*"
 
-  WriteRegStr HKLM "Software\eew view" "InstallDir" "$INSTDIR"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
-    "DisplayName" "EEW View"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
+  WriteRegStr HKLM "Software\StarQuake" "InstallDir" "$INSTDIR"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\StarQuake" \
+    "DisplayName" "StarQuake"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\StarQuake" \
     "DisplayVersion" "${VERSION}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\StarQuake" \
     "Publisher" "Jian11323"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
-    "DisplayIcon" "$INSTDIR\eewview.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\StarQuake" \
+    "DisplayIcon" "$INSTDIR\starquake.exe"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\StarQuake" \
     "UninstallString" '"$INSTDIR\Uninstall.exe"'
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
+  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\StarQuake" \
     "NoModify" 1
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView" \
+  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\StarQuake" \
     "NoRepair" 1
 
-  CreateDirectory "$SMPROGRAMS\EEW View"
-  CreateShortCut "$SMPROGRAMS\EEW View\EEW View.lnk" "$INSTDIR\eewview.exe" "" "$INSTDIR\icon\brand\app.ico" 0 SW_SHOWNORMAL "" "$INSTDIR"
-  CreateShortCut "$DESKTOP\EEW View.lnk" "$INSTDIR\eewview.exe" "" "$INSTDIR\icon\brand\app.ico" 0 SW_SHOWNORMAL "" "$INSTDIR"
+  CreateDirectory "$SMPROGRAMS\StarQuake"
+  CreateShortCut "$SMPROGRAMS\StarQuake\StarQuake.lnk" "$INSTDIR\starquake.exe" "" "$INSTDIR\icon\brand\app.ico" 0 SW_SHOWNORMAL "" "$INSTDIR"
+  CreateShortCut "$DESKTOP\StarQuake.lnk" "$INSTDIR\starquake.exe" "" "$INSTDIR\icon\brand\app.ico" 0 SW_SHOWNORMAL "" "$INSTDIR"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 SectionEnd
 
 Section "Uninstall"
+  Delete "$DESKTOP\StarQuake.lnk"
+  Delete "$SMPROGRAMS\StarQuake\StarQuake.lnk"
+  RMDir "$SMPROGRAMS\StarQuake"
   Delete "$DESKTOP\EEW View.lnk"
   Delete "$SMPROGRAMS\EEW View\EEW View.lnk"
   RMDir "$SMPROGRAMS\EEW View"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\StarQuake"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\StarQuake"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EEWView"
+  DeleteRegKey HKLM "Software\StarQuake"
   DeleteRegKey HKLM "Software\eew view"
   RMDir /r "$INSTDIR"
 SectionEnd

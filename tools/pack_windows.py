@@ -50,29 +50,29 @@ def copy_tree(src: Path, dst: Path) -> None:
 
 
 def write_usage(out: Path, ver: str) -> None:
-    usage = f"""EEW View 便携测试包
+    usage = f"""StarQuake 便携包
 ================
 
-版本：Beta {ver}
-双击 eewview.exe 即可运行（勿拆散 media / icon / geodata / config 相对位置）。
+版本：{ver}
+双击 starquake.exe 即可运行（勿拆散 media / icon / geodata / config 相对位置）。
 启动时会显示启动界面，底图就绪后进入主界面。
 
 【首次使用】
 1. 打开后点「设置」→ API与数据源，用 lk_ 换票绑定 Jian（可选）。
 2. 未配置 Jian 时，Wolfx / P2P / Pancakes 仍可用；Jian 健康态为「异常」。
 3. 用户配置写到本机 AppData，不回写本目录。
-4. 运行日志：%APPDATA%\eew view\log.txt；本地配置：同目录 settings.json。设置 → 高级可打开。
+4. 运行日志：%APPDATA%\StarQuake\log.txt；本地配置：同目录 settings.json。设置 → 高级可打开。
 
 【版本规则】
 - PATCH（x.y.Z）：修 bug / 微调，无新能力
 - MINOR（x.Y.0）：新功能或行为变更
-- MAJOR（X.0.0）：不兼容变更，或结束 Beta 转正式版
+- MAJOR（X.0.0）：不兼容变更
 """
     (out / "使用说明.txt").write_bytes(usage.encode("utf-8-sig"))
 
 
 def zip_out(out: Path, ver: str) -> Path:
-    zip_path = ROOT / "dist" / f"EEWView_Beta_{ver}_portable.zip"
+    zip_path = ROOT / "dist" / f"StarQuake_{ver}_portable.zip"
     if zip_path.exists():
         zip_path.unlink()
     skip = {".DS_Store", "Thumbs.db"}
@@ -86,7 +86,7 @@ def zip_out(out: Path, ver: str) -> Path:
             parts = set(path.parts)
             if "raw" in parts and "travel" in parts:
                 continue
-            arc = Path("EEWView") / path.relative_to(out)
+            arc = Path("StarQuake") / path.relative_to(out)
             zf.write(path, arc.as_posix())
             n += 1
             if n % 100 == 0:
@@ -98,11 +98,11 @@ def zip_out(out: Path, ver: str) -> Path:
 
 def main() -> int:
     ver = workspace_version(ROOT)
-    log(f"EEW View Beta {ver} portable pack")
+    log(f"StarQuake {ver} portable pack")
     assert_brand_assets(ROOT)
 
     skip_build = "--skip-build" in sys.argv
-    exe_src = ROOT / "target" / "release" / "eewview.exe"
+    exe_src = ROOT / "target" / "release" / "starquake.exe"
     if not skip_build or not exe_src.is_file():
         log("cargo build -p jian-app --release")
         r = subprocess.run(
@@ -118,12 +118,12 @@ def main() -> int:
         log(f"missing {exe_src}")
         return 1
 
-    out = ROOT / "dist" / "EEWView"
+    out = ROOT / "dist" / "StarQuake"
     log(f"clean {out}")
     rm_tree(out)
     out.mkdir(parents=True, exist_ok=True)
 
-    shutil.copy2(exe_src, out / "eewview.exe")
+    shutil.copy2(exe_src, out / "starquake.exe")
     for name in ("README.md", "LICENSE"):
         src = ROOT / name
         if src.is_file():
@@ -146,7 +146,7 @@ def main() -> int:
     zpath = zip_out(out, ver)
     log(f"DIR  {out}")
     log(f"ZIP  {zpath}")
-    log(f"RUN  {out / 'eewview.exe'}")
+    log(f"RUN  {out / 'starquake.exe'}")
     return 0
 
 

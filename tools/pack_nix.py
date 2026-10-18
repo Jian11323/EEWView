@@ -26,8 +26,8 @@ def main() -> int:
         return 1
     out = ROOT / "dist"
     out.mkdir(parents=True, exist_ok=True)
-    note = out / f"EEWView_Beta_{ver}_nixos.txt"
-    body = f"""EEW View NixOS / flake 安装（Beta {ver}）
+    note = out / f"StarQuake_{ver}_nixos.txt"
+    body = f"""StarQuake NixOS / flake 安装（{ver}）
 ========================================
 
 一、源码构建（推荐，仓库根 flake.nix）
@@ -36,11 +36,11 @@ def main() -> int:
   nix build .#   # 结果在 result/
 
 二、预构建便携 tar 包装（无需编译）
-  1) 取得 EEWView_Beta_{ver}_linux_x86_64.tar.gz（CI 或 pack_linux.py）
+  1) 取得 StarQuake_{ver}_linux_x86_64.tar.gz（CI 或 pack_linux.py）
   2) 复制到 packaging/nixos/
   3) nix-env -if packaging/nixos/default.nix
 
-入口命令：eew-view（EEWVIEW_ROOT 指向 share/eew-view）。
+入口命令：starquake（STARQUAKE_ROOT 指向 share/starquake）。
 本机 Windows 请在 NixOS / WSL2+Nix / CI 上执行 nix 命令。
 """
     note.write_bytes(body.encode("utf-8"))

@@ -71,6 +71,13 @@ impl AudioEngine {
 
     pub fn play(&mut self, cue: AudioCue) {
         match &cue {
+            AudioCue::Countdown(_) => {
+                if let Some(path) = self.router.resolve(&self.catalog, &cue) {
+                    if let Some(p) = &self.player {
+                        p.play_speech(&path);
+                    }
+                }
+            }
             AudioCue::CountdownLoop(on) => {
                 if *on {
                     if let Some(path) = self.router.resolve(&self.catalog, &cue) {
@@ -94,9 +101,9 @@ impl AudioEngine {
         }
     }
 
-    /// 根据剩余秒驱动倒计时播报（有本机位置时才应传入 Some）。
-    pub fn tick_countdown(&mut self, remain_s: Option<i32>) {
-        for cue in self.countdown.tick(remain_s) {
+    /// 根据剩余秒驱动地牛倒计时。`start_at` 为开始播报的剩余秒（要石默认 10）。
+    pub fn tick_countdown(&mut self, remain_s: Option<i32>, start_at: i32, speech: bool) {
+        for cue in self.countdown.tick(remain_s, start_at, speech) {
             self.play(cue);
         }
     }

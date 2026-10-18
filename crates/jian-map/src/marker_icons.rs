@@ -86,19 +86,19 @@ impl MarkerIcons {
             return;
         }
         self.tried = true;
-        self.cross = load_svg_texture(ctx, "eewview/marker_cross", CROSS_SVG);
-        self.red = load_svg_texture(ctx, "eewview/marker_red", RED_SVG);
-        self.green = load_svg_texture(ctx, "eewview/marker_green", GREEN_SVG);
+        self.cross = load_svg_texture(ctx, "starquake/marker_cross", CROSS_SVG);
+        self.red = load_svg_texture(ctx, "starquake/marker_red", RED_SVG);
+        self.green = load_svg_texture(ctx, "starquake/marker_green", GREEN_SVG);
         for (bytes, level) in SHINDO_INST_SVG {
             if let Some(tex) =
-                load_svg_texture(ctx, &format!("eewview/map_shindo_inst/{level}"), bytes)
+                load_svg_texture(ctx, &format!("starquake/map_shindo_inst/{level}"), bytes)
             {
                 self.shindo_inst.insert(level, tex);
             }
         }
         for (bytes, level) in CSIS_INST_SVG {
             if let Some(tex) =
-                load_svg_texture(ctx, &format!("eewview/map_csis_inst/{level}"), bytes)
+                load_svg_texture(ctx, &format!("starquake/map_csis_inst/{level}"), bytes)
             {
                 self.csis_inst.insert(level, tex);
             }

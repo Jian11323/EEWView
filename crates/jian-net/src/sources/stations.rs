@@ -174,9 +174,9 @@ fn spawn_snet_original(
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(12))
             .user_agent(concat!(
-                "EEWView/",
+                "StarQuake/",
                 env!("CARGO_PKG_VERSION"),
-                " (+https://github.com/Jian11323/EEWView)"
+                " (+https://github.com/Jian11323/StarQuake)"
             ))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());

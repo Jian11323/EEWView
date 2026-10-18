@@ -1139,7 +1139,7 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
     let raw = json_intensity_raw(data, &["maxIntensity", "intensity", "MaxIntensity"]);
     let (intensity_text, intensity_level) =
         fill_record_intensity(kind, magnitude, depth_km, raw.as_deref(), mag_unknown);
-    let is_auto = cenc_is_auto(agency, data);
+    let is_auto = record_is_auto(agency, data);
 
     Some(EqRecord {
         agency: AgencyId(agency.into()),
@@ -1159,24 +1159,31 @@ fn parse_jian_record(agency: &str, data: &Value) -> Option<EqRecord> {
     })
 }
 
-/// CENC 自动测定：Wolfx/Jian `type=automatic`，或文案含「自动」。
-fn cenc_is_auto(agency: &str, data: &Value) -> bool {
-    let a = agency.to_ascii_lowercase();
-    if !(a.contains("cenc") || a == "beijing") {
-        return false;
-    }
-    if let Some(t) = data
-        .get("type")
-        .or_else(|| data.get("Type"))
-        .or_else(|| data.get("infoType"))
-        .and_then(|v| v.as_str())
-    {
-        let t = t.trim().to_ascii_lowercase();
-        if t == "automatic" || t == "auto" || t.contains("自动") {
-            return true;
-        }
-        if t == "reviewed" || t.contains("正式") {
-            return false;
+/// 速报是否为自动测定：读 `type` / `Type` / `infoType` / `status`；
+/// 含 automatic/auto/自动 → true；reviewed/manual/正式 → false。
+/// 各源通用；无字段时返回 false（按正式展示，不标「自动测定」）。
+fn record_is_auto(_agency: &str, data: &Value) -> bool {
+    for key in ["type", "Type", "infoType", "status", "Status", "evaluationStatus"] {
+        if let Some(t) = data.get(key).and_then(|v| v.as_str()) {
+            let t = t.trim().to_ascii_lowercase();
+            if t.is_empty() {
+                continue;
+            }
+            if t == "automatic"
+                || t == "auto"
+                || t.contains("automatic")
+                || t.contains("自动")
+            {
+                return true;
+            }
+            if t == "reviewed"
+                || t == "manual"
+                || t == "final"
+                || t.contains("正式")
+                || t.contains("人工")
+            {
+                return false;
+            }
         }
     }
     false
@@ -1425,7 +1432,7 @@ fn ingest_wolfx_cenc_eqlist_value(tx: &NetTx, v: &Value) {
             depth_km,
             raw.as_deref(),
         );
-        let is_auto = cenc_is_auto("wolfx-cenc", item);
+        let is_auto = record_is_auto("wolfx-cenc", item);
 
         let _ = tx.send(NetEvent::Record(EqRecord {
             agency: AgencyId("wolfx-cenc".into()),

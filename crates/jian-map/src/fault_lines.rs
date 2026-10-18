@@ -313,7 +313,7 @@ impl FaultLines {
         let rect = view.rect;
         let (tx, rx) = mpsc::channel();
         match thread::Builder::new()
-            .name("eewview-faults".into())
+            .name("starquake-faults".into())
             .spawn(move || {
                 let view = ViewCtx::new(mode, lon, lat, zoom, rect);
                 let mesh = build_fault_mesh(&global, &china, &view, dark, quality);

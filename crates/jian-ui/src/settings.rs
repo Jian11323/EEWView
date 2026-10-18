@@ -177,6 +177,8 @@ impl SettingsTab {
 pub enum SettingsAction {
     Saved { cfg: AppConfig, close: bool },
     Cancelled,
+    /// 手动检查 GitHub 更新
+    CheckForUpdate,
     TestSound {
         mute: bool,
         master_volume: f32,
@@ -379,7 +381,7 @@ impl SettingsSession {
         // （勿用 Tooltip：会盖住 egui ComboBox 的 Foreground 菜单）。
         // dim 先画、Window 后画，同层内 Window 在上；打开下拉时 popup 会 move_to_top。
         let screen = ctx.screen_rect();
-        egui::Area::new(egui::Id::new("eewview_settings_dim"))
+        egui::Area::new(egui::Id::new("starquake_settings_dim"))
             .order(egui::Order::Foreground)
             .fixed_pos(screen.min)
             .interactable(true)
@@ -403,8 +405,8 @@ impl SettingsSession {
         let win_h = 600.0_f32.min(max_h);
 
         let mut still_open = self.open;
-        egui::Window::new("EEW View \u{00b7} 设置")
-            .id(egui::Id::new(("eewview_settings_embedded", self.open_gen)))
+        egui::Window::new(format!("{} \u{00b7} {}", crate::APP_DISPLAY_NAME, t("设置")))
+            .id(egui::Id::new(("starquake_settings_embedded", self.open_gen)))
             .open(&mut still_open)
             .fixed_size([win_w, win_h])
             .resizable(false)
@@ -599,6 +601,7 @@ impl SettingsSession {
                 | Some(SettingsAction::TestSound { .. })
                 | Some(SettingsAction::ClearTileCache)
                 | Some(SettingsAction::OpenLogDir)
+                | Some(SettingsAction::CheckForUpdate)
         ) {
             return action;
         }
@@ -668,7 +671,7 @@ fn draw_shell(
                                     .color(chrome().text),
                             );
                             ui.label(
-                                RichText::new(t("EEWView · 左侧分类与右侧内容合并为同一玻璃面板"))
+                                RichText::new(t("StarQuake · 左侧分类与右侧内容合并为同一玻璃面板"))
                                     .size(12.0)
                                     .color(chrome().muted),
                             );
@@ -707,7 +710,7 @@ fn draw_shell(
 
             ui.add_space(6.0);
 
-            // 底栏：EEWView 草稿保存（RQ 即时写入；此处保留显式保存）
+            // 底栏：StarQuake 草稿保存（RQ 即时写入；此处保留显式保存）
             Frame::NONE
                 .fill(chrome().footer_bg)
                 .stroke(Stroke::new(1.0_f32, chrome().divider))
@@ -1012,7 +1015,7 @@ fn draw_content(
                 }
             }
             SettingsTab::Advanced => draw_advanced(ui, draft, action),
-            SettingsTab::About => draw_about(ui),
+            SettingsTab::About => draw_about(ui, draft, action),
         }
     }
     session.map_pick = map_pick;
@@ -1050,15 +1053,18 @@ pub(super) fn control_row(
     let title = t(title);
     let subtitle = if subtitle.is_empty() { "" } else { t(subtitle) };
     ui.horizontal(|ui| {
+        ui.set_height(40.0);
         paint_row_icon(ui, glyph);
         ui.add_space(10.0);
 
-        ui.vertical(|ui| {
-            ui.set_max_width((ui.available_width() - 280.0).max(140.0));
-            ui.label(RichText::new(title).size(14.0).strong().color(chrome().text));
-            if !subtitle.is_empty() {
-                ui.label(RichText::new(subtitle).size(12.0).color(chrome().muted));
-            }
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.vertical(|ui| {
+                ui.set_max_width((ui.available_width() - 280.0).max(140.0));
+                ui.label(RichText::new(title).size(14.0).strong().color(chrome().text));
+                if !subtitle.is_empty() {
+                    ui.label(RichText::new(subtitle).size(12.0).color(chrome().muted));
+                }
+            });
         });
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1579,10 +1585,30 @@ fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> bool {
             ui.add(egui::Slider::new(&mut draft.audio.master_volume, 0.0..=1.0).show_value(true));
         });
         row_divider(ui);
-        control_row(ui, "倒计时音量", "", "\u{25ce}", |ui| {
+        control_row(ui, "倒计时音量", "语音与滴答", "\u{25ce}", |ui| {
             ui.add(
                 egui::Slider::new(&mut draft.audio.countdown_volume, 0.0..=1.0).show_value(true),
             );
+        });
+        row_divider(ui);
+        control_row(ui, "倒计时音效", "本机 S 波剩余时播倒计时", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.audio.play_countdown);
+        });
+        row_divider(ui);
+        control_row(ui, "倒计时语音", "播报十、九…；关闭则只留滴答", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.audio.countdown_speech);
+        });
+        row_divider(ui);
+        control_row(ui, "开始播报秒数", "剩余秒数降到此值后开始", "\u{25ce}", |ui| {
+            ui.add(
+                egui::DragValue::new(&mut draft.audio.countdown_start)
+                    .range(0..=60)
+                    .speed(1.0),
+            );
+        });
+        row_divider(ui);
+        control_row(ui, "仅强有感时播", "本机预估震度≥3 或烈度≥5 时播倒计时", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.audio.countdown_only_intense);
         });
         row_divider(ui);
         control_row(ui, "Windows TTS", "预警/速报语音播报（系统朗读）", "\u{25ce}", |ui| {
@@ -2101,7 +2127,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
             framed_edit(ui, &mut draft.log.dir, 180.0);
         });
         row_divider(ui);
-        control_row(ui, "打开目录", "在资源管理器中查看 eewview.log.*", "\u{25ce}", |ui| {
+        control_row(ui, "打开目录", "在资源管理器中查看 starquake.log.*", "\u{25ce}", |ui| {
             if glass_btn(ui, "打开日志文件夹", false).clicked() {
                 *action = Some(SettingsAction::OpenLogDir);
             }
@@ -2152,16 +2178,16 @@ fn snet_station_src_label(s: &str) -> String {
     }
 }
 
-fn draw_about(ui: &mut Ui) {
+fn draw_about(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<SettingsAction>) {
     if let Some(tex) = crate::logo_texture(ui.ctx()) {
         ui.add(egui::Image::new((tex.id(), egui::Vec2::splat(64.0))));
         ui.add_space(10.0);
     }
-    section(ui, "EEW View \u{00b7} 地震视监器", "\u{24d8}", |ui| {
+    section(ui, crate::APP_DISPLAY_NAME, "\u{24d8}", |ui| {
         ui.label(
             RichText::new(format!(
                 "{}",
-                t("版本 Beta {}").replace("{}", env!("CARGO_PKG_VERSION"))
+                t("版本 {}").replace("{}", env!("CARGO_PKG_VERSION"))
             ))
             .size(14.0)
             .color(chrome().text),
@@ -2174,6 +2200,20 @@ fn draw_about(ui: &mut Ui) {
             .size(13.0)
             .color(chrome().text),
         );
+        ui.add_space(10.0);
+        control_row(ui, "启动时检查更新", "从 GitHub Releases 查询是否有新版本", "\u{21bb}", |ui| {
+            toggle(ui, &mut draft.update.check_on_startup);
+        });
+        row_divider(ui);
+        control_row(ui, "确认后自动安装", "点击「立即更新」后下载并替换本机程序", "\u{21bb}", |ui| {
+            toggle(ui, &mut draft.update.auto_install);
+        });
+        row_divider(ui);
+        control_row(ui, "检查更新", "立即查询 GitHub 最新 Release", "\u{21bb}", |ui| {
+            if glass_btn(ui, "检查更新", true).clicked() {
+                *action = Some(SettingsAction::CheckForUpdate);
+            }
+        });
         ui.add_space(10.0);
         ui.label(
             RichText::new(t("数据源"))
@@ -2195,13 +2235,30 @@ fn draw_about(ui: &mut Ui) {
                 .strong()
                 .color(chrome().text),
         );
-        ui.label(
-            RichText::new(t(
-                "图标提供：平平无奇的4\n音效来源：SREV\n授权参考：悦琳雅韵☆Rhythm(Stille)\n图标提供：lxfly2000\n以及各位给与帮助的EEW爱好者",
-            ))
-            .size(12.0)
-            .color(chrome().muted),
+        // 滚动字幕式致谢
+        let credits = t(
+            "图标提供：平平无奇的4    ·    音效来源：SREV    ·    倒计时语音：地牛 Wake Up!    ·    授权参考：悦琳雅韵☆Rhythm(Stille)    ·    图标提供：lxfly2000    ·    以及各位给与帮助的EEW爱好者",
         );
+        let tsec = ui.ctx().input(|i| i.time) as f32;
+        let w = ui.available_width().max(120.0);
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 28.0), Sense::hover());
+        ui.painter().rect_filled(rect, 6.0, chrome().field);
+        let galley = ui.fonts(|f| {
+            f.layout_no_wrap(
+                credits.to_string(),
+                egui::FontId::proportional(12.0),
+                chrome().muted,
+            )
+        });
+        let text_w = galley.size().x;
+        let cycle = (text_w + w).max(1.0);
+        let x = rect.min.x + w - ((tsec * 42.0) % cycle);
+        ui.painter().with_clip_rect(rect).galley(
+            egui::pos2(x, rect.center().y - galley.size().y * 0.5),
+            galley,
+            chrome().muted,
+        );
+        ui.ctx().request_repaint();
         ui.add_space(10.0);
         ui.label(
             RichText::new(t("参考软件"))
