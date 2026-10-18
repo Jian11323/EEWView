@@ -481,10 +481,10 @@ impl GeoImageOverlay {
             return;
         }
 
-        // 球体：小格贴面；投影弦过长/中心落背面则细分或丢弃，避免穿球大三角楔。
-        let max_edge = (view.rect.width().min(view.rect.height()) * 0.045).clamp(28.0, 56.0);
-        const NX: i32 = 64;
-        const NY: i32 = 40;
+        // 球体：更密贴面，避免高分辨率云图在球上发糊/出现整齐缺口感。
+        let max_edge = (view.rect.width().min(view.rect.height()) * 0.032).clamp(18.0, 40.0);
+        const NX: i32 = 96;
+        const NY: i32 = 56;
         for j in 0..NY {
             for i in 0..NX {
                 let u0 = i as f64 / NX as f64;
@@ -558,7 +558,7 @@ fn paint_globe_cell(
         // 弦过长：继续细分
     }
 
-    if depth >= 3 {
+    if depth >= 4 {
         return;
     }
     let um = (u0 + u1) * 0.5;
