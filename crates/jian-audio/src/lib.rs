@@ -70,9 +70,14 @@ impl AudioEngine {
     }
 
     pub fn play(&mut self, cue: AudioCue) {
+        self.play_in_pack(None, cue);
+    }
+
+    /// 在指定音效包内播放（如非 JMA 预警用 `eewcn`，JMA 用 `srev`）。
+    pub fn play_in_pack(&mut self, pack: Option<&str>, cue: AudioCue) {
         match &cue {
             AudioCue::Countdown(_) => {
-                if let Some(path) = self.router.resolve(&self.catalog, &cue) {
+                if let Some(path) = self.router.resolve_in_pack(&self.catalog, pack, &cue) {
                     if let Some(p) = &self.player {
                         p.play_speech(&path);
                     }
@@ -80,7 +85,7 @@ impl AudioEngine {
             }
             AudioCue::CountdownLoop(on) => {
                 if *on {
-                    if let Some(path) = self.router.resolve(&self.catalog, &cue) {
+                    if let Some(path) = self.router.resolve_in_pack(&self.catalog, pack, &cue) {
                         if let Some(p) = &self.player {
                             p.set_countdown_loop(Some(&path));
                         }
@@ -90,7 +95,7 @@ impl AudioEngine {
                 }
             }
             other => {
-                if let Some(path) = self.router.resolve(&self.catalog, other) {
+                if let Some(path) = self.router.resolve_in_pack(&self.catalog, pack, other) {
                     if let Some(p) = &self.player {
                         p.play_oneshot(&path);
                     } else {
@@ -117,8 +122,8 @@ impl AudioEngine {
         }
     }
 
-    /// JMA EEW（对齐要石）：issue / update / final / cancel，另附 caution / warn。
-    /// `is_warn`：警报；`play_caution`：震度≥3 且非警报附加 caution。
+    /// 预警事件音：`pack` 为 `srev`（JMA）或 `eewcn`（其余机构）。
+    /// SREV 另附 caution / warn；eewcn 仅 issue / update / final。
     pub fn on_eew(
         &mut self,
         agency: &str,
@@ -128,24 +133,26 @@ impl AudioEngine {
         is_cancel: bool,
         is_warn: bool,
         play_caution: bool,
+        pack: &str,
     ) {
         let key = format!("{agency}|{event_id}");
+        let pack = Some(pack);
         if is_cancel {
-            self.play(AudioCue::Cancel);
+            self.play_in_pack(pack, AudioCue::Cancel);
             self.eew_seen.insert(key, serial);
             return;
         }
         let prev = self.eew_seen.get(&key).copied();
         let advanced = match prev {
             None => {
-                self.play(AudioCue::Issue);
+                self.play_in_pack(pack, AudioCue::Issue);
                 true
             }
             Some(p) if serial > p => {
                 if is_final {
-                    self.play(AudioCue::Final);
+                    self.play_in_pack(pack, AudioCue::Final);
                 } else {
-                    self.play(AudioCue::Update);
+                    self.play_in_pack(pack, AudioCue::Update);
                 }
                 true
             }
@@ -154,16 +161,18 @@ impl AudioEngine {
         if !advanced {
             return;
         }
-        // 要石：警报播 warn（并吞掉 caution）；否则震度≥3 播 caution；各事件最多一次
-        if is_warn {
-            if !self.warn_played.contains(&key) {
-                self.play(AudioCue::Warn);
-                self.warn_played.insert(key.clone());
+        // SREV / 要石：警报播 warn（并吞掉 caution）；否则震度≥3 播 caution
+        if pack == Some("srev") {
+            if is_warn {
+                if !self.warn_played.contains(&key) {
+                    self.play_in_pack(pack, AudioCue::Warn);
+                    self.warn_played.insert(key.clone());
+                    self.caution_played.insert(key.clone());
+                }
+            } else if play_caution && !self.caution_played.contains(&key) {
+                self.play_in_pack(pack, AudioCue::Caution);
                 self.caution_played.insert(key.clone());
             }
-        } else if play_caution && !self.caution_played.contains(&key) {
-            self.play(AudioCue::Caution);
-            self.caution_played.insert(key.clone());
         }
         self.eew_seen.insert(key, serial);
     }

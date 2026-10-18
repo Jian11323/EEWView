@@ -1,11 +1,12 @@
 {
-  "version": 2,
+  "version": 3,
   "routing": {
     "jma_eew": "srev",
+    "default_eew": "eewcn",
     "countdown": "countdown",
-    "default_eew": "srev",
     "station": "station",
-    "ui": "ui"
+    "ui": "ui",
+    "record": "eewcn"
   },
   "packs": {
     "srev": {
@@ -45,6 +46,20 @@
         "tsunami3_cancel": "srev/tsunami3cancel.mp3"
       }
     },
+    "eewcn": {
+      "license": "see ATTRIBUTION.md",
+      "source": "Open EEW CN",
+      "use_for": ["default_eew", "cea", "cenc", "cwa", "record", "other_non_jma"],
+      "format": "wav",
+      "dir": "eewcn/",
+      "events": {
+        "issue": "eewcn/eewalert.wav",
+        "update": "eewcn/eewupdate.wav",
+        "final": "eewcn/eewupdate.wav",
+        "critical": "eewcn/eewcritical.wav",
+        "record": "eewcn/newrecord.wav"
+      }
+    },
     "countdown": {
       "license": "see ATTRIBUTION.md",
       "source": "地牛Wake Up!",
@@ -74,7 +89,7 @@
     "eew": {
       "license": "CC0-1.0",
       "source": "jian-synth",
-      "use_for": ["cea", "cenc", "cwa", "other_non_jma"],
+      "use_for": ["fallback"],
       "format": "wav",
       "events": {
         "issue": "eew/issue.wav",

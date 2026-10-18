@@ -2237,7 +2237,7 @@ fn draw_about(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<SettingsAc
         );
         // 滚动字幕式致谢
         let credits = t(
-            "图标提供：平平无奇的4    ·    音效来源：SREV    ·    倒计时语音：地牛 Wake Up!    ·    授权参考：悦琳雅韵☆Rhythm(Stille)    ·    图标提供：lxfly2000    ·    以及各位给与帮助的EEW爱好者",
+            "图标提供：平平无奇的4    ·    音效来源：SREV / Open EEW CN    ·    倒计时语音：地牛 Wake Up!    ·    授权参考：悦琳雅韵☆Rhythm(Stille)    ·    图标提供：lxfly2000    ·    以及各位给与帮助的EEW爱好者",
         );
         let tsec = ui.ctx().input(|i| i.time) as f32;
         let w = ui.available_width().max(120.0);

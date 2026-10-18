@@ -14,6 +14,21 @@
 
 再分发须保留署名；衍生音频继续以 CC BY-SA 2.0（或兼容）授权。
 
+## `eewcn/` — Open EEW CN
+
+| 项 | 内容 |
+|----|------|
+| 来源 | [OpenEEWCN/eewcn](https://github.com/OpenEEWCN/eewcn) `Media/` |
+| 许可 | 开发者授权用于 StarQuake；再分发请自行确认 |
+| 用途 | 非 JMA 预警首报 / 更新报、速报提示 |
+
+| 文件 | 用途 |
+|------|------|
+| `eewalert.wav` | 预警首报 |
+| `eewupdate.wav` | 预警更新 / 最终报 |
+| `eewcritical.wav` | 危急档（预留） |
+| `newrecord.wav` | 速报 |
+
 ## `countdown/` — 地牛 Wake Up! 中文倒计时
 
 | 项 | 内容 |
@@ -27,7 +42,7 @@
 
 ## `eew/` · `station/` · `ui/` — 原创合成
 
-由 `tools/synth_sounds.py` 合成，**CC0 1.0**。用作事件音回退与测站 / UI 提示。
+由 `tools/synth_sounds.py` 合成，**CC0 1.0**。用作缺文件回退与测站 / UI 提示。
 
 ```bash
 python tools/synth_sounds.py

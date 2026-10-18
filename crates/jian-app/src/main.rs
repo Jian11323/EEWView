@@ -592,38 +592,30 @@ impl eframe::App for JianApp {
                 if let NetEvent::Eew(ref report) = ev {
                     // 发震过期：不播预警音（仍可进列表供回看）
                     let alert_ok = !origin_is_stale(report.origin_ms);
-                    // SREV 仅 JMA（对齐要石：issue/update/final/cancel + caution/warn）
-                    if alert_ok && agency_family(&report.agency.0) == AgencyFamily::Jma {
-                        if let Some(audio) = self.audio.as_mut() {
-                            // 启动界面期间历史灌入只登记不播
-                            if self.splash.active() {
-                                audio.seed_eew_seen(
-                                    &report.agency.0,
-                                    &report.event_id,
-                                    report.serial,
-                                );
-                            } else {
-                                let play_caution = report.intensity_kind
-                                    == IntensityKind::JmaShindo
-                                    && report.intensity_level >= 3
-                                    && !report.is_assumption;
-                                audio.on_eew(
-                                    &report.agency.0,
-                                    &report.event_id,
-                                    report.serial,
-                                    report.is_final,
-                                    report.is_cancel,
-                                    report.is_warn,
-                                    play_caution,
-                                );
-                            }
-                        }
-                    } else if !alert_ok {
-                        if let Some(audio) = self.audio.as_mut() {
+                    if let Some(audio) = self.audio.as_mut() {
+                        if !alert_ok || self.splash.active() {
+                            // 过期 / 启动灌入：只登记不播
                             audio.seed_eew_seen(
                                 &report.agency.0,
                                 &report.event_id,
                                 report.serial,
+                            );
+                        } else {
+                            let is_jma = agency_family(&report.agency.0) == AgencyFamily::Jma;
+                            let pack = if is_jma { "srev" } else { "eewcn" };
+                            let play_caution = is_jma
+                                && report.intensity_kind == IntensityKind::JmaShindo
+                                && report.intensity_level >= 3
+                                && !report.is_assumption;
+                            audio.on_eew(
+                                &report.agency.0,
+                                &report.event_id,
+                                report.serial,
+                                report.is_final,
+                                report.is_cancel,
+                                report.is_warn,
+                                play_caution,
+                                pack,
                             );
                         }
                     }
@@ -670,16 +662,16 @@ impl eframe::App for JianApp {
             }
         }
 
-        // 速报 TTS（含预警中的确认速报；跳转与否由 upsert_record 决定）
-        // 启动界面期间丢弃待播，避免冷启动 list 灌入朗读
-        if self.cfg.audio.tts_enabled && !self.cfg.audio.mute {
-            if let Some(rec) = self.snap.pending_tts_record.take() {
-                if !self.splash.active() {
+        // 速报：Open EEW CN newrecord + 可选 TTS（启动界面丢弃，避免冷启动灌入）
+        if let Some(rec) = self.snap.pending_tts_record.take() {
+            if !self.splash.active() {
+                if let Some(audio) = self.audio.as_mut() {
+                    audio.play(AudioCue::NewRecord);
+                }
+                if self.cfg.audio.tts_enabled && !self.cfg.audio.mute {
                     speak_async(build_record_tts_script(&rec));
                 }
             }
-        } else {
-            self.snap.pending_tts_record = None;
         }
 
         // 同步自定义震级传播表到快照（仅变更时写入，避免每帧分配+排序）

@@ -14,12 +14,14 @@ pub enum AudioCue {
     Countdown(i32),
     /// 倒计时循环底噪开/关
     CountdownLoop(bool),
-    /// 检出提示（SREV prompt；速报用，EEW 暂不接线）
+    /// 检出提示（SREV prompt）
     Prompt,
     /// 预报注意级（SREV caution，震度≥3）
     Caution,
     /// 警报级（SREV warn，震度≥5弱 / is_warn）
     Warn,
+    /// 速报提示（Open EEW CN `newrecord.wav`）
+    NewRecord,
     /// 海啸播报：grade 1=预报 2=注意报 3=警报/大海啸；kind=issue|update|cancel
     Tsunami { grade: u8, kind: TsunamiCueKind },
     /// UI：连接成功 / 失败 / 通知

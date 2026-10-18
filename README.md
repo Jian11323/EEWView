@@ -64,7 +64,8 @@
 - 中国活动断层：[gmt-china/china-geospatial-data](https://github.com/gmt-china/china-geospatial-data)（CAFD）
 - 近距走时表：[气象厅 JMA2001](https://www.data.jma.go.jp/eqev/data/bulletin/catalog/appendix/trtime/trt_j.html)
 - 远距走时表：IASPEI ak135
-- SREV 音效：[scratch-realtime-earthquake-viewer-page](https://github.com/kotoho7/scratch-realtime-earthquake-viewer-page)
+- SREV 音效（JMA）：[scratch-realtime-earthquake-viewer-page](https://github.com/kotoho7/scratch-realtime-earthquake-viewer-page)
+- Open EEW CN 音效（非 JMA 预警 / 速报）：[OpenEEWCN/eewcn](https://github.com/OpenEEWCN/eewcn)
 - 中文倒计时播报素材：[地牛 Wake Up!](https://eew.earthquake.tw/)
 - 界面字体：[霞鹜文楷](https://github.com/lxgw/LxgwWenKai)（SIL OFL 1.1）
 
