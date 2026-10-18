@@ -1,3 +1,0 @@
-feat(audio): 非 JMA 预警与速报改用 Open EEW CN 音效
-
-JMA 仍走 SREV；其余机构首报/更新用 eewalert/eewupdate，速报用 newrecord。
