@@ -67,6 +67,10 @@ mod tests {
         assert_eq!(cat.pack_for_route("ui"), Some("ui"));
         let issue = cat.event_rel_path("eewcn", "issue").expect("eewcn/issue");
         assert!(sound_root().join(issue).is_file());
+        let critical = cat.event_rel_path("eewcn", "critical").expect("eewcn/critical");
+        assert!(sound_root().join(critical).is_file());
+        let arrive = cat.event_rel_path("eewcn", "arrive_s").expect("eewcn/arrive_s");
+        assert!(sound_root().join(arrive).is_file());
         let record = cat.event_rel_path("eewcn", "record").expect("eewcn/record");
         assert!(sound_root().join(record).is_file());
         let notify = cat.event_rel_path("ui", "notify").expect("ui/notify");

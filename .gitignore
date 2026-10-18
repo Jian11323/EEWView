@@ -53,7 +53,23 @@ config/local.toml
 !**/.env.example
 
 # ===== 地牛倒计时：非自由许可，默认不进公开仓库 =====
-media/sound/countdown/
+media/sound/countdown.wav
+media/sound/0s.mp3
+media/sound/1s.mp3
+media/sound/2s.mp3
+media/sound/3s.mp3
+media/sound/4s.mp3
+media/sound/5s.mp3
+media/sound/6s.mp3
+media/sound/7s.mp3
+media/sound/8s.mp3
+media/sound/9s.mp3
+media/sound/10s.mp3
+media/sound/20s.mp3
+media/sound/30s.mp3
+media/sound/40s.mp3
+media/sound/50s.mp3
+media/sound/60s.mp3
 
 # Python
 **/__pycache__/

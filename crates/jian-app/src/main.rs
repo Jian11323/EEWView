@@ -223,13 +223,13 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
         cfg.audio.mute,
     ) {
         Ok(a) => {
-            let cd = media.join("sound/countdown");
-            let has = cd.join("0s.mp3").is_file() && cd.join("countdown.wav").is_file();
+            let sound = media.join("sound");
+            let has = sound.join("0s.mp3").is_file() && sound.join("countdown.wav").is_file();
             if has {
-                tracing::info!(path = %cd.display(), "倒计时素材已加载");
+                tracing::info!(path = %sound.display(), "倒计时素材已加载");
             } else {
                 tracing::warn!(
-                    path = %cd.display(),
+                    path = %sound.display(),
                     "未找到倒计时素材（0s.mp3 / countdown.wav），倒计时语音将静默"
                 );
             }
@@ -366,6 +366,7 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
                 update_status: String::new(),
                 update_busy: false,
                 update_checked: false,
+                update_check_manual: false,
             }))
         }),
     );
@@ -575,6 +576,8 @@ struct JianApp {
     update_status: String,
     update_busy: bool,
     update_checked: bool,
+    /// 本次检查是否由用户手动触发（启动自动检查无更新时不弹「已是最新」）
+    update_check_manual: bool,
 }
 
 impl eframe::App for JianApp {
@@ -616,6 +619,9 @@ impl eframe::App for JianApp {
                                 report.is_warn,
                                 play_caution,
                                 pack,
+                                report.magnitude,
+                                report.intensity_level,
+                                report.is_assumption || report.magnitude < 0.0,
                             );
                         }
                     }
@@ -954,6 +960,7 @@ impl eframe::App for JianApp {
         }
 
         // 地牛倒计时：本机位置有效、开关打开、启动画面结束后才播
+        // S 波抵达音：有本机位置且倒计时会话有效时，剩余首次到 0 播 swavearrive
         if let Some(audio) = self.audio.as_mut() {
             let intense_ok = !self.cfg.audio.countdown_only_intense || countdown_is_intense(&self.snap);
             let remain = if self.has_local
@@ -965,6 +972,12 @@ impl eframe::App for JianApp {
             } else {
                 None
             };
+            let arrive_remain = if self.has_local && !self.splash.active() {
+                self.snap.countdown_s
+            } else {
+                None
+            };
+            audio.tick_s_arrive(arrive_remain);
             audio.tick_countdown(
                 remain,
                 self.cfg.audio.countdown_start,
@@ -1110,13 +1123,18 @@ impl eframe::App for JianApp {
 
 impl JianApp {
 
-    fn begin_update_check(&mut self, _manual: bool) {
+    fn begin_update_check(&mut self, manual: bool) {
         if self.update_busy {
             return;
         }
         self.update_busy = true;
         self.update_checked = true;
-        self.update_status = "正在检查更新…".into();
+        self.update_check_manual = manual;
+        self.update_status = if manual {
+            "正在检查更新…".into()
+        } else {
+            String::new()
+        };
         let (tx, rx) = mpsc::channel();
         self.update_rx = Some(rx);
         let local = env!("CARGO_PKG_VERSION").to_string();
@@ -1144,19 +1162,26 @@ impl JianApp {
             Ok(Ok(None)) => {
                 self.update_busy = false;
                 self.update_rx = None;
-                self.update_status = "已是最新版本".into();
                 self.update_available = None;
+                // 启动静默：无更新不弹窗；手动检查才提示「已是最新」
+                self.update_status = if self.update_check_manual {
+                    "已是最新版本".into()
+                } else {
+                    String::new()
+                };
                 ctx.request_repaint();
             }
             Ok(Err(e)) => {
                 self.update_busy = false;
                 self.update_rx = None;
-                // 启动静默检查失败只打日志；有「正在检查」文案时展示错误
                 if e.contains("更新失败") || e.contains("下载") || e.contains("应用") {
                     self.update_status = e;
-                } else {
+                } else if self.update_check_manual {
                     tracing::warn!("检查更新失败: {e}");
                     self.update_status = format!("检查更新失败：{e}");
+                } else {
+                    tracing::warn!("启动检查更新失败: {e}");
+                    self.update_status.clear();
                 }
                 ctx.request_repaint();
             }
@@ -1170,6 +1195,9 @@ impl JianApp {
 
     fn draw_update_dialog(&mut self, ctx: &egui::Context) {
         if self.update_busy && self.update_available.is_none() {
+            if self.update_status.is_empty() {
+                return;
+            }
             egui::Window::new("StarQuake")
                 .id(egui::Id::new("starquake_update_busy"))
                 .collapsible(false)

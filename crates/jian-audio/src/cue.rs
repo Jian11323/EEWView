@@ -22,6 +22,10 @@ pub enum AudioCue {
     Warn,
     /// 速报提示（Open EEW CN `newrecord.wav`）
     NewRecord,
+    /// 非 JMA 危急档（烈度≥7 或 M≥5 → `eewcritical.wav`）
+    Critical,
+    /// 本机 S 波抵达（`swavearrive.wav`）
+    ArriveS,
     /// 海啸播报：grade 1=预报 2=注意报 3=警报/大海啸；kind=issue|update|cancel
     Tsunami { grade: u8, kind: TsunamiCueKind },
     /// UI：连接成功 / 失败 / 通知

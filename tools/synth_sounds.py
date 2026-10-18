@@ -12,19 +12,19 @@ ROOT = Path(__file__).resolve().parents[1] / "media" / "sound"
 RATE = 22050
 
 SPECS = {
-    "ui/connect_ok.wav": (880, 0.12, 0.25),
-    "ui/connect_fail.wav": (220, 0.18, 0.3),
-    "ui/notify.wav": (660, 0.08, 0.2),
-    "eew/issue.wav": (520, 0.2, 0.35),
-    "eew/update.wav": (480, 0.12, 0.25),
-    "eew/final.wav": (400, 0.25, 0.4),
-    "eew/cancel.wav": (300, 0.2, 0.35),
-    "eew/prompt.wav": (600, 0.1, 0.2),
-    "eew/arrive_p.wav": (700, 0.08, 0.15),
-    "eew/arrive_s.wav": (350, 0.1, 0.2),
-    "station/weak.wav": (440, 0.06, 0.12),
-    "station/mid.wav": (520, 0.08, 0.15),
-    "station/strong.wav": (300, 0.12, 0.22),
+    "connect_ok.wav": (880, 0.12, 0.25),
+    "connect_fail.wav": (220, 0.18, 0.3),
+    "notify.wav": (660, 0.08, 0.2),
+    "issue.wav": (520, 0.2, 0.35),
+    "update.wav": (480, 0.12, 0.25),
+    "final.wav": (400, 0.25, 0.4),
+    "cancel.wav": (300, 0.2, 0.35),
+    "prompt.wav": (600, 0.1, 0.2),
+    "arrive_p.wav": (700, 0.08, 0.15),
+    "arrive_s.wav": (350, 0.1, 0.2),
+    "weak.wav": (440, 0.06, 0.12),
+    "mid.wav": (520, 0.08, 0.15),
+    "strong.wav": (300, 0.12, 0.22),
 }
 
 

@@ -79,6 +79,17 @@ impl Router {
                     .to_string(),
                 "record".into(),
             ),
+            AudioCue::Critical => (
+                self.pick_event_pack(catalog, pack_override),
+                "critical".into(),
+            ),
+            AudioCue::ArriveS => (
+                catalog
+                    .pack_for_route("default_eew")
+                    .unwrap_or("eewcn")
+                    .to_string(),
+                "arrive_s".into(),
+            ),
             AudioCue::Tsunami { grade, kind } => {
                 let g = (*grade).clamp(1, 3);
                 let k = match kind {

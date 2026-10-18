@@ -30,6 +30,8 @@ pub struct AudioEngine {
     /// 本事件已播 caution / warn（对齐要石：各最多一次）
     caution_played: HashSet<String>,
     warn_played: HashSet<String>,
+    /// 当前倒计时会话是否已播本机 S 波抵达音
+    s_arrive_played: bool,
 }
 
 impl AudioEngine {
@@ -66,6 +68,7 @@ impl AudioEngine {
             eew_seen: HashMap::new(),
             caution_played: HashSet::new(),
             warn_played: HashSet::new(),
+            s_arrive_played: false,
         })
     }
 
@@ -123,7 +126,7 @@ impl AudioEngine {
     }
 
     /// 预警事件音：`pack` 为 `srev`（JMA）或 `eewcn`（其余机构）。
-    /// SREV 另附 caution / warn；eewcn 仅 issue / update / final。
+    /// SREV 另附 caution / warn；eewcn：危急档（烈度≥7 或 M≥5）播 critical，否则首报 alert / 更新 update。
     pub fn on_eew(
         &mut self,
         agency: &str,
@@ -134,6 +137,9 @@ impl AudioEngine {
         is_warn: bool,
         play_caution: bool,
         pack: &str,
+        magnitude: f64,
+        intensity_level: u8,
+        magnitude_unknown: bool,
     ) {
         let key = format!("{agency}|{event_id}");
         let pack = Some(pack);
@@ -142,14 +148,22 @@ impl AudioEngine {
             self.eew_seen.insert(key, serial);
             return;
         }
+        let eewcn_critical = pack == Some("eewcn")
+            && (intensity_level >= 7 || (!magnitude_unknown && magnitude >= 5.0));
         let prev = self.eew_seen.get(&key).copied();
         let advanced = match prev {
             None => {
-                self.play_in_pack(pack, AudioCue::Issue);
+                if eewcn_critical {
+                    self.play_in_pack(pack, AudioCue::Critical);
+                } else {
+                    self.play_in_pack(pack, AudioCue::Issue);
+                }
                 true
             }
             Some(p) if serial > p => {
-                if is_final {
+                if eewcn_critical {
+                    self.play_in_pack(pack, AudioCue::Critical);
+                } else if is_final {
                     self.play_in_pack(pack, AudioCue::Final);
                 } else {
                     self.play_in_pack(pack, AudioCue::Update);
@@ -175,6 +189,24 @@ impl AudioEngine {
             }
         }
         self.eew_seen.insert(key, serial);
+    }
+
+    /// 本机 S 波剩余秒：首次落到 0 时播抵达音；会话清空后可再触发。
+    pub fn tick_s_arrive(&mut self, remain: Option<i32>) {
+        match remain {
+            Some(sec) if sec <= 0 => {
+                if !self.s_arrive_played {
+                    self.play(AudioCue::ArriveS);
+                    self.s_arrive_played = true;
+                }
+            }
+            Some(_) => {
+                self.s_arrive_played = false;
+            }
+            None => {
+                self.s_arrive_played = false;
+            }
+        }
     }
 
     pub fn set_mute(&mut self, mute: bool) {
