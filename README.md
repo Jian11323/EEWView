@@ -2,7 +2,7 @@
   <img src="icon/brand/app.png" alt="EEW View" width="128" />
 </p>
 
-<h1 align="center">EEW View · 地震实时监看</h1>
+<h1 align="center">StarQuake · 地震实时监看</h1>
 
 <p align="center">
   纯 Rust 桌面端 · 多源预警 / 速报视监
