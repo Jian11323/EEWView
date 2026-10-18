@@ -28,7 +28,7 @@ pub use intensity::{
 pub use palette::{instrumental_band_level, instrumental_band_rgb, instrumental_rgb};
 pub use sun::{
     format_hm_minutes, is_night, solar_altitude_deg, sun_geometry, sunrise_sunset_local_hm,
-    terminator_lon_at_lat, UserNotice, UserNoticeKind, WeatherOverlay,
+    terminator_lon_at_lat, CloudSheet, UserNotice, UserNoticeKind, WeatherOverlay,
 };
 
 // tsunami_official_rgb / tsunami_grade_zh 定义于本文件
@@ -955,20 +955,12 @@ impl AppSnapshot {
         std::mem::take(&mut self.pending_notices)
     }
 
-    pub fn set_weather_tiles(
-        &mut self,
-        host: String,
-        radar_path: Option<String>,
-        cloud_path: Option<String>,
-    ) {
+    pub fn set_weather_tiles(&mut self, host: String, radar_path: Option<String>) {
         if !host.is_empty() {
             self.weather.rainviewer_host = host;
         }
         if let Some(p) = radar_path {
             self.weather.radar_path = Some(p);
-        }
-        if let Some(p) = cloud_path {
-            self.weather.cloud_path = Some(p);
         }
     }
 

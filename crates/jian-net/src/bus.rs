@@ -1,8 +1,8 @@
 //! 网络事件总线（tokio mpsc）。
 
 use jian_core::{
-    EewReport, EqRecord, HealthStatus, StationSample, TsunamiInfo, TyphoonInfo, UserNotice,
-    VolcanoNotice,
+    CloudSheet, EewReport, EqRecord, HealthStatus, StationSample, TsunamiInfo, TyphoonInfo,
+    UserNotice, VolcanoNotice,
 };
 use tokio::sync::mpsc;
 
@@ -31,12 +31,17 @@ pub enum NetEvent {
     Volcano(VolcanoNotice),
     /// 活跃台风快照（整表替换）
     Typhoons(Vec<TyphoonInfo>),
-    /// RainViewer 瓦片 host + path
+    /// 兼容旧瓦片 path 事件（现已改用单幅）
     WeatherTiles {
         host: String,
         radar_path: Option<String>,
-        cloud_path: Option<String>,
     },
+    /// 本站全球雷达单幅
+    WeatherRadarSheet(CloudSheet),
+    /// 全国红外云图
+    WeatherChinaCloudSheet(CloudSheet),
+    /// 全球红外云图
+    WeatherGlobalCloudSheet(CloudSheet),
     /// 需弹窗提醒用户（鉴权 / 超限 / 封禁）
     UserNotice(UserNotice),
 }

@@ -37,13 +37,13 @@ impl NetHub {
     }
 
     /// 按开关重启气象轮询（关则停任务）。
-    pub fn set_weather_overlay(&mut self, radar: bool, cloud: bool) {
+    pub fn set_weather_overlay(&mut self, opts: sources::weather::WeatherPollOpts) {
         for t in self.weather.drain(..) {
             t.abort();
         }
-        if radar || cloud {
+        if opts.any() {
             self.weather
-                .extend(spawn_weather_overlay(self.tx.clone(), radar, cloud));
+                .extend(spawn_weather_overlay(self.tx.clone(), opts));
         }
     }
 
@@ -133,17 +133,12 @@ pub fn spawn_hub_with_assets(
 /// 按 UI 开关启动气象叠层轮询（可与 `spawn_hub` 并列追加任务）。
 pub fn spawn_weather_overlay(
     tx: NetTx,
-    want_radar: bool,
-    want_cloud: bool,
+    opts: sources::weather::WeatherPollOpts,
 ) -> Vec<tokio::task::JoinHandle<()>> {
-    sources::weather::spawn(
-        tx,
-        sources::weather::WeatherPollOpts {
-            want_radar,
-            want_cloud,
-        },
-    )
+    sources::weather::spawn(tx, opts)
 }
+
+pub use sources::weather::WeatherPollOpts;
 
 /// 将 `NetEvent` 合并进 `AppSnapshot`（供 UI 帧循环调用）。
 pub fn apply_event(snap: &mut jian_core::AppSnapshot, ev: NetEvent) {
@@ -180,16 +175,41 @@ pub fn apply_event_filtered(
         NetEvent::Tsunami(t) => snap.upsert_tsunami(t),
         NetEvent::Volcano(v) => snap.upsert_volcano(v),
         NetEvent::Typhoons(list) => snap.replace_typhoons(list),
-        NetEvent::WeatherTiles {
-            host,
-            radar_path,
-            cloud_path,
-        } => {
+        NetEvent::WeatherTiles { host, radar_path } => {
             if !host.is_empty() {
                 snap.weather.rainviewer_host = host;
             }
             snap.weather.radar_path = radar_path;
-            snap.weather.cloud_path = cloud_path;
+        }
+        NetEvent::WeatherRadarSheet(sheet) => {
+            let same = snap
+                .weather
+                .radar_sheet
+                .as_ref()
+                .is_some_and(|old| old.id == sheet.id);
+            if !same {
+                snap.weather.radar_sheet = Some(sheet);
+            }
+        }
+        NetEvent::WeatherChinaCloudSheet(sheet) => {
+            let same = snap
+                .weather
+                .china_cloud_sheet
+                .as_ref()
+                .is_some_and(|old| old.id == sheet.id);
+            if !same {
+                snap.weather.china_cloud_sheet = Some(sheet);
+            }
+        }
+        NetEvent::WeatherGlobalCloudSheet(sheet) => {
+            let same = snap
+                .weather
+                .global_cloud_sheet
+                .as_ref()
+                .is_some_and(|old| old.id == sheet.id);
+            if !same {
+                snap.weather.global_cloud_sheet = Some(sheet);
+            }
         }
         NetEvent::UserNotice(n) => snap.push_notice(n),
     }

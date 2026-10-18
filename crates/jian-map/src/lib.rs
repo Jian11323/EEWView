@@ -77,7 +77,7 @@ use marker_icons::MarkerIcons;
 use projection::ViewCtx;
 use fault_lines::FaultLines;
 use tsunami_coast::TsunamiCoast;
-use overlay_tiles::OverlayTileCache;
+use overlay_tiles::{GeoImageOverlay, OverlayTileCache};
 use tile_cache::TileCache as Cache;
 use std::sync::Arc;
 
@@ -117,7 +117,9 @@ pub struct MapViewport {
     /// 非交互时合成底图层，避免波圈动画每帧再走一遍矢量/断层/测站路径
     still_static: Option<StillStatic>,
     radar_tiles: OverlayTileCache,
-    cloud_tiles: OverlayTileCache,
+    radar_sheet: GeoImageOverlay,
+    china_cloud_sheet: GeoImageOverlay,
+    global_cloud_sheet: GeoImageOverlay,
     show_terminator: bool,
 }
 
@@ -150,10 +152,9 @@ impl Default for MapViewport {
                 "/2/1_0.png",
                 Color32::from_rgba_unmultiplied(255, 255, 255, 200),
             ),
-            cloud_tiles: OverlayTileCache::new(
-                "/0/0_0.png",
-                Color32::from_rgba_unmultiplied(255, 255, 255, 140),
-            ),
+            radar_sheet: GeoImageOverlay::radar(),
+            china_cloud_sheet: GeoImageOverlay::cloud(),
+            global_cloud_sheet: GeoImageOverlay::cloud(),
             show_terminator: false,
         }
     }
@@ -384,10 +385,24 @@ impl MapViewport {
         self.paint_quality = q;
     }
 
-    /// 全球雷达 / 云图瓦片前缀（空则不画）。云图无 path 时传空串。
-    pub fn set_weather_tile_prefixes(&mut self, radar_prefix: &str, cloud_prefix: &str) {
+    /// 全球雷达瓦片前缀（空则不画）。
+    pub fn set_weather_tile_prefixes(&mut self, radar_prefix: &str) {
         self.radar_tiles.set_prefix(radar_prefix);
-        self.cloud_tiles.set_prefix(cloud_prefix);
+    }
+
+    /// 本站全球雷达单幅；`None` 则不画。
+    pub fn set_radar_sheet(&mut self, sheet: Option<&jian_core::CloudSheet>) {
+        self.radar_sheet.set_source(sheet);
+    }
+
+    /// 全国红外云图；`None` 则不画。
+    pub fn set_china_cloud_sheet(&mut self, sheet: Option<&jian_core::CloudSheet>) {
+        self.china_cloud_sheet.set_source(sheet);
+    }
+
+    /// 全球红外云图；`None` 则不画。
+    pub fn set_global_cloud_sheet(&mut self, sheet: Option<&jian_core::CloudSheet>) {
+        self.global_cloud_sheet.set_source(sheet);
     }
 
     pub fn set_show_terminator(&mut self, on: bool) {
@@ -594,8 +609,11 @@ impl MapViewport {
         }
 
         // 气象叠层：在底图/断层之上、测站与事件之下；平面与球体均绘制
+        // 顺序：雷达 → 全球云图 → 国内云图（东亚更清晰压在全球之上）
         self.radar_tiles.paint(ui, &view);
-        self.cloud_tiles.paint(ui, &view);
+        self.radar_sheet.paint(ui, &view);
+        self.global_cloud_sheet.paint(ui, &view);
+        self.china_cloud_sheet.paint(ui, &view);
         if self.show_terminator {
             weather_paint::paint_terminator(ui, &view, now_ms);
         }

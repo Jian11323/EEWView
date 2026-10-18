@@ -5,12 +5,28 @@ use std::f64::consts::PI;
 /// 气象叠层运行时状态（上游有则写，无则空）。
 #[derive(Debug, Clone, Default)]
 pub struct WeatherOverlay {
-    /// RainViewer host，如 `https://tilecache.rainviewer.com`
+    /// 兼容旧瓦片前缀（现已改拉本站单幅，可空）
     pub rainviewer_host: String,
-    /// 最新雷达 path，如 `/v2/radar/xxxx`
+    /// 兼容旧雷达 path；现用 [`Self::radar_sheet`]
     pub radar_path: Option<String>,
-    /// 最新红外云图 path；上游空则 None
-    pub cloud_path: Option<String>,
+    /// 本站全球雷达单幅（`/get/global-radar.php`）
+    pub radar_sheet: Option<CloudSheet>,
+    /// 全国红外云图（`/get/cloud.php`）
+    pub china_cloud_sheet: Option<CloudSheet>,
+    /// 全球红外云图（`/get/global-cloud.php`）
+    pub global_cloud_sheet: Option<CloudSheet>,
+}
+
+/// 带经纬范围的云图单幅。
+#[derive(Debug, Clone)]
+pub struct CloudSheet {
+    /// 上游时次，用于判断是否换图
+    pub id: String,
+    pub png: Vec<u8>,
+    pub min_lon: f64,
+    pub min_lat: f64,
+    pub max_lon: f64,
+    pub max_lat: f64,
 }
 
 /// 用户提示（鉴权 / 连接限制等），供 UI 弹窗。
@@ -41,10 +57,11 @@ pub fn sun_geometry(unix_ms: i64) -> (f64, f64) {
     let g = ((357.528 + 0.9856003 * n).rem_euclid(360.0)).to_radians();
     let lambda = (l + 1.915 * g.sin() + 0.020 * (2.0 * g).sin()).to_radians();
     let eps = (23.439 - 0.0000004 * n).to_radians();
-    let dec = (eps.cos() * lambda.sin()).asin();
+    // δ = arcsin(sin ε · sin λ)；α = atan2(sin λ · cos ε, cos λ)
+    let dec = (eps.sin() * lambda.sin()).asin();
     let gmst_deg =
         (280.160_041_4 + 360.985_647_366 * (jd - 2_451_545.0)).rem_euclid(360.0);
-    let ra = lambda.sin().atan2(eps.cos() * lambda.cos());
+    let ra = (lambda.sin() * eps.cos()).atan2(lambda.cos());
     let ha = (gmst_deg.to_radians() - ra).rem_euclid(2.0 * PI);
     (dec, ha)
 }
@@ -165,5 +182,22 @@ mod tests {
         let (rise, set) = sunrise_sunset_local_hm(35.68, 139.76, t).expect("sun times");
         assert!(rise < set, "rise {rise} set {set}");
         assert_eq!(format_hm_minutes(rise).len(), 5);
+    }
+
+    #[test]
+    fn yinchuan_oct_day_length_reasonable() {
+        // 2026-10-18 银川附近：日长约 11h，不应再出现 08:14/17:38 那种赤纬算错
+        let t = 1_792_281_600_000i64; // 2026-10-18 00:00 UTC
+        let (rise, set) = sunrise_sunset_local_hm(38.5959, 106.3325, t).expect("sun");
+        let day_min = set.saturating_sub(rise);
+        assert!(
+            (10 * 60..12 * 60).contains(&day_min),
+            "day_min={day_min} rise={} set={}",
+            format_hm_minutes(rise),
+            format_hm_minutes(set)
+        );
+        // CST 下大致落在 07:xx / 18:xx
+        assert!((6 * 60 + 40..7 * 60 + 40).contains(&rise), "rise {}", format_hm_minutes(rise));
+        assert!((17 * 60 + 40..18 * 60 + 40).contains(&set), "set {}", format_hm_minutes(set));
     }
 }

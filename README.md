@@ -37,7 +37,7 @@
 - 地图叠加震中、P/S 波圈（近距 JMA2001，远距 ak135）
 - 暗色矢量底图 / 亮色海洋地形瓦片，可随主题切换
 - 台风路径、风圈与多源预报（可开关）
-- 地图气象叠层（设置 → 地图显示，默认关）：全球雷达与红外云图（[RainViewer](https://www.rainviewer.com/)）、晨昏线；设置本机经纬度后在右下角显示预估日出与日落
+- 地图气象叠层（设置 → 地图显示）：全国/全球红外云图（默认开，约 5 分钟刷新）、全球雷达与晨昏线（默认关）；设置本机经纬度后在右下角显示预估日出与日落
 - 配置本机经纬度（地图选点或按公网 IP 定位）后估算本地 S 波倒计时，并支持音效播报
 - 各数据源健康状态：**正常** / **波动** / **异常**
 - 界面语言切换：简体中文 / 繁体中文 / 日本語 / English（设置 → 通用）
@@ -55,7 +55,8 @@
 - GlobalQuake 全球预警、JMA-Atom 火山情报：[PancakesAPI](https://wiki.aloys23.link/wiki/PancakesAPI)
 - 日本测站烈度：[NIED 強震モニタ](https://www.lmoni.bosai.go.jp/)
 - 亮色海洋地形瓦片：[sismotide tilemap](https://tilemap.sismotide.top/)
-- 全球雷达 / 红外云图：[RainViewer](https://www.rainviewer.com/)
+- 全球雷达：本站 [GET 全球雷达](https://api.sismotide.top/get/global-radar.php)（Web Mercator 拼幅，地图平面/球体按墨卡托贴图）
+- 全国红外云图：本站 [GET 云图](https://api.sismotide.top/get/cloud.php)；全球红外云图：[GET 全球云图](https://api.sismotide.top/get/global-cloud.php)（红外彩色：晴空透明、冷云顶偏红）
 - IP 归属定位：[sismotide GET IP](https://api.sismotide.top/get/ip.php)
 - 中国大陆地图：[阿里云 DataV.GeoAtlas](https://datav.aliyun.com/portal/school/atlas/area_selector)
 - 中国台湾地图：[GeoJSON.cn](https://geojson.cn/)

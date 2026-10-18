@@ -39,6 +39,9 @@ pub fn spawn(tx: NetTx, cfg: TyphoonSourceConfig) -> Vec<JoinHandle<()>> {
             }
         };
 
+        // 错开启动瞬间与全球雷达/云图等同 IP 的 GET（服务端 1s 限流）
+        sleep(Duration::from_millis(500)).await;
+
         loop {
             emit_health(&tx, "typhoon", HealthStatus::Fluctuating);
             let fetch_url = format!(
@@ -46,34 +49,25 @@ pub fn spawn(tx: NetTx, cfg: TyphoonSourceConfig) -> Vec<JoinHandle<()>> {
                 sep = if url.contains('?') { '&' } else { '?' },
                 ts = chrono::Utc::now().timestamp_millis()
             );
-            let ok = match client.get(&fetch_url).send().await {
+            let mut ok = false;
+            let mut rate_limited = false;
+            match client.get(&fetch_url).send().await {
                 Ok(resp) if resp.status().is_success() => match resp.bytes().await {
-                    Ok(body) => {
-                        match parse_typhoon_list(&body) {
-                            Ok(list) => {
-                                let _ = tx.send(NetEvent::Typhoons(list));
-                                true
-                            }
-                            Err(e) => {
-                                warn!("typhoon parse: {e}");
-                                false
-                            }
+                    Ok(body) => match parse_typhoon_list(&body) {
+                        Ok(list) => {
+                            let _ = tx.send(NetEvent::Typhoons(list));
+                            ok = true;
                         }
-                    }
-                    Err(e) => {
-                        warn!("typhoon body: {e}");
-                        false
-                    }
+                        Err(e) => warn!("typhoon parse: {e}"),
+                    },
+                    Err(e) => warn!("typhoon body: {e}"),
                 },
                 Ok(resp) => {
+                    rate_limited = resp.status().as_u16() == 429;
                     warn!(status = %resp.status(), "typhoon http");
-                    false
                 }
-                Err(e) => {
-                    warn!("typhoon fetch: {e}");
-                    false
-                }
-            };
+                Err(e) => warn!("typhoon fetch: {e}"),
+            }
             emit_health(
                 &tx,
                 "typhoon",
@@ -83,7 +77,12 @@ pub fn spawn(tx: NetTx, cfg: TyphoonSourceConfig) -> Vec<JoinHandle<()>> {
                     HealthStatus::Abnormal
                 },
             );
-            sleep(Duration::from_secs(poll)).await;
+            let wait = if rate_limited {
+                poll.max(3)
+            } else {
+                poll
+            };
+            sleep(Duration::from_secs(wait)).await;
         }
     })]
 }

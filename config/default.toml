@@ -26,9 +26,10 @@ show_legend = true
 show_volcanoes = true
 show_typhoons = true
 show_faults = false
-# 全球气象叠层（默认关）
+# 全球雷达默认关；红外云图默认开（约 5 分钟刷新）
 show_global_radar = false
-show_global_cloud = false
+show_china_cloud = true
+show_global_cloud = true
 show_terminator = false
 # 全部 | 中国 | 中国台湾 | 日本 | 美国 | 中国香港
 typhoon_forecast_agency = "中国"

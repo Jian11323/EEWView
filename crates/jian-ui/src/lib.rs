@@ -327,29 +327,25 @@ impl MainShell {
                 };
                 let show_typhoons_map =
                     cfg.ui.show_typhoons && cfg.sources.typhoon.enabled;
-                let host = snap.weather.rainviewer_host.trim_end_matches('/');
-                let radar_prefix = if cfg.ui.show_global_radar {
-                    snap.weather
-                        .radar_path
-                        .as_ref()
-                        .filter(|_| !host.is_empty())
-                        .map(|p| format!("{host}{p}/256"))
-                        .unwrap_or_default()
+                self.map.set_weather_tile_prefixes("");
+                let radar_sheet = if cfg.ui.show_global_radar {
+                    snap.weather.radar_sheet.as_ref()
                 } else {
-                    String::new()
+                    None
                 };
-                let cloud_prefix = if cfg.ui.show_global_cloud {
-                    snap.weather
-                        .cloud_path
-                        .as_ref()
-                        .filter(|_| !host.is_empty())
-                        .map(|p| format!("{host}{p}/256"))
-                        .unwrap_or_default()
+                let china_cloud = if cfg.ui.show_china_cloud {
+                    snap.weather.china_cloud_sheet.as_ref()
                 } else {
-                    String::new()
+                    None
                 };
-                self.map
-                    .set_weather_tile_prefixes(&radar_prefix, &cloud_prefix);
+                let global_cloud = if cfg.ui.show_global_cloud {
+                    snap.weather.global_cloud_sheet.as_ref()
+                } else {
+                    None
+                };
+                self.map.set_radar_sheet(radar_sheet);
+                self.map.set_china_cloud_sheet(china_cloud);
+                self.map.set_global_cloud_sheet(global_cloud);
                 self.map.set_show_terminator(cfg.ui.show_terminator);
                 map_ui = self.map.ui(
                     ui,
