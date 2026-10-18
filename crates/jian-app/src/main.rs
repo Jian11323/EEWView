@@ -24,7 +24,6 @@ use jian_ui::{draw_splash, MainShell, SettingsAction, SplashGate, AppUiTheme};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokio::runtime::Runtime;
-use tracing_appender::non_blocking::WorkerGuard;
 
 fn looks_like_resource_root(dir: &Path) -> bool {
     dir.join("media").is_dir()
@@ -124,7 +123,14 @@ fn main() {
 }
 
 fn run_app() -> Result<()> {
-    run_app_inner(false)
+    // 日志订阅器进程内只能装一次。OpenGL 失败回退会再次进入 run_app_inner，
+    // 守卫必须留在这一层，否则第二次 init 会 panic，且已安装的写入端被提前拆掉。
+    let root = resource_root();
+    let cfg = AppConfig::load_merged(root.join("config/default.toml"));
+    let log_guard = logging::init_logging(&root, &cfg.log);
+    let result = run_app_inner(false);
+    drop(log_guard);
+    result
 }
 
 fn gl_context_unsupported(err: &str) -> bool {
@@ -151,7 +157,6 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
     let mut cfg = cfg;
     cfg.ui.language = jian_config::normalize_ui_language(&cfg.ui.language);
     jian_ui::set_lang_from_config(&cfg.ui.language);
-    let log_guard = logging::init_logging(&root, &cfg.log);
     tracing::info!(
         root = %root.display(),
         version = env!("CARGO_PKG_VERSION"),
@@ -318,7 +323,6 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
             // 强制嵌入式 viewport，防止历史 set_embed_viewports(false) 残留逻辑
             cc.egui_ctx.set_embed_viewports(true);
             Ok(Box::new(JianApp {
-                _log_guard: log_guard,
                 resource_root: root,
                 snap,
                 shell,
@@ -507,8 +511,6 @@ fn eew_wave_live(
 }
 
 struct JianApp {
-    /// 保持非阻塞日志 worker 存活至退出
-    _log_guard: WorkerGuard,
     resource_root: PathBuf,
     snap: AppSnapshot,
     shell: MainShell,

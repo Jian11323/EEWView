@@ -447,17 +447,21 @@ pub fn init_logging(resource_root: &Path, cfg: &LogConfig) -> WorkerGuard {
         .with_timer(LocalTimer)
         .with_target(true);
 
-    tracing_subscriber::registry()
+    // try_init：全局订阅器已存在时返回错误，避免 SetGlobalDefaultError 把进程打崩。
+    if let Err(err) = tracing_subscriber::registry()
         .with(filter)
         .with(file_layer)
         .with(console_layer)
-        .init();
+        .try_init()
+    {
+        eprintln!("tracing subscriber already installed: {err}");
+    }
 
     std::panic::set_hook(Box::new(|info| {
         let loc = info
             .location()
             .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
-            .unwrap_or_else(|| "(unknown)".into());
+            .unwrap_or_else(|| "(unknown)".into()); 
         let payload = if let Some(s) = info.payload().downcast_ref::<&'static str>() {
             (*s).to_string()
         } else if let Some(s) = info.payload().downcast_ref::<String>() {
