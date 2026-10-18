@@ -671,15 +671,6 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "活动断层"), "活動斷層");
         m.insert((Lang::Ja, "活动断层"), "活断層");
         m.insert((Lang::En, "活动断层"), "Active faults");
-        m.insert((Lang::ZhTw, "全球雷达"), "全球雷達");
-        m.insert((Lang::Ja, "全球雷达"), "全球レーダー");
-        m.insert((Lang::En, "全球雷达"), "Global radar");
-        m.insert((Lang::ZhTw, "全国云图"), "全國雲圖");
-        m.insert((Lang::Ja, "全国云图"), "全国雲図");
-        m.insert((Lang::En, "全国云图"), "China IR cloud");
-        m.insert((Lang::ZhTw, "全球云图"), "全球雲圖");
-        m.insert((Lang::Ja, "全球云图"), "全球雲図");
-        m.insert((Lang::En, "全球云图"), "Global IR cloud");
         m.insert((Lang::ZhTw, "晨昏线"), "晨昏線");
         m.insert((Lang::Ja, "晨昏线"), "昼夜境界線");
         m.insert((Lang::En, "晨昏线"), "Terminator");
@@ -701,15 +692,6 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "连接超限"), "連線超限");
         m.insert((Lang::Ja, "连接超限"), "接続数超過");
         m.insert((Lang::En, "连接超限"), "Connection limit");
-        m.insert((Lang::En, "本站全球降水雷达叠层"), "Global precipitation radar from this site");
-        m.insert(
-            (Lang::En, "本站全国红外云图（约 5 分钟刷新）"),
-            "China IR cloud from this site (~5 min)",
-        );
-        m.insert(
-            (Lang::En, "本站全球红外云图（约 5 分钟刷新）"),
-            "Global IR cloud from this site (~5 min)",
-        );
         m.insert((Lang::En, "按本机时间绘制夜侧与晨昏分界"), "Night shade and terminator from local time");
         m.insert((Lang::ZhTw, "活跃台风路径、风圈与预报线"), "活躍颱風路徑、風圈與預報線");
         m.insert((Lang::Ja, "活跃台风路径、风圈与预报线"), "活動台風の経路・風円・予報線");

@@ -327,25 +327,6 @@ impl MainShell {
                 };
                 let show_typhoons_map =
                     cfg.ui.show_typhoons && cfg.sources.typhoon.enabled;
-                self.map.set_weather_tile_prefixes("");
-                let radar_sheet = if cfg.ui.show_global_radar {
-                    snap.weather.radar_sheet.as_ref()
-                } else {
-                    None
-                };
-                let china_cloud = if cfg.ui.show_china_cloud {
-                    snap.weather.china_cloud_sheet.as_ref()
-                } else {
-                    None
-                };
-                let global_cloud = if cfg.ui.show_global_cloud {
-                    snap.weather.global_cloud_sheet.as_ref()
-                } else {
-                    None
-                };
-                self.map.set_radar_sheet(radar_sheet);
-                self.map.set_china_cloud_sheet(china_cloud);
-                self.map.set_global_cloud_sheet(global_cloud);
                 self.map.set_show_terminator(cfg.ui.show_terminator);
                 map_ui = self.map.ui(
                     ui,

@@ -2,32 +2,9 @@
 
 use std::f64::consts::PI;
 
-/// 气象叠层运行时状态（上游有则写，无则空）。
+/// 气象叠层占位（雷达/云图已移除）。
 #[derive(Debug, Clone, Default)]
-pub struct WeatherOverlay {
-    /// 兼容旧瓦片前缀（现已改拉本站单幅，可空）
-    pub rainviewer_host: String,
-    /// 兼容旧雷达 path；现用 [`Self::radar_sheet`]
-    pub radar_path: Option<String>,
-    /// 本站全球雷达单幅（`/get/global-radar.php`）
-    pub radar_sheet: Option<CloudSheet>,
-    /// 全国红外云图（`/get/cloud.php`）
-    pub china_cloud_sheet: Option<CloudSheet>,
-    /// 全球红外云图（`/get/global-cloud.php`）
-    pub global_cloud_sheet: Option<CloudSheet>,
-}
-
-/// 带经纬范围的云图单幅。
-#[derive(Debug, Clone)]
-pub struct CloudSheet {
-    /// 上游时次，用于判断是否换图
-    pub id: String,
-    pub png: Vec<u8>,
-    pub min_lon: f64,
-    pub min_lat: f64,
-    pub max_lon: f64,
-    pub max_lat: f64,
-}
+pub struct WeatherOverlay {}
 
 /// 用户提示（鉴权 / 连接限制等），供 UI 弹窗。
 #[derive(Debug, Clone)]

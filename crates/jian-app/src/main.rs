@@ -237,16 +237,10 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
     let net_rx = {
         let _enter = rt.enter();
         let stations_dir = media.join("stations");
-        let mut hub = spawn_hub_with_assets(
+        Some(spawn_hub_with_assets(
             &cfg.sources,
             stations_dir.is_dir().then_some(stations_dir),
-        );
-        hub.set_weather_overlay(jian_net::WeatherPollOpts {
-            want_radar: cfg.ui.show_global_radar,
-            want_china_cloud: cfg.ui.show_china_cloud,
-            want_global_cloud: cfg.ui.show_global_cloud,
-        });
-        Some(hub)
+        ))
     };
     let _ = live;
 
@@ -1244,9 +1238,6 @@ impl JianApp {
         jian_ui::set_lang_from_config(&new_cfg.ui.language);
 
         let sources_same = self.cfg.sources_runtime_equal(&new_cfg);
-        let weather_same = self.cfg.ui.show_global_radar == new_cfg.ui.show_global_radar
-            && self.cfg.ui.show_china_cloud == new_cfg.ui.show_china_cloud
-            && self.cfg.ui.show_global_cloud == new_cfg.ui.show_global_cloud;
         let travel_same = self.cfg.travel.primary == new_cfg.travel.primary
             && self.cfg.travel.fallback == new_cfg.travel.fallback
             && self.cfg.travel.linear_last_resort == new_cfg.travel.linear_last_resort;
@@ -1314,17 +1305,6 @@ impl JianApp {
                 stations_dir.is_dir().then_some(stations_dir),
             ));
         }
-        if !sources_same || !weather_same {
-            if let Some(hub) = self.net_rx.as_mut() {
-                let _enter = self.rt.enter();
-                hub.set_weather_overlay(jian_net::WeatherPollOpts {
-                    want_radar: self.cfg.ui.show_global_radar,
-                    want_china_cloud: self.cfg.ui.show_china_cloud,
-                    want_global_cloud: self.cfg.ui.show_global_cloud,
-                });
-            }
-        }
-
         match self.cfg.save_user_overlay() {
             Ok(path) => {
                 tracing::info!(path = %path.display(), "用户配置已保存");

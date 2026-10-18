@@ -26,9 +26,10 @@ pub use place::{fix_place, load_from_dir as load_place_fix};
 /// 三源任务句柄：丢弃或 `shutdown` 会中止连接循环，便于设置页热切换。
 pub struct NetHub {
     rx: NetRx,
+    /// 保留发送端，避免任务通道在 hub 存活期内被关闭
+    #[allow(dead_code)]
     tx: NetTx,
     tasks: Vec<JoinHandle<()>>,
-    weather: Vec<JoinHandle<()>>,
 }
 
 impl NetHub {
@@ -36,21 +37,7 @@ impl NetHub {
         self.rx.try_recv()
     }
 
-    /// 按开关重启气象轮询（关则停任务）。
-    pub fn set_weather_overlay(&mut self, opts: sources::weather::WeatherPollOpts) {
-        for t in self.weather.drain(..) {
-            t.abort();
-        }
-        if opts.any() {
-            self.weather
-                .extend(spawn_weather_overlay(self.tx.clone(), opts));
-        }
-    }
-
     pub fn shutdown(&mut self) {
-        for t in self.weather.drain(..) {
-            t.abort();
-        }
         for t in self.tasks.drain(..) {
             t.abort();
         }
@@ -122,23 +109,8 @@ pub fn spawn_hub_with_assets(
         assets_stations,
     ));
     tasks.extend(sources::typhoon::spawn(tx.clone(), sources.typhoon.clone()));
-    NetHub {
-        rx,
-        tx,
-        tasks,
-        weather: Vec::new(),
-    }
+    NetHub { rx, tx, tasks }
 }
-
-/// 按 UI 开关启动气象叠层轮询（可与 `spawn_hub` 并列追加任务）。
-pub fn spawn_weather_overlay(
-    tx: NetTx,
-    opts: sources::weather::WeatherPollOpts,
-) -> Vec<tokio::task::JoinHandle<()>> {
-    sources::weather::spawn(tx, opts)
-}
-
-pub use sources::weather::WeatherPollOpts;
 
 /// 将 `NetEvent` 合并进 `AppSnapshot`（供 UI 帧循环调用）。
 pub fn apply_event(snap: &mut jian_core::AppSnapshot, ev: NetEvent) {
@@ -175,42 +147,6 @@ pub fn apply_event_filtered(
         NetEvent::Tsunami(t) => snap.upsert_tsunami(t),
         NetEvent::Volcano(v) => snap.upsert_volcano(v),
         NetEvent::Typhoons(list) => snap.replace_typhoons(list),
-        NetEvent::WeatherTiles { host, radar_path } => {
-            if !host.is_empty() {
-                snap.weather.rainviewer_host = host;
-            }
-            snap.weather.radar_path = radar_path;
-        }
-        NetEvent::WeatherRadarSheet(sheet) => {
-            let same = snap
-                .weather
-                .radar_sheet
-                .as_ref()
-                .is_some_and(|old| old.id == sheet.id);
-            if !same {
-                snap.weather.radar_sheet = Some(sheet);
-            }
-        }
-        NetEvent::WeatherChinaCloudSheet(sheet) => {
-            let same = snap
-                .weather
-                .china_cloud_sheet
-                .as_ref()
-                .is_some_and(|old| old.id == sheet.id);
-            if !same {
-                snap.weather.china_cloud_sheet = Some(sheet);
-            }
-        }
-        NetEvent::WeatherGlobalCloudSheet(sheet) => {
-            let same = snap
-                .weather
-                .global_cloud_sheet
-                .as_ref()
-                .is_some_and(|old| old.id == sheet.id);
-            if !same {
-                snap.weather.global_cloud_sheet = Some(sheet);
-            }
-        }
         NetEvent::UserNotice(n) => snap.push_notice(n),
     }
 }
@@ -238,5 +174,6 @@ fn record_allowed(
     if magnitude + 1e-9 >= thr {
         return true;
     }
-    f.place_whitelist_hit(place)
+    let _ = place;
+    false
 }

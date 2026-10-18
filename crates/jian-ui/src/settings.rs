@@ -1735,18 +1735,6 @@ fn draw_general(
             toggle(ui, &mut draft.ui.show_faults);
         });
         row_divider(ui);
-        control_row(ui, "全球雷达", "本站全球降水雷达叠层", "\u{25ce}", |ui| {
-            toggle(ui, &mut draft.ui.show_global_radar);
-        });
-        row_divider(ui);
-        control_row(ui, "全国云图", "本站全国红外云图（约 5 分钟刷新）", "\u{25ce}", |ui| {
-            toggle(ui, &mut draft.ui.show_china_cloud);
-        });
-        row_divider(ui);
-        control_row(ui, "全球云图", "本站全球红外云图（约 5 分钟刷新）", "\u{25ce}", |ui| {
-            toggle(ui, &mut draft.ui.show_global_cloud);
-        });
-        row_divider(ui);
         control_row(ui, "晨昏线", "按本机时间绘制夜侧与晨昏分界", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_terminator);
         });

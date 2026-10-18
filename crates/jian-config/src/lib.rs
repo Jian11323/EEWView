@@ -106,15 +106,6 @@ pub struct UiConfig {
     /// 地图绘制活动断层（全球 GEM + 中国 CAFD）
     #[serde(default = "default_false")]
     pub show_faults: bool,
-    /// 全球雷达叠层（本站 GET global-radar）
-    #[serde(default = "default_false")]
-    pub show_global_radar: bool,
-    /// 全国红外云图（本站 GET cloud）
-    #[serde(default = "default_true")]
-    pub show_china_cloud: bool,
-    /// 全球红外云图（本站 GET global-cloud）
-    #[serde(default = "default_true")]
-    pub show_global_cloud: bool,
     /// 全球晨昏线与夜侧遮罩
     #[serde(default = "default_false")]
     pub show_terminator: bool,
@@ -792,9 +783,6 @@ impl Default for AppConfig {
                 show_volcanoes: true,
                 show_typhoons: true,
                 show_faults: false,
-                show_global_radar: false,
-                show_china_cloud: true,
-                show_global_cloud: true,
                 show_terminator: false,
                 typhoon_forecast_agency: default_typhoon_forecast_agency(),
             },

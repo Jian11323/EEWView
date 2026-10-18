@@ -39,7 +39,7 @@ pub fn spawn(tx: NetTx, cfg: TyphoonSourceConfig) -> Vec<JoinHandle<()>> {
             }
         };
 
-        // 错开启动瞬间与全球雷达/云图等同 IP 的 GET（服务端 1s 限流）
+        // 错开启动瞬间与其它同 IP 的 GET（服务端 1s 限流）
         sleep(Duration::from_millis(500)).await;
 
         loop {
