@@ -354,32 +354,12 @@ pub struct AudioConfig {
     /// NHK 一级新闻铃：情报震度达到 6 弱及以上
     #[serde(default = "default_true")]
     pub nhk_news_bell: bool,
-    /// 自定义路径；空则用内置 nhk_news_bell.wav
-    #[serde(default)]
-    pub nhk_news_bell_path: String,
-    #[serde(default = "default_sound_repeat")]
-    pub nhk_news_bell_repeat: u8,
     /// JMA 紧急地震速报「警报」（预报升级为警报）专用音
     #[serde(default = "default_true")]
     pub jma_eew_alert_sound: bool,
-    #[serde(default)]
-    pub jma_eew_alert_sound_path: String,
-    #[serde(default = "default_jma_alert_repeat")]
-    pub jma_eew_alert_sound_repeat: u8,
     /// 津波警报 / 大津波警报：紧急警报放送第 2 种开始信号
     #[serde(default = "default_true")]
     pub tsunami_ebs_sound: bool,
-    #[serde(default)]
-    pub tsunami_ebs_sound_path: String,
-    #[serde(default = "default_sound_repeat")]
-    pub tsunami_ebs_sound_repeat: u8,
-}
-
-fn default_sound_repeat() -> u8 {
-    1
-}
-fn default_jma_alert_repeat() -> u8 {
-    2
 }
 
 /// 桌面系统通知（Win10/11 Toast）
@@ -904,14 +884,8 @@ impl Default for AppConfig {
                 countdown_start: default_countdown_start(),
                 countdown_only_intense: false,
                 nhk_news_bell: true,
-                nhk_news_bell_path: String::new(),
-                nhk_news_bell_repeat: 1,
                 jma_eew_alert_sound: true,
-                jma_eew_alert_sound_path: String::new(),
-                jma_eew_alert_sound_repeat: 2,
                 tsunami_ebs_sound: true,
-                tsunami_ebs_sound_path: String::new(),
-                tsunami_ebs_sound_repeat: 1,
             },
             notify: NotifyConfig::default(),
             travel: TravelConfig {

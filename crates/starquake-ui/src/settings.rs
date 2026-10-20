@@ -136,7 +136,7 @@ impl SettingsTab {
         match self {
             Self::Sources => "API与数据源",
             Self::General => "通用设置",
-            Self::Audio => "音效自定义",
+            Self::Audio => "音频",
             Self::Advanced => "高级",
             Self::About => "关于",
         }
@@ -146,7 +146,7 @@ impl SettingsTab {
         match self {
             Self::Sources => "接口开关、鉴权与连接状态",
             Self::General => "主题、底图、窗口与定位",
-            Self::Audio => "NHK/警报音、通知与音量",
+            Self::Audio => "音效开关、通知与音量",
             Self::Advanced => "走时表、缓存与配置路径",
             Self::About => "版本、致谢与版权",
         }
@@ -185,15 +185,6 @@ pub enum SettingsAction {
         countdown_volume: f32,
         event_pack: String,
         countdown_pack: String,
-    },
-    /// 试听自定义档位：nhk / jma_alert / tsunami_ebs
-    TestCustomSound {
-        kind: String,
-        path: String,
-        repeat: u8,
-        mute: bool,
-        master_volume: f32,
-        countdown_volume: f32,
     },
     ClearTileCache,
     OpenLogDir,
@@ -608,7 +599,6 @@ impl SettingsSession {
             action,
             Some(SettingsAction::Saved { .. })
                 | Some(SettingsAction::TestSound { .. })
-                | Some(SettingsAction::TestCustomSound { .. })
                 | Some(SettingsAction::ClearTileCache)
                 | Some(SettingsAction::OpenLogDir)
                 | Some(SettingsAction::CheckForUpdate)
@@ -1580,60 +1570,35 @@ fn scale_display(s: &str) -> String {
 
 fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> Option<SettingsAction> {
     let mut action = None;
-    section(ui, "音效自定义", "♪", |ui| {
-        ui.label(
-            RichText::new(t("可开关内置 NHK/EBS 提示音，并自选 wav/mp3 文件与重复次数。"))
-                .size(12.0)
-                .color(chrome().muted),
-        );
-        ui.add_space(8.0);
-
-        let mute = draft.audio.mute;
-        let master_volume = draft.audio.master_volume;
-        let countdown_volume = draft.audio.countdown_volume;
-        custom_sound_block(
+    section(ui, "音效设置", "♪", |ui| {
+        control_row(
             ui,
-            &mut action,
             "NHK 一级新闻铃",
-            "情报震度达到6弱及以上时播放。",
-            "nhk",
-            &mut draft.audio.nhk_news_bell,
-            &mut draft.audio.nhk_news_bell_path,
-            &mut draft.audio.nhk_news_bell_repeat,
-            "nhk_news_bell.wav",
-            mute,
-            master_volume,
-            countdown_volume,
+            "情报震度达到6弱及以上时播放 NHK 一级新闻铃。",
+            "♪",
+            |ui| {
+                toggle(ui, &mut draft.audio.nhk_news_bell);
+            },
         );
         row_divider(ui);
-        custom_sound_block(
+        control_row(
             ui,
-            &mut action,
             "JMA 警报音",
             "紧急地震速报由预报升级为警报时播放。",
-            "jma_alert",
-            &mut draft.audio.jma_eew_alert_sound,
-            &mut draft.audio.jma_eew_alert_sound_path,
-            &mut draft.audio.jma_eew_alert_sound_repeat,
-            "nhk_eew_alert.wav",
-            mute,
-            master_volume,
-            countdown_volume,
+            "♪",
+            |ui| {
+                toggle(ui, &mut draft.audio.jma_eew_alert_sound);
+            },
         );
         row_divider(ui);
-        custom_sound_block(
+        control_row(
             ui,
-            &mut action,
             "津波警报音",
-            "津波警报或大津波警报时播放紧急警报放送第2种开始信号。",
-            "tsunami_ebs",
-            &mut draft.audio.tsunami_ebs_sound,
-            &mut draft.audio.tsunami_ebs_sound_path,
-            &mut draft.audio.tsunami_ebs_sound_repeat,
-            "ebs_type2_start.wav",
-            mute,
-            master_volume,
-            countdown_volume,
+            "收到津波警报或大津波警报时播放。",
+            "♪",
+            |ui| {
+                toggle(ui, &mut draft.audio.tsunami_ebs_sound);
+            },
         );
     });
 
@@ -1708,65 +1673,6 @@ fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> Option<SettingsAction> {
     });
 
     action
-}
-
-fn custom_sound_block(
-    ui: &mut Ui,
-    action: &mut Option<SettingsAction>,
-    title: &str,
-    subtitle: &str,
-    kind: &str,
-    enabled: &mut bool,
-    path: &mut String,
-    repeat: &mut u8,
-    default_name: &str,
-    mute: bool,
-    master_volume: f32,
-    countdown_volume: f32,
-) {
-    control_row(ui, title, subtitle, "♪", |ui| {
-        toggle(ui, enabled);
-    });
-    ui.horizontal(|ui| {
-        ui.add_space(36.0);
-        let label = {
-            let p = path.trim();
-            if p.is_empty() {
-                format!("{}（内置）", default_name)
-            } else {
-                std::path::Path::new(p)
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(p)
-                    .to_string()
-            }
-        };
-        if glass_btn(ui, &label, false).clicked() {
-            if let Some(picked) = rfd::FileDialog::new()
-                .add_filter("音频", &["wav", "mp3"])
-                .add_filter("全部", &["*"])
-                .pick_file()
-            {
-                *path = picked.to_string_lossy().into_owned();
-            }
-        }
-        ui.label(RichText::new(t("重复")).size(12.0).color(chrome().muted));
-        ui.add(egui::DragValue::new(repeat).range(1..=10).speed(1.0));
-        if glass_btn(ui, "试听", true).clicked() {
-            *action = Some(SettingsAction::TestCustomSound {
-                kind: kind.into(),
-                path: path.clone(),
-                repeat: (*repeat).clamp(1, 10),
-                mute,
-                master_volume,
-                countdown_volume,
-            });
-        }
-        if !path.trim().is_empty() && glass_btn(ui, "恢复默认", false).clicked() {
-            path.clear();
-        }
-    });
-    ui.add_space(6.0);
 }
 
 fn draw_general(

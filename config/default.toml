@@ -78,16 +78,10 @@ countdown_start = 10
 countdown_only_intense = false
 # NHK 一级新闻铃：情报震度 ≥6 弱
 nhk_news_bell = true
-nhk_news_bell_path = ""
-nhk_news_bell_repeat = 1
 # JMA 紧急地震速报「警报」（预报升级）
 jma_eew_alert_sound = true
-jma_eew_alert_sound_path = ""
-jma_eew_alert_sound_repeat = 2
 # 津波警报 / 大津波警报：紧急警报放送第 2 种
 tsunami_ebs_sound = true
-tsunami_ebs_sound_path = ""
-tsunami_ebs_sound_repeat = 1
 
 [notify]
 enabled = true
