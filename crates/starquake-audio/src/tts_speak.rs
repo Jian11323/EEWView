@@ -247,12 +247,26 @@ pub fn list_offline_voices() -> Vec<TtsVoiceInfo> {
     }];
     #[cfg(target_os = "windows")]
     {
-        match enum_sapi_voices() {
-            Ok(mut list) => {
-                list.sort_by(|a, b| a.label.cmp(&b.label));
-                out.extend(list);
+        // 必须在独立 STA 线程枚举：UI 线程常已是 MTA，CoInitializeEx 会失败只剩「系统默认」。
+        let (tx, rx) = mpsc::channel();
+        let join = thread::Builder::new()
+            .name("starquake-tts-voices".into())
+            .spawn(move || {
+                let _ = tx.send(enum_sapi_voices());
+            });
+        match join {
+            Ok(handle) => {
+                match rx.recv_timeout(Duration::from_secs(4)) {
+                    Ok(Ok(mut list)) => {
+                        list.sort_by(|a, b| a.label.cmp(&b.label));
+                        out.extend(list);
+                    }
+                    Ok(Err(e)) => warn!("tts: list offline voices failed: {e}"),
+                    Err(_) => warn!("tts: list offline voices timed out"),
+                }
+                let _ = handle.join();
             }
-            Err(e) => warn!("tts: list offline voices failed: {e}"),
+            Err(e) => warn!("tts: spawn voice enum thread failed: {e}"),
         }
     }
     out
@@ -323,22 +337,35 @@ fn speak_edge_blocking(text: &str, cfg: &TtsRuntimeConfig, sink: &Sink, gen: u64
 }
 
 #[cfg(target_os = "windows")]
-struct ComApartment;
+struct ComApartment {
+    /// 本线程是否由我们成功 CoInitialize（需配对 Uninitialize）
+    owned: bool,
+}
 
 #[cfg(target_os = "windows")]
 impl ComApartment {
     fn enter() -> windows::core::Result<Self> {
+        use windows::core::HRESULT;
+        use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_FALSE};
         use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
-        unsafe {
-            CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
+        let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        if hr.is_ok() || hr == S_FALSE {
+            return Ok(Self { owned: true });
         }
-        Ok(Self)
+        // 已是其它套间模型：尽量继续用（读注册表 token 常仍可用）
+        if HRESULT(hr.0) == RPC_E_CHANGED_MODE {
+            return Ok(Self { owned: false });
+        }
+        Err(windows::core::Error::from(hr))
     }
 }
 
 #[cfg(target_os = "windows")]
 impl Drop for ComApartment {
     fn drop(&mut self) {
+        if !self.owned {
+            return;
+        }
         use windows::Win32::System::Com::CoUninitialize;
         unsafe {
             CoUninitialize();
@@ -401,8 +428,18 @@ fn apply_sapi_voice(
         return Ok(());
     }
     let tokens = enum_sapi_tokens()?;
-    for (name, token) in tokens {
+    for (name, _culture, token) in tokens {
         if name.eq_ignore_ascii_case(wanted) {
+            unsafe {
+                voice.SetVoice(&token)?;
+            }
+            return Ok(());
+        }
+    }
+    // 兼容「Name (zh-CN)」形式的 id
+    let bare = wanted.split(" (").next().unwrap_or(wanted).trim();
+    for (name, _culture, token) in enum_sapi_tokens()? {
+        if name.eq_ignore_ascii_case(bare) {
             unsafe {
                 voice.SetVoice(&token)?;
             }
@@ -416,55 +453,150 @@ fn apply_sapi_voice(
 fn enum_sapi_voices() -> windows::core::Result<Vec<TtsVoiceInfo>> {
     let _com = ComApartment::enter()?;
     let tokens = enum_sapi_tokens()?;
-    Ok(tokens
-        .into_iter()
-        .map(|(name, _)| TtsVoiceInfo {
-            id: name.clone(),
-            label: name,
-        })
-        .collect())
+    let mut out = Vec::new();
+    for (name, culture, _) in tokens {
+        let label = if culture.is_empty() {
+            name.clone()
+        } else {
+            format!("{name} ({culture})")
+        };
+        out.push(TtsVoiceInfo { id: name, label });
+    }
+    Ok(out)
 }
 
 #[cfg(target_os = "windows")]
-fn enum_sapi_tokens(
-) -> windows::core::Result<Vec<(String, windows::Win32::Media::Speech::ISpObjectToken)>> {
+fn pwstr_to_string(pw: windows::core::PWSTR) -> String {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    if pw.is_null() {
+        return String::new();
+    }
+    let s = unsafe { pw.to_string().unwrap_or_default() };
+    unsafe {
+        CoTaskMemFree(Some(pw.as_ptr() as *const _));
+    }
+    s
+}
+
+/// SAPI 音色名在 token 的 Attributes\\Name，不在根键。
+#[cfg(target_os = "windows")]
+fn sapi_token_name_culture(
+    token: &windows::Win32::Media::Speech::ISpObjectToken,
+) -> (String, String) {
+    use windows::core::w;
+    let mut name = String::new();
+    let mut culture = String::new();
+    if let Ok(attrs) = unsafe { token.OpenKey(w!("Attributes")) } {
+        if let Ok(pw) = unsafe { attrs.GetStringValue(w!("Name")) } {
+            name = pwstr_to_string(pw);
+        }
+        if let Ok(pw) = unsafe { attrs.GetStringValue(w!("Language")) } {
+            culture = language_attr_to_tag(&pwstr_to_string(pw));
+        }
+    }
+    if name.is_empty() {
+        // 回退：根键 Name / GetId 末段
+        if let Ok(pw) = unsafe { token.GetStringValue(w!("Name")) } {
+            name = pwstr_to_string(pw);
+        }
+    }
+    if name.is_empty() {
+        if let Ok(pw) = unsafe { token.GetId() } {
+            let id = pwstr_to_string(pw);
+            name = id.rsplit('\\').next().unwrap_or(&id).to_string();
+        }
+    }
+    (name, culture)
+}
+
+#[cfg(target_os = "windows")]
+fn language_attr_to_tag(raw: &str) -> String {
+    // 常见形式：`804` / `409;9` / `804;9`
+    let first = raw
+        .split([';', ',', ' '])
+        .find(|s| !s.is_empty())
+        .unwrap_or("")
+        .trim();
+    let lcid = u32::from_str_radix(first, 16).or_else(|_| first.parse::<u32>());
+    match lcid {
+        Ok(0x0804) | Ok(0x2052) | Ok(0x0004) => "zh-CN".into(),
+        Ok(0x0404) => "zh-TW".into(),
+        Ok(0x0C04) => "zh-HK".into(),
+        Ok(0x0409) => "en-US".into(),
+        Ok(0x0809) => "en-GB".into(),
+        Ok(0x0411) => "ja-JP".into(),
+        Ok(0x0412) => "ko-KR".into(),
+        _ if !first.is_empty() => first.to_string(),
+        _ => String::new(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn enum_sapi_tokens() -> windows::core::Result<
+    Vec<(
+        String,
+        String,
+        windows::Win32::Media::Speech::ISpObjectToken,
+    )>,
+> {
     use windows::core::w;
     use windows::Win32::Media::Speech::{
         ISpObjectToken, ISpObjectTokenCategory, SpObjectTokenCategory, SPCAT_VOICES,
     };
-    use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
-    let cat: ISpObjectTokenCategory =
-        unsafe { CoCreateInstance(&SpObjectTokenCategory, None, CLSCTX_ALL)? };
-    unsafe {
-        cat.SetId(SPCAT_VOICES, false)?;
-    }
-
-    let enumerator = unsafe { cat.EnumTokens(None, None)? };
-    let mut count = 0u32;
-    unsafe {
-        enumerator.GetCount(&mut count)?;
-    }
-
-    let mut out = Vec::new();
-    for i in 0..count {
-        let token: ISpObjectToken = match unsafe { enumerator.Item(i) } {
-            Ok(t) => t,
+    let mut out: Vec<(String, String, ISpObjectToken)> = Vec::new();
+    // 经典 Speech + OneCore（Win10/11 常见装在 OneCore）
+    for cat_id in [
+        SPCAT_VOICES,
+        w!("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Speech_OneCore\\Voices"),
+    ] {
+        let cat: ISpObjectTokenCategory =
+            match unsafe { CoCreateInstance(&SpObjectTokenCategory, None, CLSCTX_ALL) } {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+        if unsafe { cat.SetId(cat_id, false) }.is_err() {
+            continue;
+        }
+        let enumerator = match unsafe { cat.EnumTokens(None, None) } {
+            Ok(e) => e,
             Err(_) => continue,
         };
-        let name = match unsafe { token.GetStringValue(w!("Name")) } {
-            Ok(pw) => {
-                let s = unsafe { pw.to_string().unwrap_or_default() };
-                unsafe {
-                    CoTaskMemFree(Some(pw.as_ptr() as *const _));
-                }
-                s
+        let mut count = 0u32;
+        if unsafe { enumerator.GetCount(&mut count) }.is_err() {
+            continue;
+        }
+        for i in 0..count {
+            let token: ISpObjectToken = match unsafe { enumerator.Item(i) } {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            let (name, culture) = sapi_token_name_culture(&token);
+            if name.is_empty() {
+                continue;
             }
-            Err(_) => String::new(),
-        };
-        if !name.is_empty() {
-            out.push((name, token));
+            if out.iter().any(|(n, _, _)| n.eq_ignore_ascii_case(&name)) {
+                continue;
+            }
+            out.push((name, culture, token));
         }
     }
     Ok(out)
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod windows_voice_tests {
+    use super::list_offline_voices;
+
+    #[test]
+    fn lists_more_than_system_default() {
+        let voices = list_offline_voices();
+        eprintln!("offline voices: {voices:?}");
+        assert!(
+            voices.len() > 1,
+            "expected installed SAPI voices, got only {:?}",
+            voices
+        );
+    }
 }
