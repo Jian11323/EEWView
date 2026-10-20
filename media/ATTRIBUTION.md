@@ -26,7 +26,7 @@
 
 图标提供：**平平无奇的4**。
 
-运行时由 jian-ui 嵌入 csis/shindo/mmi/lpgm 及对应 `_inst`（SVG）。
+运行时由 starquake-ui 嵌入 csis/shindo/mmi/lpgm 及对应 `_inst`（SVG）。
 
 | 目录 | 标度 | 说明 |
 |------|------|------|
@@ -110,3 +110,14 @@
 | `arrive_p.wav` / `arrive_s.wav` | P/S 波抵达回退 |
 | `weak.wav` / `mid.wav` / `strong.wav` | 测站 |
 | `connect_ok.wav` / `connect_fail.wav` / `notify.wav` | UI |
+
+
+## 自定义告警音（special/）
+
+| 文件 | 用途 |
+|------|------|
+| `nhk_news_bell.wav`（源自 `NHK一級ニュースベル.wav`） | 情报/预警震度 ≥6 弱 |
+| `nhk_eew_alert.wav`（源自 `NHK緊急地震速報の音.wav`） | JMA 紧急地震速报「警报」 |
+| `ebs_type2_start.wav`（源自 `緊急警報放送 第 2 種開始信号.wav`） | 津波警报 / 大津波警报 |
+
+上述为广播/公开试听类素材副本，再分发前请自行确认授权。

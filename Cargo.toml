@@ -1,18 +1,18 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/jian-util",
-    "crates/jian-core",
-    "crates/jian-travel",
-    "crates/jian-config",
-    "crates/jian-net",
-    "crates/jian-audio",
-    "crates/jian-map",
-    "crates/jian-ui",
-    "crates/jian-app",
+    "crates/starquake-util",
+    "crates/starquake-core",
+    "crates/starquake-travel",
+    "crates/starquake-config",
+    "crates/starquake-net",
+    "crates/starquake-audio",
+    "crates/starquake-map",
+    "crates/starquake-ui",
+    "crates/starquake-app",
     "tools/convert_travel_tables",
 ]
-default-members = ["crates/jian-app"]
+default-members = ["crates/starquake-app"]
 exclude = ["tools/gen_brand_icon"]
 
 [workspace.package]
@@ -23,14 +23,14 @@ authors = ["Jian11323"]
 repository = "https://github.com/Jian11323/StarQuake"
 
 [workspace.dependencies]
-jian-util = { path = "crates/jian-util" }
-jian-core = { path = "crates/jian-core" }
-jian-travel = { path = "crates/jian-travel" }
-jian-config = { path = "crates/jian-config" }
-jian-net = { path = "crates/jian-net" }
-jian-audio = { path = "crates/jian-audio" }
-jian-map = { path = "crates/jian-map" }
-jian-ui = { path = "crates/jian-ui" }
+starquake-util = { path = "crates/starquake-util" }
+starquake-core = { path = "crates/starquake-core" }
+starquake-travel = { path = "crates/starquake-travel" }
+starquake-config = { path = "crates/starquake-config" }
+starquake-net = { path = "crates/starquake-net" }
+starquake-audio = { path = "crates/starquake-audio" }
+starquake-map = { path = "crates/starquake-map" }
+starquake-ui = { path = "crates/starquake-ui" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = { version = "0.8", features = ["parse", "display"] }

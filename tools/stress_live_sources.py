@@ -32,7 +32,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# —— 默认端点（与 jian-config 默认一致）——
+# —— 默认端点（与 starquake-config 默认一致）——
 DEFAULTS = {
     "wolfx_eqlist": "https://api.wolfx.jp/cenc_eqlist.json",
     "wolfx_ws": "wss://ws-api.wolfx.jp/all_eew",

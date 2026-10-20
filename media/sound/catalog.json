@@ -1,18 +1,23 @@
 {
-  "version": 5,
+  "version": 6,
   "routing": {
     "jma_eew": "srev",
     "default_eew": "eewcn",
     "countdown": "countdown",
     "station": "station",
     "ui": "ui",
-    "record": "eewcn"
+    "record": "eewcn",
+    "special": "special"
   },
   "packs": {
     "srev": {
       "license": "CC-BY-SA-2.0",
       "source": "SREV",
-      "use_for": ["jma_eew", "jma_tsunami", "jma_intensity"],
+      "use_for": [
+        "jma_eew",
+        "jma_tsunami",
+        "jma_intensity"
+      ],
       "format": "mp3",
       "dir": "",
       "events": {
@@ -49,7 +54,15 @@
     "eewcn": {
       "license": "see media/ATTRIBUTION.md",
       "source": "Open EEW CN",
-      "use_for": ["default_eew", "cea", "cenc", "cwa", "record", "other_non_jma", "s_arrive"],
+      "use_for": [
+        "default_eew",
+        "cea",
+        "cenc",
+        "cwa",
+        "record",
+        "other_non_jma",
+        "s_arrive"
+      ],
       "format": "wav",
       "dir": "",
       "events": {
@@ -64,7 +77,9 @@
     "countdown": {
       "license": "see media/ATTRIBUTION.md",
       "source": "地牛Wake Up!",
-      "use_for": ["local_s_countdown"],
+      "use_for": [
+        "local_s_countdown"
+      ],
       "format": "mp3/wav",
       "dir": "",
       "events": {
@@ -90,7 +105,9 @@
     "eew": {
       "license": "CC0-1.0",
       "source": "jian-synth",
-      "use_for": ["fallback"],
+      "use_for": [
+        "fallback"
+      ],
       "format": "wav",
       "dir": "",
       "events": {
@@ -123,6 +140,22 @@
         "connect_ok": "connect_ok.wav",
         "connect_fail": "connect_fail.wav",
         "notify": "notify.wav"
+      }
+    },
+    "special": {
+      "license": "see media/ATTRIBUTION.md",
+      "source": "NHK / EBS broadcast samples",
+      "use_for": [
+        "nhk_news_bell",
+        "jma_eew_alert",
+        "tsunami_ebs"
+      ],
+      "format": "wav",
+      "dir": "",
+      "events": {
+        "nhk_news_bell": "nhk_news_bell.wav",
+        "jma_eew_alert": "nhk_eew_alert.wav",
+        "tsunami_ebs": "ebs_type2_start.wav"
       }
     }
   }

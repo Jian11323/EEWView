@@ -97,8 +97,8 @@ def find_bin(cli_bin: str | None) -> Path:
         if c.is_file():
             return c
     raise SystemExit(
-        "未找到 Linux 二进制。本机 Linux/WSL: cargo build -p jian-app --release\n"
-        f"Windows 交叉: cargo zigbuild -p jian-app --release --target {ZIG_TARGET}\n"
+        "未找到 Linux 二进制。本机 Linux/WSL: cargo build -p starquake-app --release\n"
+        f"Windows 交叉: cargo zigbuild -p starquake-app --release --target {ZIG_TARGET}\n"
         "然后: python tools/pack_linux.py --skip-build --bin <path>"
     )
 
@@ -109,7 +109,7 @@ def try_zigbuild() -> int:
         "cargo",
         "zigbuild",
         "-p",
-        "jian-app",
+        "starquake-app",
         "--release",
         "--target",
         ZIG_TARGET,
@@ -131,9 +131,9 @@ def main() -> int:
 
     if not skip_build and cli_bin is None:
         if platform.system() == "Linux":
-            log("cargo build -p jian-app --release")
+            log("cargo build -p starquake-app --release")
             r = subprocess.run(
-                ["cargo", "build", "-p", "jian-app", "--release"], cwd=ROOT
+                ["cargo", "build", "-p", "starquake-app", "--release"], cwd=ROOT
             )
             if r.returncode != 0:
                 return r.returncode

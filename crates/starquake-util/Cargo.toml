@@ -1,0 +1,8 @@
+[package]
+name = "starquake-util"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sysinfo = "0.33"
+starquake-config = { workspace = true }

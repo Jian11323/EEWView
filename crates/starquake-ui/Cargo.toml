@@ -1,0 +1,17 @@
+[package]
+name = "starquake-ui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+egui = { workspace = true }
+chrono = { workspace = true }
+image = { workspace = true }
+resvg = { workspace = true }
+tracing = { workspace = true }
+starquake-core = { workspace = true }
+starquake-config = { workspace = true }
+starquake-map = { workspace = true }
+starquake-travel = { workspace = true }
+starquake-net = { workspace = true }
+starquake-util = { workspace = true }

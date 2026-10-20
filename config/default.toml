@@ -76,6 +76,18 @@ countdown_speech = true
 countdown_start = 10
 # 仅本机预估震度≥3 / 烈度≥5 时播
 countdown_only_intense = false
+# NHK 一级新闻铃：情报震度 ≥6 弱
+nhk_news_bell = true
+# JMA 紧急地震速报「警报」（预报升级）
+jma_eew_alert_sound = true
+# 津波警报 / 大津波警报：紧急警报放送第 2 种
+tsunami_ebs_sound = true
+
+[notify]
+enabled = true
+on_eew = true
+on_record = true
+on_tsunami = true
 
 [travel]
 primary = "jma2001"

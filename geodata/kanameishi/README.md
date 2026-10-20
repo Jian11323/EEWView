@@ -9,5 +9,5 @@
 | `cn.province.topo.json` | 中国省级 |
 | `jp.pref.topo.json` | 日本都道府县 |
 
-运行时直接解析 TopoJSON（`jian-map`），无需再展开 GeoJSON。  
+运行时直接解析 TopoJSON（`starquake-map`），无需再展开 GeoJSON。  
 暗色绘制令牌：海洋 `#202124`、陆地 `#393939`、边界 `#BBBBBB`。

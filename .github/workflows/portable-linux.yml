@@ -15,7 +15,7 @@ jobs:
             libxcb-xfixes0-dev libxkbcommon-dev libssl-dev pkg-config libgtk-3-dev
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
-        run: cargo build -p jian-app --release
+        run: cargo build -p starquake-app --release
       - name: Pack
         run: python3 tools/pack_linux.py --skip-build --bin target/release/starquake
       - uses: actions/upload-artifact@v4

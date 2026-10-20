@@ -104,9 +104,9 @@ def main() -> int:
     skip_build = "--skip-build" in sys.argv
     exe_src = ROOT / "target" / "release" / "starquake.exe"
     if not skip_build or not exe_src.is_file():
-        log("cargo build -p jian-app --release")
+        log("cargo build -p starquake-app --release")
         r = subprocess.run(
-            ["cargo", "build", "-p", "jian-app", "--release"],
+            ["cargo", "build", "-p", "starquake-app", "--release"],
             cwd=ROOT,
         )
         if r.returncode != 0:

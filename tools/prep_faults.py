@@ -28,7 +28,7 @@ CN_URL = (
     "https://raw.githubusercontent.com/gmt-china/china-geospatial-data/main/CN-faults.gmt"
 )
 
-# 与 jian-map fault_lines 阈值对齐
+# 与 starquake-map fault_lines 阈值对齐
 LOD0_MIN_DIAG = 1.0
 LOD1_MIN_DIAG = 0.28
 

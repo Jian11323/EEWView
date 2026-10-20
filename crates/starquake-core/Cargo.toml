@@ -1,0 +1,10 @@
+[package]
+name = "starquake-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+starquake-util = { workspace = true }
+chrono = { workspace = true }

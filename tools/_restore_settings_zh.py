@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-P = ROOT / "crates/jian-ui/src/settings.rs"
+P = ROOT / "crates/starquake-ui/src/settings.rs"
 LOG = ROOT / "target" / "_restore_result.txt"
 
 # ASCII-safe middle dot in Rust source
