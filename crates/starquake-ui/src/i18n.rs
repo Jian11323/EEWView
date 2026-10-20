@@ -434,6 +434,9 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "图标提供：平平无奇的4\n音效来源：SREV\n授权参考：悦琳雅韵☆Rhythm(Stille)\n图标提供：lxfly2000\n以及各位给与帮助的EEW爱好者"), "圖示提供：平平無奇的4\n音效來源：SREV\n授權參考：悅琳雅韻☆Rhythm(Stille)\n圖示提供：lxfly2000\n以及各位給予幫助的EEW愛好者");
         m.insert((Lang::Ja, "图标提供：平平无奇的4\n音效来源：SREV\n授权参考：悦琳雅韵☆Rhythm(Stille)\n图标提供：lxfly2000\n以及各位给与帮助的EEW爱好者"), "アイコン：平平无奇的4\n効果音：SREV\n許諾参考：悦琳雅韵☆Rhythm(Stille)\nアイコン：lxfly2000\nご協力いただいたEEW愛好者の皆様");
         m.insert((Lang::En, "图标提供：平平无奇的4\n音效来源：SREV\n授权参考：悦琳雅韵☆Rhythm(Stille)\n图标提供：lxfly2000\n以及各位给与帮助的EEW爱好者"), "Icons: 平平无奇的4\nSounds: SREV\nLicense reference: 悦琳雅韵☆Rhythm(Stille)\nIcons: lxfly2000\nand fellow EEW enthusiasts");
+        m.insert((Lang::ZhTw, "\u{00b7} 图标提供：平平无奇的4\n\u{00b7} 音效来源：SREV / Open EEW CN\n\u{00b7} 倒计时语音：地牛 Wake Up!\n\u{00b7} 授权参考：悦琳雅韵\u{2606}Rhythm(Stille)\n\u{00b7} 图标提供：lxfly2000\n\u{00b7} 以及各位给与帮助的EEW爱好者"), "\u{00b7} 圖示提供：平平無奇的4\n\u{00b7} 音效來源：SREV / Open EEW CN\n\u{00b7} 倒計時語音：地牛 Wake Up!\n\u{00b7} 授權參考：悅琳雅韻\u{2606}Rhythm(Stille)\n\u{00b7} 圖示提供：lxfly2000\n\u{00b7} 以及各位給予幫助的EEW愛好者");
+        m.insert((Lang::Ja, "\u{00b7} 图标提供：平平无奇的4\n\u{00b7} 音效来源：SREV / Open EEW CN\n\u{00b7} 倒计时语音：地牛 Wake Up!\n\u{00b7} 授权参考：悦琳雅韵\u{2606}Rhythm(Stille)\n\u{00b7} 图标提供：lxfly2000\n\u{00b7} 以及各位给与帮助的EEW爱好者"), "\u{00b7} アイコン：平平无奇的4\n\u{00b7} 効果音：SREV / Open EEW CN\n\u{00b7} カウントダウン音声：地牛 Wake Up!\n\u{00b7} 許諾参考：悦琳雅韵\u{2606}Rhythm(Stille)\n\u{00b7} アイコン：lxfly2000\n\u{00b7} ご協力いただいたEEW愛好者の皆様");
+        m.insert((Lang::En, "\u{00b7} 图标提供：平平无奇的4\n\u{00b7} 音效来源：SREV / Open EEW CN\n\u{00b7} 倒计时语音：地牛 Wake Up!\n\u{00b7} 授权参考：悦琳雅韵\u{2606}Rhythm(Stille)\n\u{00b7} 图标提供：lxfly2000\n\u{00b7} 以及各位给与帮助的EEW爱好者"), "\u{00b7} Icons: 平平无奇的4\n\u{00b7} Sounds: SREV / Open EEW CN\n\u{00b7} Countdown voice: 地牛 Wake Up!\n\u{00b7} License reference: 悦琳雅韵\u{2606}Rhythm(Stille)\n\u{00b7} Icons: lxfly2000\n\u{00b7} and fellow EEW enthusiasts");
         m.insert((Lang::ZhTw, "在主地图单击设置本机位置"), "在主地圖單擊設定本機位置");
         m.insert((Lang::Ja, "在主地图单击设置本机位置"), "メイン地図クリックで自位置を設定");
         m.insert((Lang::En, "在主地图单击设置本机位置"), "Click the main map to set local location");
@@ -979,6 +982,12 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "走时表、缓存与配置路径"), "走時表、快取與設定路徑");
         m.insert((Lang::Ja, "走时表、缓存与配置路径"), "走時表・キャッシュ・設定パス");
         m.insert((Lang::En, "走时表、缓存与配置路径"), "Travel tables, cache, and config path");
+        m.insert((Lang::ZhTw, "走时表、更新、缓存与配置路径"), "走時表、更新、快取與設定路徑");
+        m.insert((Lang::Ja, "走时表、更新、缓存与配置路径"), "走時表・更新・キャッシュ・設定パス");
+        m.insert((Lang::En, "走时表、更新、缓存与配置路径"), "Travel tables, updates, cache, and config paths");
+        m.insert((Lang::ZhTw, "软件更新"), "軟體更新");
+        m.insert((Lang::Ja, "软件更新"), "ソフトウェア更新");
+        m.insert((Lang::En, "软件更新"), "Software updates");
         m.insert((Lang::ZhTw, "跟随主题（推荐）"), "跟隨主題（推薦）");
         m.insert((Lang::Ja, "跟随主题（推荐）"), "テーマ連動（推奨）");
         m.insert((Lang::En, "跟随主题（推荐）"), "Follow theme (recommended)");

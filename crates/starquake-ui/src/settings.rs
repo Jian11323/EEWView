@@ -147,7 +147,7 @@ impl SettingsTab {
             Self::Sources => "接口开关、鉴权与连接状态",
             Self::General => "主题、底图、窗口与定位",
             Self::Audio => "音效开关、通知与音量",
-            Self::Advanced => "走时表、缓存与配置路径",
+            Self::Advanced => "走时表、更新、缓存与配置路径",
             Self::About => "版本、致谢与版权",
         }
     }
@@ -1034,7 +1034,7 @@ fn draw_content(
                 }
             }
             SettingsTab::Advanced => draw_advanced(ui, draft, action),
-            SettingsTab::About => draw_about(ui, draft, action),
+            SettingsTab::About => draw_about(ui, draft),
         }
     }
     session.map_pick = map_pick;
@@ -2347,6 +2347,22 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
         );
     });
 
+    section(ui, "软件更新", "\u{21bb}", |ui| {
+        control_row(ui, "启动时检查更新", "从 GitHub Releases 查询是否有新版本", "\u{21bb}", |ui| {
+            toggle(ui, &mut draft.update.check_on_startup);
+        });
+        row_divider(ui);
+        control_row(ui, "确认后自动安装", "点击「立即更新」后下载并替换本机程序", "\u{21bb}", |ui| {
+            toggle(ui, &mut draft.update.auto_install);
+        });
+        row_divider(ui);
+        control_row(ui, "检查更新", "立即查询 GitHub 最新 Release", "\u{21bb}", |ui| {
+            if glass_btn(ui, "检查更新", true).clicked() {
+                *action = Some(SettingsAction::CheckForUpdate);
+            }
+        });
+    });
+
     section(ui, "配置文件", "\u{25ce}", |ui| {
         if let Some(path) = AppConfig::user_config_path() {
             ui.label(
@@ -2385,7 +2401,7 @@ fn snet_station_src_label(s: &str) -> String {
     }
 }
 
-fn draw_about(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<SettingsAction>) {
+fn draw_about(ui: &mut Ui, _draft: &mut AppConfig) {
     if let Some(tex) = crate::logo_texture(ui.ctx()) {
         ui.add(egui::Image::new((tex.id(), egui::Vec2::splat(64.0))));
         ui.add_space(10.0);
@@ -2408,20 +2424,6 @@ fn draw_about(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<SettingsAc
             .color(chrome().text),
         );
         ui.add_space(10.0);
-        control_row(ui, "启动时检查更新", "从 GitHub Releases 查询是否有新版本", "\u{21bb}", |ui| {
-            toggle(ui, &mut draft.update.check_on_startup);
-        });
-        row_divider(ui);
-        control_row(ui, "确认后自动安装", "点击「立即更新」后下载并替换本机程序", "\u{21bb}", |ui| {
-            toggle(ui, &mut draft.update.auto_install);
-        });
-        row_divider(ui);
-        control_row(ui, "检查更新", "立即查询 GitHub 最新 Release", "\u{21bb}", |ui| {
-            if glass_btn(ui, "检查更新", true).clicked() {
-                *action = Some(SettingsAction::CheckForUpdate);
-            }
-        });
-        ui.add_space(10.0);
         ui.label(
             RichText::new(t("数据源"))
                 .size(13.0)
@@ -2442,30 +2444,13 @@ fn draw_about(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<SettingsAc
                 .strong()
                 .color(chrome().text),
         );
-        // 滚动字幕式致谢
-        let credits = t(
-            "图标提供：平平无奇的4    ·    音效来源：SREV / Open EEW CN    ·    倒计时语音：地牛 Wake Up!    ·    授权参考：悦琳雅韵☆Rhythm(Stille)    ·    图标提供：lxfly2000    ·    以及各位给与帮助的EEW爱好者",
+        ui.label(
+            RichText::new(t(
+                "\u{00b7} 图标提供：平平无奇的4\n\u{00b7} 音效来源：SREV / Open EEW CN\n\u{00b7} 倒计时语音：地牛 Wake Up!\n\u{00b7} 授权参考：悦琳雅韵\u{2606}Rhythm(Stille)\n\u{00b7} 图标提供：lxfly2000\n\u{00b7} 以及各位给与帮助的EEW爱好者",
+            ))
+            .size(12.0)
+            .color(chrome().muted),
         );
-        let tsec = ui.ctx().input(|i| i.time) as f32;
-        let w = ui.available_width().max(120.0);
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 28.0), Sense::hover());
-        ui.painter().rect_filled(rect, 6.0, chrome().field);
-        let galley = ui.fonts(|f| {
-            f.layout_no_wrap(
-                credits.to_string(),
-                egui::FontId::proportional(12.0),
-                chrome().muted,
-            )
-        });
-        let text_w = galley.size().x;
-        let cycle = (text_w + w).max(1.0);
-        let x = rect.min.x + w - ((tsec * 42.0) % cycle);
-        ui.painter().with_clip_rect(rect).galley(
-            egui::pos2(x, rect.center().y - galley.size().y * 0.5),
-            galley,
-            chrome().muted,
-        );
-        ui.ctx().request_repaint();
         ui.add_space(10.0);
         ui.label(
             RichText::new(t("参考软件"))
