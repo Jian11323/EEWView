@@ -365,6 +365,7 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
                 cinema_idx: 0,
                 cinema_next_at: Instant::now(),
                 cinema_seen_key: String::new(),
+                cinema_prev_live: Vec::new(),
                 prev_health: [HealthStatus::Abnormal; 5],
                 prev_tsunami_key: String::new(),
                 eew_alert_played: HashSet::new(),
@@ -575,6 +576,8 @@ struct StarQuakeApp {
     cinema_next_at: Instant,
     /// 已见过多震 id 签名，用于发现新震立刻跳转
     cinema_seen_key: String,
+    /// 上一帧 cinema 队列（用于同事件换源/换 id 时勿当新震飞跃）
+    cinema_prev_live: Vec<EewReport>,
     prev_health: [HealthStatus; 5],
     prev_tsunami_key: String,
     /// 已播 JMA 警报专用音的事件键 agency|event_id
@@ -861,19 +864,29 @@ impl eframe::App for StarQuakeApp {
                     .join(";");
                 if live.is_empty() {
                     self.cinema_seen_key.clear();
+                    self.cinema_prev_live.clear();
                 } else if live.len() == 1 {
                     let ev = live[0];
                     let key = (ev.event_id.clone(), ev.serial);
-                    let prev_id = self.last_follow_key.as_ref().map(|(id, _)| id.as_str());
-                    let is_new_event = prev_id != Some(ev.event_id.as_str());
-                    // 速报/测站曾抢焦点时：跟焦键未变也要把 active/Tab 拉回预警
-                    let active_is_this_eew = self.snap.active.as_ref().is_some_and(|a| {
-                        a.event_id == ev.event_id
-                            && !a.event_id.starts_with("record:")
-                            && !a.event_id.starts_with("station:")
-                    });
+                    // 同事件换源/换 id（Jian↔Wolfx/GQ）不算新震，避免更新报再次飞跃
+                    let is_new_event = !self.snap.active.as_ref().is_some_and(|a| {
+                        is_eew_camera_target(a) && same_eew_event(a, ev)
+                    }) && !self
+                        .cinema_prev_live
+                        .iter()
+                        .any(|p| same_eew_event(p, ev))
+                        && self
+                            .last_follow_key
+                            .as_ref()
+                            .map(|(id, _)| id.as_str())
+                            != Some(ev.event_id.as_str());
+                    let active_is_this_eew = self
+                        .snap
+                        .active
+                        .as_ref()
+                        .is_some_and(|a| is_eew_camera_target(a) && same_eew_event(a, ev));
                     if is_new_event {
-                        // 新预警：强制飞跃（无视用户拖拽锁定）
+                        // 新预警：强制飞跃（无视用户拖拽锁定）——对齐 GQ 仅首报跳
                         let z = gq_jump_zoom();
                         self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 0.9);
                         self.shell.map.user_camera_override = false;
@@ -885,17 +898,15 @@ impl eframe::App for StarQuakeApp {
                         self.snap.overlay_mode = starquake_core::OverlayMode::Wave;
                     } else if hold_record_pick {
                         // 保留用户点选的速报镜头
-                    } else if self.last_follow_key.as_ref() != Some(&key) {
-                        // 同震更新报：刷新 active，不重飞
+                    } else if self.last_follow_key.as_ref() != Some(&key) || !active_is_this_eew
+                    {
+                        // 同震更新报：只刷 active / 侧栏，绝不 fly_to
                         self.last_follow_key = Some(key);
                         self.snap.active = Some(ev.clone());
                         self.snap.tab = starquake_core::SidebarTab::Eew;
                         self.snap.overlay_mode = starquake_core::OverlayMode::Wave;
-                    } else if !active_is_this_eew {
-                        self.snap.active = Some(ev.clone());
-                        self.snap.tab = starquake_core::SidebarTab::Eew;
-                        self.snap.overlay_mode = starquake_core::OverlayMode::Wave;
                     }
+                    self.cinema_prev_live = live.iter().map(|e| (*e).clone()).collect();
                 } else {
                     let mut jump_idx: Option<usize> = None;
                     let mut is_new_arrival = false;
@@ -905,29 +916,32 @@ impl eframe::App for StarQuakeApp {
                             .split(';')
                             .filter(|s| !s.is_empty())
                             .collect();
-                        // 新震：按队列顺序取最早出现的新项（与旧→新排序一致）
+                        // 新震：键未见过，且与上一帧队列无 same_eew_event（防换源假新震）
                         for (i, e) in live.iter().enumerate() {
                             let id = cinema_event_key(e);
-                            if !old.contains(id.as_str()) {
+                            if old.contains(id.as_str()) {
+                                continue;
+                            }
+                            let known = self.cinema_prev_live.iter().any(|p| same_eew_event(p, e));
+                            if !known {
                                 jump_idx = Some(i);
                                 is_new_arrival = true;
                                 break;
                             }
                         }
                         if jump_idx.is_none() {
-                            // 集合变化（有震结束）：尽量钉住当前事件，再按序继续
+                            // 集合变化（有震结束 / 仅换 id）：钉住当前事件，不飞跃
                             let cur_key = self
                                 .snap
                                 .active
                                 .as_ref()
+                                .filter(|a| is_eew_camera_target(a))
                                 .map(cinema_event_key)
                                 .or_else(|| {
-                                    self.last_follow_key.as_ref().map(|(id, _)| {
-                                        // 回退：用 event_id 在 live 里找
+                                    self.last_follow_key.as_ref().and_then(|(id, _)| {
                                         live.iter()
                                             .find(|e| e.event_id == *id)
                                             .map(|e| cinema_event_key(e))
-                                            .unwrap_or_default()
                                     })
                                 })
                                 .unwrap_or_default();
@@ -935,10 +949,13 @@ impl eframe::App for StarQuakeApp {
                                 live.iter().position(|e| cinema_event_key(e) == cur_key)
                             {
                                 self.cinema_idx = i;
+                            } else if let Some(i) = self.snap.active.as_ref().and_then(|a| {
+                                live.iter().position(|e| same_eew_event(e, a))
+                            }) {
+                                self.cinema_idx = i;
                             } else {
-                                let idx = self.cinema_idx.min(live.len() - 1);
-                                jump_idx = Some(idx);
-                                is_new_arrival = true;
+                                // 当前震已结束：切到队列内最近一项，但不标 new_arrival（不强制解锁）
+                                jump_idx = Some(self.cinema_idx.min(live.len() - 1));
                             }
                         }
                         self.cinema_seen_key = seen_key;
@@ -982,6 +999,11 @@ impl eframe::App for StarQuakeApp {
                         let key = (ev.event_id.clone(), ev.serial);
                         if self.last_follow_key.as_ref() != Some(&key)
                             || self.snap.active.as_ref().map(|a| a.serial) != Some(ev.serial)
+                            || !self
+                                .snap
+                                .active
+                                .as_ref()
+                                .is_some_and(|a| same_eew_event(a, ev))
                         {
                             self.last_follow_key = Some(key);
                             self.snap.active = Some(ev.clone());
@@ -989,6 +1011,7 @@ impl eframe::App for StarQuakeApp {
                             self.snap.overlay_mode = starquake_core::OverlayMode::Wave;
                         }
                     }
+                    self.cinema_prev_live = live.iter().map(|e| (*e).clone()).collect();
                 }
             }
         }
@@ -1687,6 +1710,10 @@ fn apply_tts_runtime(audio: &starquake_config::AudioConfig) {
         rate: audio.tts_rate,
         volume,
     });
+}
+
+fn is_eew_camera_target(e: &EewReport) -> bool {
+    !e.event_id.starts_with("record:") && !e.event_id.starts_with("station:")
 }
 
 /// 预警跟焦落地固定 Z11；落地后由 auto_zoom 从 Z11 缓慢线性跟 S 波缩小。
