@@ -832,6 +832,12 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "从 GitHub Releases 查询是否有新版本"), "從 GitHub Releases 查詢是否有新版本");
         m.insert((Lang::Ja, "从 GitHub Releases 查询是否有新版本"), "GitHub Releases で新バージョンを確認");
         m.insert((Lang::En, "从 GitHub Releases 查询是否有新版本"), "Query GitHub Releases for a newer build");
+        m.insert((Lang::ZhTw, "拉取更新清单判断是否有新版本"), "拉取更新清單判斷是否有新版本");
+        m.insert((Lang::Ja, "拉取更新清单判断是否有新版本"), "更新マニフェストで新バージョンを確認");
+        m.insert((Lang::En, "拉取更新清单判断是否有新版本"), "Fetch the update manifest for a newer build");
+        m.insert((Lang::ZhTw, "立即拉取 update/manifest.json"), "立即拉取 update/manifest.json");
+        m.insert((Lang::Ja, "立即拉取 update/manifest.json"), "update/manifest.json を取得");
+        m.insert((Lang::En, "立即拉取 update/manifest.json"), "Fetch update/manifest.json now");
         m.insert((Lang::ZhTw, "确认后自动安装"), "確認後自動安裝");
         m.insert((Lang::Ja, "确认后自动安装"), "確認後に自動インストール");
         m.insert((Lang::En, "确认后自动安装"), "Install after confirmation");

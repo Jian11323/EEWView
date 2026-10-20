@@ -3949,6 +3949,7 @@ dependencies = [
  "reqwest",
  "rustls",
  "serde",
+ "serde_json",
  "starquake-audio",
  "starquake-config",
  "starquake-core",

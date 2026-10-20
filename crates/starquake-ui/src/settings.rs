@@ -2348,7 +2348,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
     });
 
     section(ui, "软件更新", "\u{21bb}", |ui| {
-        control_row(ui, "启动时检查更新", "从 GitHub Releases 查询是否有新版本", "\u{21bb}", |ui| {
+        control_row(ui, "启动时检查更新", "拉取更新清单判断是否有新版本", "\u{21bb}", |ui| {
             toggle(ui, &mut draft.update.check_on_startup);
         });
         row_divider(ui);
@@ -2356,7 +2356,7 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
             toggle(ui, &mut draft.update.auto_install);
         });
         row_divider(ui);
-        control_row(ui, "检查更新", "立即查询 GitHub 最新 Release", "\u{21bb}", |ui| {
+        control_row(ui, "检查更新", "立即拉取 update/manifest.json", "\u{21bb}", |ui| {
             if glass_btn(ui, "检查更新", true).clicked() {
                 *action = Some(SettingsAction::CheckForUpdate);
             }
@@ -2432,7 +2432,7 @@ fn draw_about(ui: &mut Ui, _draft: &mut AppConfig) {
         );
         ui.label(
             RichText::new(t(
-                "\u{00b7} Jian Project API（预警 / 速报 / 测站中转）\n\u{00b7} PancakesAPI（GQ + JMA-Atom）\n\u{00b7} Wolfx（all_eew 预警与速报）\n\u{00b7} P2PQuake（气象厅地震情报）\n\u{00b7} FSSN（Fan Studio 地震信息）\n\u{00b7} 台风路径（sismotide /get/typhoon）\n\u{00b7} NIED kmoni / lmoni 测站（可选）",
+                "\u{00b7} Jian Project API\n\u{00b7} PancakesAPI\n\u{00b7} Wolfx\n\u{00b7} P2PQuake\n\u{00b7} FSSN",
             ))
             .size(12.0)
             .color(chrome().muted),

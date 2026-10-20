@@ -1,0 +1,20 @@
+{
+  "latest_version": "2.0.0",
+  "min_supported_version": "2.0.0",
+  "channel": "stable",
+  "installer": {
+    "url": "https://github.com/Jian11323/StarQuake/releases/download/v2.0.0/StarQuake_2.0.0_setup.exe",
+    "sha256": "",
+    "user_interface": "progress"
+  },
+  "zip": {
+    "url": "https://github.com/Jian11323/StarQuake/releases/download/v2.0.0/StarQuake_2.0.0_portable.zip",
+    "sha256": ""
+  },
+  "linux": {
+    "url": "https://github.com/Jian11323/StarQuake/releases/download/v2.0.0/StarQuake_2.0.0_linux_x86_64.tar.gz",
+    "sha256": ""
+  },
+  "release_notes_url": "https://github.com/Jian11323/StarQuake/releases/tag/v2.0.0",
+  "html_url": "https://github.com/Jian11323/StarQuake/releases/tag/v2.0.0"
+}

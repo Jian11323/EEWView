@@ -220,7 +220,7 @@ url = "https://api.sismotide.top/get/typhoon.php"
 poll_secs = 15
 
 [update]
-# 启动后检查 GitHub Releases 是否有新版本
+# 启动后拉取 update/manifest.json（raw / jsDelivr）检查新版本
 check_on_startup = true
 # 「立即更新」时下载并应用安装包 / 便携包
 auto_install = true

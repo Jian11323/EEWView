@@ -1,4 +1,7 @@
-//! 从 GitHub Releases 检查 / 下载 / 应用更新。
+//! 从静态更新清单检查 / 下载 / 应用更新。
+//!
+//! 对齐滚动字幕：拉取 `update/manifest.json`（raw / jsDelivr），
+//! 不依赖 `api.github.com`（国内易 403）。
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -8,13 +11,17 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{info, warn};
 
-const RELEASES_API: &str =
-    "https://api.github.com/repos/Jian11323/StarQuake/releases/latest";
 const UA: &str = concat!(
     "StarQuake/",
     env!("CARGO_PKG_VERSION"),
     " (+https://github.com/Jian11323/StarQuake)"
 );
+
+/// 清单镜像（按序尝试；均为静态 JSON，避开 GitHub API）。
+const MANIFEST_URLS: &[&str] = &[
+    "https://raw.githubusercontent.com/Jian11323/StarQuake/main/update/manifest.json",
+    "https://cdn.jsdelivr.net/gh/Jian11323/StarQuake@main/update/manifest.json",
+];
 
 #[derive(Debug, Clone)]
 pub struct AvailableUpdate {
@@ -24,21 +31,37 @@ pub struct AvailableUpdate {
     pub html_url: String,
     pub asset_url: String,
     pub asset_name: String,
+    /// 空则跳过校验
+    pub sha256: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct GhRelease {
-    tag_name: String,
-    name: Option<String>,
-    body: Option<String>,
+struct UpdateManifest {
+    latest_version: String,
+    #[serde(default)]
+    min_supported_version: String,
+    #[serde(default)]
+    channel: String,
+    #[serde(default)]
+    #[cfg_attr(not(windows), allow(dead_code))]
+    installer: Option<ManifestAsset>,
+    #[serde(default)]
+    #[cfg_attr(not(windows), allow(dead_code))]
+    zip: Option<ManifestAsset>,
+    #[serde(default)]
+    #[cfg_attr(windows, allow(dead_code))]
+    linux: Option<ManifestAsset>,
+    #[serde(default)]
+    release_notes_url: String,
+    #[serde(default)]
     html_url: String,
-    assets: Vec<GhAsset>,
 }
 
-#[derive(Debug, Deserialize)]
-struct GhAsset {
-    name: String,
-    browser_download_url: String,
+#[derive(Debug, Deserialize, Clone)]
+struct ManifestAsset {
+    url: String,
+    #[serde(default)]
+    sha256: String,
 }
 
 /// 解析 `v2.0.1` / `2.0.1` / `StarQuake-2.0.1` → (major, minor, patch)。
@@ -69,75 +92,123 @@ pub fn is_newer(remote: &str, local: &str) -> bool {
     }
 }
 
-fn pick_asset(assets: &[GhAsset]) -> Option<&GhAsset> {
+fn http_client() -> Result<reqwest::blocking::Client> {
+    Ok(reqwest::blocking::Client::builder()
+        .user_agent(UA)
+        .timeout(std::time::Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::limited(8))
+        .build()?)
+}
+
+fn fetch_manifest(client: &reqwest::blocking::Client) -> Result<UpdateManifest> {
+    let mut last_err = None;
+    for url in MANIFEST_URLS {
+        match client.get(*url).send() {
+            Ok(resp) => {
+                let status = resp.status();
+                if !status.is_success() {
+                    let body = resp.text().unwrap_or_default();
+                    let snippet: String = body.chars().take(160).collect();
+                    last_err = Some(format!("{url} → HTTP {status} {snippet}"));
+                    continue;
+                }
+                // 兼容带 BOM 的 UTF-8
+                let bytes = resp.bytes().context("读取清单正文")?;
+                let text = String::from_utf8_lossy(&bytes);
+                let text = text.trim_start_matches('\u{feff}');
+                match serde_json::from_str::<UpdateManifest>(text) {
+                    Ok(m) => {
+                        info!(url = %url, ver = %m.latest_version, "更新清单已加载");
+                        return Ok(m);
+                    }
+                    Err(e) => {
+                        last_err = Some(format!("{url} → JSON: {e}"));
+                    }
+                }
+            }
+            Err(e) => {
+                last_err = Some(format!("{url} → {e}"));
+            }
+        }
+    }
+    bail!(
+        "无法获取更新清单：{}",
+        last_err.unwrap_or_else(|| "无可用镜像".into())
+    )
+}
+
+fn pick_platform_asset(m: &UpdateManifest) -> Result<(ManifestAsset, String)> {
     #[cfg(windows)]
     {
-        assets
-            .iter()
-            .find(|a| {
-                let n = a.name.to_ascii_lowercase();
-                n.contains("portable") && n.ends_with(".zip") && n.contains("starquake")
-            })
-            .or_else(|| {
-                assets.iter().find(|a| {
-                    let n = a.name.to_ascii_lowercase();
-                    n.ends_with(".zip") && n.contains("starquake")
-                })
-            })
-            .or_else(|| {
-                assets.iter().find(|a| {
-                    let n = a.name.to_ascii_lowercase();
-                    (n.contains("setup") || n.contains("installer")) && n.ends_with(".exe")
-                })
-            })
+        // 便携 zip 优先，其次 setup.exe（对齐旧版 GitHub 资源挑选）
+        if let Some(z) = m.zip.as_ref().filter(|a| !a.url.trim().is_empty()) {
+            let name = url_file_name(&z.url).unwrap_or_else(|| "StarQuake_portable.zip".into());
+            return Ok((z.clone(), name));
+        }
+        if let Some(i) = m.installer.as_ref().filter(|a| !a.url.trim().is_empty()) {
+            let name = url_file_name(&i.url).unwrap_or_else(|| "StarQuake_setup.exe".into());
+            return Ok((i.clone(), name));
+        }
+        bail!("更新清单缺少 Windows 安装包 / 便携包 URL");
     }
     #[cfg(not(windows))]
     {
-        assets
-            .iter()
-            .find(|a| {
-                let n = a.name.to_ascii_lowercase();
-                n.contains("linux") && (n.ends_with(".tar.gz") || n.ends_with(".tgz"))
-            })
-            .or_else(|| {
-                assets.iter().find(|a| {
-                    let n = a.name.to_ascii_lowercase();
-                    n.contains("starquake") && n.ends_with(".tar.gz")
-                })
-            })
+        if let Some(l) = m.linux.as_ref().filter(|a| !a.url.trim().is_empty()) {
+            let name = url_file_name(&l.url).unwrap_or_else(|| "StarQuake_linux.tar.gz".into());
+            return Ok((l.clone(), name));
+        }
+        bail!("更新清单缺少 Linux 包 URL");
     }
 }
 
-/// 查询最新版；若无更新或失败返回 `Ok(None)` / `Err`。
+fn url_file_name(url: &str) -> Option<String> {
+    let path = url.split('?').next().unwrap_or(url);
+    path.rsplit('/').next().map(|s| s.to_string()).filter(|s| !s.is_empty())
+}
+
+/// 查询最新版；若无更新返回 `Ok(None)`。
 pub fn check_latest(local_version: &str) -> Result<Option<AvailableUpdate>> {
-    let client = reqwest::blocking::Client::builder()
-        .user_agent(UA)
-        .timeout(std::time::Duration::from_secs(20))
-        .build()?;
-    let resp = client
-        .get(RELEASES_API)
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .context("请求 GitHub Releases")?;
-    if !resp.status().is_success() {
-        bail!("GitHub Releases HTTP {}", resp.status());
+    let client = http_client()?;
+    let m = fetch_manifest(&client)?;
+    let ver = m
+        .latest_version
+        .trim()
+        .trim_start_matches('v')
+        .trim_start_matches('V')
+        .to_string();
+    if ver.is_empty() {
+        bail!("更新清单缺少 latest_version");
     }
-    let rel: GhRelease = resp.json().context("解析 Releases JSON")?;
-    let ver = rel.tag_name.trim().trim_start_matches('v').to_string();
     if !is_newer(&ver, local_version) {
-        info!(local = local_version, remote = %ver, "已是最新版");
+        info!(
+            local = local_version,
+            remote = %ver,
+            channel = %m.channel,
+            "已是最新版"
+        );
+        let _ = m.min_supported_version;
         return Ok(None);
     }
-    let Some(asset) = pick_asset(&rel.assets) else {
-        bail!("最新 Release 无匹配本平台的安装包资源");
+    let (asset, asset_name) = pick_platform_asset(&m)?;
+    let html = if !m.html_url.trim().is_empty() {
+        m.html_url
+    } else if !m.release_notes_url.trim().is_empty() {
+        m.release_notes_url.clone()
+    } else {
+        format!("https://github.com/Jian11323/StarQuake/releases/tag/v{ver}")
     };
     Ok(Some(AvailableUpdate {
-        version: ver,
-        name: rel.name.unwrap_or_default(),
-        body: rel.body.unwrap_or_default(),
-        html_url: rel.html_url,
-        asset_url: asset.browser_download_url.clone(),
-        asset_name: asset.name.clone(),
+        version: ver.clone(),
+        name: format!("StarQuake {ver}"),
+        body: if m.release_notes_url.trim().is_empty() {
+            String::new()
+        } else {
+            format!("发行说明：{}", m.release_notes_url.trim())
+        },
+        html_url: html,
+        asset_url: asset.url,
+        asset_name,
+        sha256: asset.sha256.trim().to_ascii_lowercase(),
     }))
 }
 
@@ -150,6 +221,44 @@ fn staging_root() -> Result<PathBuf> {
     Ok(dir)
 }
 
+fn sha256_hex(path: &Path) -> Result<String> {
+    // 无额外 crate：用系统工具做可选校验；清单 sha256 为空则跳过。
+    #[cfg(windows)]
+    {
+        let out = Command::new("certutil")
+            .args(["-hashfile", &path.to_string_lossy(), "SHA256"])
+            .output()
+            .context("certutil SHA256")?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let t = line.trim();
+            if t.len() == 64 && t.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Ok(t.to_ascii_lowercase());
+            }
+        }
+        bail!("无法解析 certutil SHA256 输出");
+    }
+    #[cfg(not(windows))]
+    {
+        let out = Command::new("sha256sum")
+            .arg(path)
+            .output()
+            .or_else(|_| Command::new("shasum").args(["-a", "256"]).arg(path).output())
+            .context("sha256sum")?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let hex = text
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if hex.len() == 64 {
+            return Ok(hex);
+        }
+        bail!("无法解析 sha256 输出");
+    }
+}
+
 /// 下载资源到暂存目录，返回本地文件路径。
 pub fn download_asset(info: &AvailableUpdate) -> Result<PathBuf> {
     let dir = staging_root()?;
@@ -158,6 +267,7 @@ pub fn download_asset(info: &AvailableUpdate) -> Result<PathBuf> {
     let client = reqwest::blocking::Client::builder()
         .user_agent(UA)
         .timeout(std::time::Duration::from_secs(600))
+        .redirect(reqwest::redirect::Policy::limited(8))
         .build()?;
     let mut resp = client
         .get(&info.asset_url)
@@ -169,6 +279,15 @@ pub fn download_asset(info: &AvailableUpdate) -> Result<PathBuf> {
     let mut file = File::create(&dest)?;
     io::copy(&mut resp, &mut file)?;
     file.flush()?;
+
+    if !info.sha256.is_empty() {
+        let got = sha256_hex(&dest)?;
+        if got != info.sha256 {
+            let _ = fs::remove_file(&dest);
+            bail!("更新包校验失败（期望 {}，实际 {}）", info.sha256, got);
+        }
+        info!("更新包 SHA256 校验通过");
+    }
     Ok(dest)
 }
 
@@ -252,7 +371,6 @@ del \"%~f0\"\r\n",
 }
 
 fn find_payload_root(extract_dir: &Path) -> Result<PathBuf> {
-    // 打包顶层多为 StarQuake/ 或 EEWView/
     for name in ["StarQuake", "EEWView", "starquake", "eewview"] {
         let p = extract_dir.join(name);
         if p.is_dir() {
@@ -293,7 +411,6 @@ fn extract_zip(zip_path: &Path, dest: &Path) -> Result<()> {
 }
 
 fn extract_tar_gz(path: &Path, dest: &Path) -> Result<()> {
-    // 无额外依赖：调用系统 tar
     let status = Command::new("tar")
         .args(["-xzf", &path.to_string_lossy(), "-C", &dest.to_string_lossy()])
         .status()
@@ -354,5 +471,17 @@ mod tests {
         assert!(is_newer("v2.1.0", "2.0.9"));
         assert!(!is_newer("2.0.0", "2.0.0"));
         assert!(!is_newer("1.9.9", "2.0.0"));
+    }
+
+    #[test]
+    fn parse_manifest_shape() {
+        let raw = r#"{
+          "latest_version": "2.0.1",
+          "zip": { "url": "https://example.com/a.zip", "sha256": "" },
+          "installer": { "url": "https://example.com/a.exe", "sha256": "" }
+        }"#;
+        let m: UpdateManifest = serde_json::from_str(raw).unwrap();
+        assert_eq!(m.latest_version, "2.0.1");
+        assert!(m.zip.unwrap().url.contains("a.zip"));
     }
 }
