@@ -13,7 +13,7 @@
   },
   "linux": {
     "url": "https://github.com/Jian11323/StarQuake/releases/download/v2.1.0/StarQuake_2.1.0_linux_x86_64.tar.gz",
-    "sha256": ""
+    "sha256": "e15cfc306256b8d2a007388234c514c866f1ee4e0e8bf64bb988a4ec8d4fabb9"
   },
   "release_notes_url": "https://github.com/Jian11323/StarQuake/releases/tag/v2.1.0",
   "html_url": "https://github.com/Jian11323/StarQuake/releases/tag/v2.1.0"
