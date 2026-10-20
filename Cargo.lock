@@ -3947,6 +3947,7 @@ dependencies = [
  "egui",
  "notify-rust",
  "reqwest",
+ "rustls",
  "serde",
  "starquake-audio",
  "starquake-config",

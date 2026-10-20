@@ -119,6 +119,9 @@ fn window_title() -> String {
 }
 
 fn main() {
+    // rustls 0.23：多后端并存时必须显式安装，否则 TLS（含 Edge TTS）会 panic
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     if let Err(e) = run_app() {
         let msg = format!("{e:#}");
         logging::show_fatal_dialog(starquake_ui::APP_DISPLAY_NAME, &format!("启动失败：\n{msg}"));
