@@ -209,6 +209,39 @@ impl AudioEngine {
         }
     }
 
+
+    /// 播放指定文件（可重复）；用于自定义音效路径与试听。
+    pub fn play_file_repeat(&mut self, path: &Path, repeat: u8) {
+        let n = repeat.clamp(1, 10);
+        if let Some(p) = &self.player {
+            p.play_oneshot(path);
+            for _ in 1..n {
+                p.play_oneshot_queued(path);
+            }
+        } else {
+            tracing::debug!(path = %path.display(), repeat = n, "would play file (no device)");
+        }
+    }
+
+    /// 解析 cue；若 custom 路径存在则优先，并按 repeat 播放。
+    pub fn play_special(
+        &mut self,
+        cue: AudioCue,
+        custom_path: Option<&str>,
+        repeat: u8,
+    ) {
+        if let Some(c) = custom_path.map(str::trim).filter(|s| !s.is_empty()) {
+            let p = PathBuf::from(c);
+            if p.is_file() {
+                self.play_file_repeat(&p, repeat);
+                return;
+            }
+        }
+        if let Some(path) = self.router.resolve(&self.catalog, &cue) {
+            self.play_file_repeat(&path, repeat);
+        }
+    }
+
     pub fn set_mute(&mut self, mute: bool) {
         if let Some(p) = &mut self.player {
             p.set_mute(mute);

@@ -136,7 +136,7 @@ impl SettingsTab {
         match self {
             Self::Sources => "API与数据源",
             Self::General => "通用设置",
-            Self::Audio => "音频",
+            Self::Audio => "音效自定义",
             Self::Advanced => "高级",
             Self::About => "关于",
         }
@@ -146,7 +146,7 @@ impl SettingsTab {
         match self {
             Self::Sources => "接口开关、鉴权与连接状态",
             Self::General => "主题、底图、窗口与定位",
-            Self::Audio => "音量、自定义音效与通知",
+            Self::Audio => "NHK/警报音、通知与音量",
             Self::Advanced => "走时表、缓存与配置路径",
             Self::About => "版本、致谢与版权",
         }
@@ -185,6 +185,15 @@ pub enum SettingsAction {
         countdown_volume: f32,
         event_pack: String,
         countdown_pack: String,
+    },
+    /// 试听自定义档位：nhk / jma_alert / tsunami_ebs
+    TestCustomSound {
+        kind: String,
+        path: String,
+        repeat: u8,
+        mute: bool,
+        master_volume: f32,
+        countdown_volume: f32,
     },
     ClearTileCache,
     OpenLogDir,
@@ -599,6 +608,7 @@ impl SettingsSession {
             action,
             Some(SettingsAction::Saved { .. })
                 | Some(SettingsAction::TestSound { .. })
+                | Some(SettingsAction::TestCustomSound { .. })
                 | Some(SettingsAction::ClearTileCache)
                 | Some(SettingsAction::OpenLogDir)
                 | Some(SettingsAction::CheckForUpdate)
@@ -1004,14 +1014,8 @@ fn draw_content(
                 }
             }
             SettingsTab::Audio => {
-                if draw_audio(ui, draft) {
-                    *action = Some(SettingsAction::TestSound {
-                        mute: draft.audio.mute,
-                        master_volume: draft.audio.master_volume,
-                        countdown_volume: draft.audio.countdown_volume,
-                        event_pack: draft.audio.event_pack.clone(),
-                        countdown_pack: draft.audio.countdown_pack.clone(),
-                    });
+                if let Some(a) = draw_audio(ui, draft) {
+                    *action = Some(a);
                 }
             }
             SettingsTab::Advanced => draw_advanced(ui, draft, action),
@@ -1574,82 +1578,107 @@ fn scale_display(s: &str) -> String {
     }
 }
 
-fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> bool {
-    let mut test = false;
-    section(ui, "音效设置", "\u{266a}", |ui| {
-        control_row(
+fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> Option<SettingsAction> {
+    let mut action = None;
+    section(ui, "音效自定义", "♪", |ui| {
+        ui.label(
+            RichText::new(t("可开关内置 NHK/EBS 提示音，并自选 wav/mp3 文件与重复次数。"))
+                .size(12.0)
+                .color(chrome().muted),
+        );
+        ui.add_space(8.0);
+
+        let mute = draft.audio.mute;
+        let master_volume = draft.audio.master_volume;
+        let countdown_volume = draft.audio.countdown_volume;
+        custom_sound_block(
             ui,
+            &mut action,
             "NHK 一级新闻铃",
-            "情报震度达到6弱及以上时播放 NHK 一级新闻铃。",
-            "\u{266a}",
-            |ui| {
-                toggle(ui, &mut draft.audio.nhk_news_bell);
-            },
+            "情报震度达到6弱及以上时播放。",
+            "nhk",
+            &mut draft.audio.nhk_news_bell,
+            &mut draft.audio.nhk_news_bell_path,
+            &mut draft.audio.nhk_news_bell_repeat,
+            "nhk_news_bell.wav",
+            mute,
+            master_volume,
+            countdown_volume,
         );
         row_divider(ui);
-        control_row(
+        custom_sound_block(
             ui,
+            &mut action,
             "JMA 警报音",
             "紧急地震速报由预报升级为警报时播放。",
-            "\u{266a}",
-            |ui| {
-                toggle(ui, &mut draft.audio.jma_eew_alert_sound);
-            },
+            "jma_alert",
+            &mut draft.audio.jma_eew_alert_sound,
+            &mut draft.audio.jma_eew_alert_sound_path,
+            &mut draft.audio.jma_eew_alert_sound_repeat,
+            "nhk_eew_alert.wav",
+            mute,
+            master_volume,
+            countdown_volume,
         );
         row_divider(ui);
-        control_row(
+        custom_sound_block(
             ui,
+            &mut action,
             "津波警报音",
-            "收到津波警报或大津波警报时播放紧急警报放送第2种开始信号。",
-            "\u{266a}",
-            |ui| {
-                toggle(ui, &mut draft.audio.tsunami_ebs_sound);
-            },
+            "津波警报或大津波警报时播放紧急警报放送第2种开始信号。",
+            "tsunami_ebs",
+            &mut draft.audio.tsunami_ebs_sound,
+            &mut draft.audio.tsunami_ebs_sound_path,
+            &mut draft.audio.tsunami_ebs_sound_repeat,
+            "ebs_type2_start.wav",
+            mute,
+            master_volume,
+            countdown_volume,
         );
     });
 
-    section(ui, "系统通知", "\u{1f514}", |ui| {
-        control_row(ui, "启用系统通知", "预警、速报与海啸弹出桌面 Toast", "\u{25ce}", |ui| {
+    section(ui, "系统通知", "🔔", |ui| {
+        control_row(ui, "启用系统通知", "预警、速报与海啸弹出桌面 Toast", "◎", |ui| {
             toggle(ui, &mut draft.notify.enabled);
         });
         row_divider(ui);
-        control_row(ui, "预警通知", "收到紧急地震速报时通知", "\u{25ce}", |ui| {
+        control_row(ui, "预警通知", "收到紧急地震速报时通知", "◎", |ui| {
             toggle(ui, &mut draft.notify.on_eew);
         });
         row_divider(ui);
-        control_row(ui, "速报通知", "收到地震情报/速报时通知", "\u{25ce}", |ui| {
+        control_row(ui, "速报通知", "收到地震情报/速报时通知", "◎", |ui| {
             toggle(ui, &mut draft.notify.on_record);
         });
         row_divider(ui);
-        control_row(ui, "海啸通知", "收到海啸情报时通知", "\u{25ce}", |ui| {
+        control_row(ui, "海啸通知", "收到海啸情报时通知", "◎", |ui| {
             toggle(ui, &mut draft.notify.on_tsunami);
         });
     });
 
-    section(ui, "音频设置", "\u{266a}", |ui| {
-        control_row(ui, "静音", "", "\u{25ce}", |ui| {
+    section(ui, "音频设置", "♪", |ui| {
+        control_row(ui, "静音", "", "◎", |ui| {
             toggle(ui, &mut draft.audio.mute);
         });
         row_divider(ui);
-        control_row(ui, "主音量", "", "\u{25ce}", |ui| {
+        control_row(ui, "主音量", "", "◎", |ui| {
             ui.add(egui::Slider::new(&mut draft.audio.master_volume, 0.0..=1.0).show_value(true));
         });
         row_divider(ui);
-        control_row(ui, "倒计时音量", "语音与滴答", "\u{25ce}", |ui| {
+        control_row(ui, "倒计时音量", "语音与滴答", "◎", |ui| {
             ui.add(
                 egui::Slider::new(&mut draft.audio.countdown_volume, 0.0..=1.0).show_value(true),
             );
         });
         row_divider(ui);
-        control_row(ui, "倒计时音效", "本机 S 波剩余时播倒计时", "\u{25ce}", |ui| {
+        control_row(ui, "倒计时音效", "本机 S 波剩余时播倒计时", "◎", |ui| {
             toggle(ui, &mut draft.audio.play_countdown);
         });
         row_divider(ui);
-        control_row(ui, "倒计时语音", "播报十、九…；关闭则只留滴答", "\u{25ce}", |ui| {
+        control_row(ui, "倒计时语音", "播报十、九…；关闭则只留滴答", "◎", |ui| {
             toggle(ui, &mut draft.audio.countdown_speech);
         });
         row_divider(ui);
-        control_row(ui, "开始播报秒数", "剩余秒数降到此值后开始", "\u{25ce}", |ui| {
+        control_row(ui, "开始播报秒数", "剩余秒数降到此值后开始", "◎", |ui| {
             ui.add(
                 egui::DragValue::new(&mut draft.audio.countdown_start)
                     .range(0..=60)
@@ -1657,22 +1686,87 @@ fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> bool {
             );
         });
         row_divider(ui);
-        control_row(ui, "仅强有感时播", "本机预估震度≥3 或烈度≥5 时播倒计时", "\u{25ce}", |ui| {
+        control_row(ui, "仅强有感时播", "本机预估震度≥3 或烈度≥5 时播倒计时", "◎", |ui| {
             toggle(ui, &mut draft.audio.countdown_only_intense);
         });
         row_divider(ui);
-        control_row(ui, "Windows TTS", "预警/速报语音播报（系统朗读）", "\u{25ce}", |ui| {
+        control_row(ui, "Windows TTS", "预警/速报语音播报（系统朗读）", "◎", |ui| {
             toggle(ui, &mut draft.audio.tts_enabled);
         });
         row_divider(ui);
-        control_row(ui, "试听", "按草稿音量立即试听（无需先保存）", "\u{25b6}", |ui| {
+        control_row(ui, "试听", "按草稿音量立即试听（无需先保存）", "▶", |ui| {
             if glass_btn(ui, "试听首报音", true).clicked() {
-                test = true;
+                action = Some(SettingsAction::TestSound {
+                    mute: draft.audio.mute,
+                    master_volume: draft.audio.master_volume,
+                    countdown_volume: draft.audio.countdown_volume,
+                    event_pack: draft.audio.event_pack.clone(),
+                    countdown_pack: draft.audio.countdown_pack.clone(),
+                });
             }
         });
     });
 
-    test
+    action
+}
+
+fn custom_sound_block(
+    ui: &mut Ui,
+    action: &mut Option<SettingsAction>,
+    title: &str,
+    subtitle: &str,
+    kind: &str,
+    enabled: &mut bool,
+    path: &mut String,
+    repeat: &mut u8,
+    default_name: &str,
+    mute: bool,
+    master_volume: f32,
+    countdown_volume: f32,
+) {
+    control_row(ui, title, subtitle, "♪", |ui| {
+        toggle(ui, enabled);
+    });
+    ui.horizontal(|ui| {
+        ui.add_space(36.0);
+        let label = {
+            let p = path.trim();
+            if p.is_empty() {
+                format!("{}（内置）", default_name)
+            } else {
+                std::path::Path::new(p)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(p)
+                    .to_string()
+            }
+        };
+        if glass_btn(ui, &label, false).clicked() {
+            if let Some(picked) = rfd::FileDialog::new()
+                .add_filter("音频", &["wav", "mp3"])
+                .add_filter("全部", &["*"])
+                .pick_file()
+            {
+                *path = picked.to_string_lossy().into_owned();
+            }
+        }
+        ui.label(RichText::new(t("重复")).size(12.0).color(chrome().muted));
+        ui.add(egui::DragValue::new(repeat).range(1..=10).speed(1.0));
+        if glass_btn(ui, "试听", true).clicked() {
+            *action = Some(SettingsAction::TestCustomSound {
+                kind: kind.into(),
+                path: path.clone(),
+                repeat: (*repeat).clamp(1, 10),
+                mute,
+                master_volume,
+                countdown_volume,
+            });
+        }
+        if !path.trim().is_empty() && glass_btn(ui, "恢复默认", false).clicked() {
+            path.clear();
+        }
+    });
+    ui.add_space(6.0);
 }
 
 fn draw_general(

@@ -67,6 +67,11 @@ impl Player {
     /// 清空事件轨队列后播一次
     pub fn play_oneshot(&self, path: &Path) {
         self.event_sink.stop();
+        self.play_oneshot_queued(path);
+    }
+
+    /// 追加到事件轨（用于同一提示音重复多次）
+    pub fn play_oneshot_queued(&self, path: &Path) {
         match decode(path) {
             Ok(source) => {
                 self.event_sink.append(source);

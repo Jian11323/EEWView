@@ -643,7 +643,11 @@ impl eframe::App for StarQuakeApp {
                                 && !report.is_cancel
                                 && !self.eew_alert_played.contains(&eew_key)
                             {
-                                audio.play(AudioCue::JmaEewAlert);
+                                audio.play_special(
+                                    AudioCue::JmaEewAlert,
+                                    Some(&self.cfg.audio.jma_eew_alert_sound_path),
+                                    self.cfg.audio.jma_eew_alert_sound_repeat,
+                                );
                                 self.eew_alert_played.insert(eew_key.clone());
                             }
                             // 预警震度 >=6 弱 → NHK 一级新闻铃
@@ -653,7 +657,11 @@ impl eframe::App for StarQuakeApp {
                                 && !report.is_cancel
                                 && !self.nhk_bell_played.contains(&eew_key)
                             {
-                                audio.play(AudioCue::NhkNewsBell);
+                                audio.play_special(
+                                    AudioCue::NhkNewsBell,
+                                    Some(&self.cfg.audio.nhk_news_bell_path),
+                                    self.cfg.audio.nhk_news_bell_repeat,
+                                );
                                 self.nhk_bell_played.insert(eew_key.clone());
                             }
                         }
@@ -743,7 +751,11 @@ impl eframe::App for StarQuakeApp {
                     {
                         let rk = format!("{}|{}|{:.4}|{:.4}|{}", rec.agency.0, rec.origin_ms, rec.latitude, rec.longitude, rec.intensity_level);
                         if !self.nhk_bell_played.contains(&rk) {
-                            audio.play(AudioCue::NhkNewsBell);
+                            audio.play_special(
+                                AudioCue::NhkNewsBell,
+                                Some(&self.cfg.audio.nhk_news_bell_path),
+                                self.cfg.audio.nhk_news_bell_repeat,
+                            );
                             self.nhk_bell_played.insert(rk);
                         }
                     }
@@ -1133,6 +1145,30 @@ impl eframe::App for StarQuakeApp {
                         audio.set_packs(
                             &self.cfg.audio.event_pack,
                             &self.cfg.audio.countdown_pack,
+                        );
+                    }
+                }
+                SettingsAction::TestCustomSound {
+                    kind,
+                    path,
+                    repeat,
+                    mute,
+                    master_volume,
+                    countdown_volume,
+                } => {
+                    if let Some(audio) = self.audio.as_mut() {
+                        audio.set_mute(mute);
+                        audio.set_volumes(master_volume, countdown_volume);
+                        let cue = match kind.as_str() {
+                            "jma_alert" => AudioCue::JmaEewAlert,
+                            "tsunami_ebs" => AudioCue::TsunamiEbs,
+                            _ => AudioCue::NhkNewsBell,
+                        };
+                        audio.play_special(cue, Some(&path), repeat);
+                        audio.set_mute(self.cfg.audio.mute);
+                        audio.set_volumes(
+                            self.cfg.audio.master_volume,
+                            self.cfg.audio.countdown_volume,
                         );
                     }
                 }
@@ -1555,7 +1591,11 @@ impl StarQuakeApp {
         };
         // 津波警报 / 大津波警报：优先播紧急警报放送第 2 种；其余档仍走 SREV
         if g == 3 && self.cfg.audio.tsunami_ebs_sound {
-            audio.play(AudioCue::TsunamiEbs);
+            audio.play_special(
+                AudioCue::TsunamiEbs,
+                Some(&self.cfg.audio.tsunami_ebs_sound_path),
+                self.cfg.audio.tsunami_ebs_sound_repeat,
+            );
         } else {
             audio.play(AudioCue::Tsunami { grade: g, kind });
         }
