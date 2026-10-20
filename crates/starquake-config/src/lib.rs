@@ -336,9 +336,21 @@ pub struct AudioConfig {
     pub master_volume: f32,
     pub countdown_volume: f32,
     pub mute: bool,
-    /// Windows TTS 语音播报（预警/速报文案）
+    /// 预警/速报 TTS 语音播报
     #[serde(default)]
     pub tts_enabled: bool,
+    /// TTS 引擎：`offline`（系统离线语音包）/ `edge`（微软 Edge 在线）
+    #[serde(default = "default_tts_engine")]
+    pub tts_engine: String,
+    /// 离线 TTS 音色（Windows SAPI 语音名；空=系统默认）
+    #[serde(default)]
+    pub tts_voice: String,
+    /// Edge TTS 音色（如 zh-CN-XiaoxiaoNeural）
+    #[serde(default = "default_tts_edge_voice")]
+    pub tts_edge_voice: String,
+    /// TTS 语速倍率（0.5–2.0，1.0 为默认）
+    #[serde(default = "default_tts_rate")]
+    pub tts_rate: f32,
     /// 本地 S 波倒计时音（地牛语音 + 滴答）
     #[serde(default = "default_true")]
     pub play_countdown: bool,
@@ -388,6 +400,18 @@ impl Default for NotifyConfig {
 
 fn default_countdown_start() -> i32 {
     10
+}
+
+fn default_tts_engine() -> String {
+    "offline".into()
+}
+
+fn default_tts_edge_voice() -> String {
+    "zh-CN-XiaoxiaoNeural".into()
+}
+
+fn default_tts_rate() -> f32 {
+    1.0
 }
 
 /// 自定义震级区间 → 最大 S 波传播距离。
@@ -879,6 +903,10 @@ impl Default for AppConfig {
                 countdown_volume: 1.0,
                 mute: false,
                 tts_enabled: false,
+                tts_engine: default_tts_engine(),
+                tts_voice: String::new(),
+                tts_edge_voice: default_tts_edge_voice(),
+                tts_rate: default_tts_rate(),
                 play_countdown: true,
                 countdown_speech: true,
                 countdown_start: default_countdown_start(),

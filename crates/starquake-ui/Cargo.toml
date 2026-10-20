@@ -14,4 +14,5 @@ starquake-config = { workspace = true }
 starquake-map = { workspace = true }
 starquake-travel = { workspace = true }
 starquake-net = { workspace = true }
+starquake-audio = { workspace = true }
 starquake-util = { workspace = true }

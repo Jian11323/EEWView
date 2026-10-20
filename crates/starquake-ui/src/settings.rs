@@ -186,6 +186,14 @@ pub enum SettingsAction {
         event_pack: String,
         countdown_pack: String,
     },
+    /// 按草稿 TTS 配置试听一句（无需先保存）
+    TestTts {
+        engine: String,
+        offline_voice: String,
+        edge_voice: String,
+        rate: f32,
+        volume: f32,
+    },
     ClearTileCache,
     OpenLogDir,
 }
@@ -235,6 +243,10 @@ pub struct SettingsSession {
     open_gen: u64,
     /// 性能诊断文案
     perf_diag: Option<String>,
+    /// 本机离线 SAPI 语音包（打开设置时枚举一次）
+    offline_tts_voices: Vec<(String, String)>,
+    /// Edge TTS 预设音色
+    edge_tts_voices: Vec<(String, String)>,
 }
 
 impl Default for SettingsSession {
@@ -256,6 +268,8 @@ impl Default for SettingsSession {
             opened_at: None,
             open_gen: 0,
             perf_diag: None,
+            offline_tts_voices: Vec::new(),
+            edge_tts_voices: Vec::new(),
         }
     }
 }
@@ -278,6 +292,14 @@ impl SettingsSession {
         self.opened_at = Some(std::time::Instant::now());
         self.open_gen = self.open_gen.wrapping_add(1);
         self.perf_diag = None;
+        self.offline_tts_voices = starquake_audio::list_offline_voices()
+            .into_iter()
+            .map(|v| (v.id, v.label))
+            .collect();
+        self.edge_tts_voices = starquake_audio::edge_voice_presets()
+            .into_iter()
+            .map(|v| (v.id, v.label))
+            .collect();
     }
 
     /// 打开设置并切到关于页。
@@ -599,6 +621,7 @@ impl SettingsSession {
             action,
             Some(SettingsAction::Saved { .. })
                 | Some(SettingsAction::TestSound { .. })
+                | Some(SettingsAction::TestTts { .. })
                 | Some(SettingsAction::ClearTileCache)
                 | Some(SettingsAction::OpenLogDir)
                 | Some(SettingsAction::CheckForUpdate)
@@ -982,6 +1005,8 @@ fn draw_content(
     let mut map_pick = session.map_pick;
     let mut capture_view = session.capture_view;
     let mut perf_diag = session.perf_diag.take();
+    let offline_tts_voices = session.offline_tts_voices.clone();
+    let edge_tts_voices = session.edge_tts_voices.clone();
     {
         let draft = session.draft.as_mut().unwrap();
         let login_key = &mut session.login_key;
@@ -1004,7 +1029,7 @@ fn draw_content(
                 }
             }
             SettingsTab::Audio => {
-                if let Some(a) = draw_audio(ui, draft) {
+                if let Some(a) = draw_audio(ui, draft, &offline_tts_voices, &edge_tts_voices) {
                     *action = Some(a);
                 }
             }
@@ -1568,7 +1593,19 @@ fn scale_display(s: &str) -> String {
     }
 }
 
-fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> Option<SettingsAction> {
+fn tts_engine_display(s: &str) -> String {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "edge" | "online" | "msedge" => t("Edge TTS（在线）").into(),
+        _ => t("离线语音包").into(),
+    }
+}
+
+fn draw_audio(
+    ui: &mut Ui,
+    draft: &mut AppConfig,
+    offline_voices: &[(String, String)],
+    edge_voices: &[(String, String)],
+) -> Option<SettingsAction> {
     let mut action = None;
     section(ui, "音效设置", "♪", |ui| {
         control_row(
@@ -1655,11 +1692,7 @@ fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> Option<SettingsAction> {
             toggle(ui, &mut draft.audio.countdown_only_intense);
         });
         row_divider(ui);
-        control_row(ui, "Windows TTS", "预警/速报语音播报（系统朗读）", "◎", |ui| {
-            toggle(ui, &mut draft.audio.tts_enabled);
-        });
-        row_divider(ui);
-        control_row(ui, "试听", "按草稿音量立即试听（无需先保存）", "▶", |ui| {
+        control_row(ui, "试听音效", "按草稿音量立即试听（无需先保存）", "▶", |ui| {
             if glass_btn(ui, "试听首报音", true).clicked() {
                 action = Some(SettingsAction::TestSound {
                     mute: draft.audio.mute,
@@ -1667,6 +1700,130 @@ fn draw_audio(ui: &mut Ui, draft: &mut AppConfig) -> Option<SettingsAction> {
                     countdown_volume: draft.audio.countdown_volume,
                     event_pack: draft.audio.event_pack.clone(),
                     countdown_pack: draft.audio.countdown_pack.clone(),
+                });
+            }
+        });
+    });
+
+    section(ui, "语音播报", "◎", |ui| {
+        control_row(
+            ui,
+            "启用 TTS",
+            "音效播放后，再朗读预警/速报文案。",
+            "◎",
+            |ui| {
+                toggle(ui, &mut draft.audio.tts_enabled);
+            },
+        );
+        row_divider(ui);
+        control_row(
+            ui,
+            "TTS 引擎",
+            "离线用本机语音包；Edge 需联网。",
+            "◎",
+            |ui| {
+                egui::ComboBox::from_id_salt("set_tts_engine")
+                    .selected_text(tts_engine_display(&draft.audio.tts_engine))
+                    .width(160.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut draft.audio.tts_engine,
+                            "offline".into(),
+                            t("离线语音包"),
+                        );
+                        ui.selectable_value(
+                            &mut draft.audio.tts_engine,
+                            "edge".into(),
+                            t("Edge TTS（在线）"),
+                        );
+                    });
+            },
+        );
+        let use_edge = matches!(
+            draft.audio.tts_engine.trim().to_ascii_lowercase().as_str(),
+            "edge" | "online" | "msedge"
+        );
+        row_divider(ui);
+        if use_edge {
+            let edge_label = edge_voices
+                .iter()
+                .find(|(id, _)| id == &draft.audio.tts_edge_voice)
+                .map(|(_, lab)| lab.clone())
+                .unwrap_or_else(|| draft.audio.tts_edge_voice.clone());
+            control_row(ui, "Edge 音色", "微软 Neural 在线音色", "◎", |ui| {
+                egui::ComboBox::from_id_salt("set_tts_edge_voice")
+                    .selected_text(edge_label.clone())
+                    .width(200.0)
+                    .show_ui(ui, |ui| {
+                        for (id, label) in edge_voices {
+                            ui.selectable_value(
+                                &mut draft.audio.tts_edge_voice,
+                                id.clone(),
+                                label,
+                            );
+                        }
+                    });
+            });
+        } else {
+            let offline_label = offline_voices
+                .iter()
+                .find(|(id, _)| id == &draft.audio.tts_voice)
+                .map(|(_, lab)| lab.clone())
+                .unwrap_or_else(|| {
+                    if draft.audio.tts_voice.is_empty() {
+                        t("系统默认").to_string()
+                    } else {
+                        draft.audio.tts_voice.clone()
+                    }
+                });
+            control_row(
+                ui,
+                "离线语音包",
+                "选择系统已安装的 TTS 音色；没有合适选项时用系统默认。",
+                "◎",
+                |ui| {
+                    egui::ComboBox::from_id_salt("set_tts_offline_voice")
+                        .selected_text(offline_label.clone())
+                        .width(220.0)
+                        .show_ui(ui, |ui| {
+                            for (id, label) in offline_voices {
+                                let shown = if id.is_empty() {
+                                    t("系统默认").to_string()
+                                } else {
+                                    label.clone()
+                                };
+                                ui.selectable_value(
+                                    &mut draft.audio.tts_voice,
+                                    id.clone(),
+                                    shown,
+                                );
+                            }
+                        });
+                },
+            );
+        }
+        row_divider(ui);
+        control_row(ui, "语速", "调低更清楚，调高更紧凑", "◎", |ui| {
+            ui.add(
+                egui::Slider::new(&mut draft.audio.tts_rate, 0.5..=2.0)
+                    .show_value(true)
+                    .fixed_decimals(2),
+            );
+        });
+        row_divider(ui);
+        control_row(ui, "试听语音", "立即用当前草稿配置播放测试句", "▶", |ui| {
+            if glass_btn(ui, "播放测试", true).clicked() {
+                let vol = if draft.audio.mute {
+                    0.0
+                } else {
+                    draft.audio.master_volume
+                };
+                action = Some(SettingsAction::TestTts {
+                    engine: draft.audio.tts_engine.clone(),
+                    offline_voice: draft.audio.tts_voice.clone(),
+                    edge_voice: draft.audio.tts_edge_voice.clone(),
+                    rate: draft.audio.tts_rate,
+                    volume: vol,
                 });
             }
         });

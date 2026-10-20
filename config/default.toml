@@ -68,8 +68,16 @@ countdown_pack = "countdown"
 master_volume = 0.8
 countdown_volume = 1.0
 mute = false
-# Windows TTS 语音播报（默认关）
+# TTS 语音播报（默认关）
 tts_enabled = false
+# offline = 系统离线语音包；edge = 微软 Edge 在线 TTS
+tts_engine = "offline"
+# 离线音色（Windows SAPI 语音名；空=系统默认）
+tts_voice = ""
+# Edge TTS 音色
+tts_edge_voice = "zh-CN-XiaoxiaoNeural"
+# 语速倍率 0.5–2.0
+tts_rate = 1.0
 # 倒计时：从剩余秒开始播语音，并循环滴答
 play_countdown = true
 countdown_speech = true

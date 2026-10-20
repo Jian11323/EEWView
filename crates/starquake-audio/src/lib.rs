@@ -16,7 +16,10 @@ pub use catalog::SoundCatalog;
 pub use countdown::CountdownMachine;
 pub use cue::{AudioCue, TsunamiCueKind};
 pub use router::Router;
-pub use tts_speak::speak_async;
+pub use tts_speak::{
+    configure_tts, edge_voice_presets, list_offline_voices, speak_async, speak_with_config,
+    TtsEngine, TtsRuntimeConfig, TtsVoiceInfo,
+};
 
 use player::Player;
 

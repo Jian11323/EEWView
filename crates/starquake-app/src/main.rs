@@ -9,7 +9,10 @@ mod update;
 
 use anyhow::Result;
 use eframe::egui;
-use starquake_audio::{speak_async, AudioCue, AudioEngine, TsunamiCueKind};
+use starquake_audio::{
+    configure_tts, speak_async, speak_with_config, AudioCue, AudioEngine, TsunamiCueKind,
+    TtsEngine, TtsRuntimeConfig,
+};
 use starquake_config::AppConfig;
 use starquake_core::{
     agency_family, build_eew_tts_script, build_record_tts_script, eew_sidebar_entries,
@@ -242,6 +245,7 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
             None
         }
     };
+    apply_tts_runtime(&cfg.audio);
 
     let live = cfg.any_source_enabled();
     let mut snap = AppSnapshot::empty();
@@ -1136,6 +1140,24 @@ impl eframe::App for StarQuakeApp {
                         );
                     }
                 }
+                SettingsAction::TestTts {
+                    engine,
+                    offline_voice,
+                    edge_voice,
+                    rate,
+                    volume,
+                } => {
+                    speak_with_config(
+                        "StarQuake 语音播报测试。",
+                        TtsRuntimeConfig {
+                            engine: TtsEngine::parse(&engine),
+                            offline_voice,
+                            edge_voice,
+                            rate,
+                            volume,
+                        },
+                    );
+                }
                 SettingsAction::Cancelled => {}
                 SettingsAction::ClearTileCache => {
                     self.shell.map.clear_tile_cache();
@@ -1626,6 +1648,7 @@ impl StarQuakeApp {
             audio.set_volumes(self.cfg.audio.master_volume, self.cfg.audio.countdown_volume);
             audio.set_packs(&self.cfg.audio.event_pack, &self.cfg.audio.countdown_pack);
         }
+        apply_tts_runtime(&self.cfg.audio);
 
         if !sources_same {
             tracing::info!("数据源已变更，正在重连");
@@ -1651,6 +1674,17 @@ impl StarQuakeApp {
 }
 
 
+
+fn apply_tts_runtime(audio: &starquake_config::AudioConfig) {
+    let volume = if audio.mute { 0.0 } else { audio.master_volume };
+    configure_tts(TtsRuntimeConfig {
+        engine: TtsEngine::parse(&audio.tts_engine),
+        offline_voice: audio.tts_voice.clone(),
+        edge_voice: audio.tts_edge_voice.clone(),
+        rate: audio.tts_rate,
+        volume,
+    });
+}
 
 /// 预警跟焦落地固定 Z11；落地后由 auto_zoom 从 Z11 缓慢线性跟 S 波缩小。
 fn gq_jump_zoom() -> f64 {
