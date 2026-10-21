@@ -840,7 +840,7 @@ fn default_gq_min_mag() -> f64 {
     3.0
 }
 fn default_typhoon_url() -> String {
-    "https://api.sismotide.top/get/typhoon.php".into()
+    "https://api.sismotide.top/get/typhoon.json".into()
 }
 fn default_typhoon_poll() -> u64 {
     15

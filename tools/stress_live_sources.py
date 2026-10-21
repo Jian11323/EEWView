@@ -44,7 +44,7 @@ DEFAULTS = {
     "kma_ws": "wss://api.sismotide.top/kma-station",
     "pancakes_base": "https://api.aloys23.link",
     "pancakes_ws": "wss://api.aloys23.link",
-    "typhoon": "https://api.sismotide.top/get/typhoon.php",
+    "typhoon": "https://api.sismotide.top/get/typhoon.json",
 }
 
 UA = "StarQuake-stress/2.0 (+https://github.com/Jian11323/StarQuake)"

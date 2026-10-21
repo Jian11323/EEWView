@@ -1,8 +1,8 @@
-//! 公网 IP 归属定位：`GET https://api.sismotide.top/get/ip.php`（缺省查客户端 IP）。
+//! 公网 IP 归属定位：`GET https://api.sismotide.top/get/ip.json`（缺省查客户端 IP）。
 
 use serde::Deserialize;
 
-const IP_URL: &str = "https://api.sismotide.top/get/ip.php";
+const IP_URL: &str = "https://api.sismotide.top/get/ip.json";
 const UA: &str = concat!(
     "StarQuake/",
     env!("CARGO_PKG_VERSION"),

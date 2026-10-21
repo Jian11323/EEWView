@@ -216,7 +216,7 @@ other = 0.0
 
 [sources.typhoon]
 enabled = true
-url = "https://api.sismotide.top/get/typhoon.php"
+url = "https://api.sismotide.top/get/typhoon.json"
 poll_secs = 15
 
 [update]

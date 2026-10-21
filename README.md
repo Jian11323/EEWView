@@ -59,7 +59,7 @@
 - GlobalQuake 全球预警、JMA-Atom 火山情报：[PancakesAPI](https://wiki.aloys23.link/wiki/PancakesAPI)
 - 日本测站烈度：[NIED 強震モニタ](https://www.lmoni.bosai.go.jp/)
 - 亮色海洋地形瓦片：[sismotide tilemap](https://tilemap.sismotide.top/)
-- IP 归属定位：[sismotide GET IP](https://api.sismotide.top/get/ip.php)
+- IP 归属定位：[sismotide GET IP](https://api.sismotide.top/get/ip.json)
 - 中国大陆地图：[阿里云 DataV.GeoAtlas](https://datav.aliyun.com/portal/school/atlas/area_selector)
 - 中国台湾地图：[GeoJSON.cn](https://geojson.cn/)
 - 日本地图：[日本气象厅](https://www.data.jma.go.jp/developer/gis.html)（注意钓鱼岛地区处理）
