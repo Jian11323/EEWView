@@ -108,6 +108,7 @@ const CAT_VOICE: Color32 = Color32::from_rgb(0xD6, 0xA5, 0xFF);
 const CAT_ADV: Color32 = Color32::from_rgb(0xAE, 0xB8, 0xCC);
 const CAT_GENERAL: Color32 = Color32::from_rgb(0x9E, 0xD0, 0xFF);
 const CAT_ABOUT: Color32 = Color32::from_rgb(0xFF, 0xC6, 0x6D);
+const CAT_NOTICE: Color32 = Color32::from_rgb(0xF5, 0x9E, 0x0B);
 
 const NAV_W: f32 = 228.0;
 const HEADER_H: f32 = 78.0;
@@ -120,15 +121,17 @@ enum SettingsTab {
     General,
     Audio,
     Advanced,
+    Notices,
     About,
 }
 
 impl SettingsTab {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Sources,
         Self::General,
         Self::Audio,
         Self::Advanced,
+        Self::Notices,
         Self::About,
     ];
 
@@ -138,6 +141,7 @@ impl SettingsTab {
             Self::General => "通用设置",
             Self::Audio => "音频",
             Self::Advanced => "高级",
+            Self::Notices => "通知中心",
             Self::About => "关于",
         }
     }
@@ -148,6 +152,7 @@ impl SettingsTab {
             Self::General => "主题、底图、窗口与定位",
             Self::Audio => "音效开关、通知与音量",
             Self::Advanced => "走时表、更新、缓存与配置路径",
+            Self::Notices => "官方公告、更新与安全通知",
             Self::About => "版本、致谢与版权",
         }
     }
@@ -159,6 +164,7 @@ impl SettingsTab {
             Self::General => "\u{2630}",
             Self::Audio => "\u{266a}",
             Self::Advanced => "\u{2699}",
+            Self::Notices => "\u{1f514}",
             Self::About => "\u{24d8}",
         }
     }
@@ -169,6 +175,7 @@ impl SettingsTab {
             Self::General => CAT_GENERAL,
             Self::Audio => CAT_VOICE,
             Self::Advanced => CAT_ADV,
+            Self::Notices => CAT_NOTICE,
             Self::About => CAT_ABOUT,
         }
     }
@@ -196,6 +203,21 @@ pub enum SettingsAction {
     },
     ClearTileCache,
     OpenLogDir,
+    /// 通知中心：标记单条已读
+    MarkNoticeRead(i64),
+    /// 通知中心：全部标记已读
+    MarkAllNoticesRead,
+}
+
+/// 设置页「通知中心」展示用条目（由主循环注入）。
+#[derive(Debug, Clone)]
+pub struct OfficialNoticeView {
+    pub id: i64,
+    pub title: String,
+    pub content: String,
+    pub type_label: String,
+    pub created_at: String,
+    pub unread: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +269,8 @@ pub struct SettingsSession {
     offline_tts_voices: Vec<(String, String)>,
     /// Edge TTS 预设音色
     edge_tts_voices: Vec<(String, String)>,
+    /// 官方通知列表（主循环每帧同步）
+    pub official_notices: Vec<OfficialNoticeView>,
 }
 
 impl Default for SettingsSession {
@@ -270,6 +294,7 @@ impl Default for SettingsSession {
             perf_diag: None,
             offline_tts_voices: Vec::new(),
             edge_tts_voices: Vec::new(),
+            official_notices: Vec::new(),
         }
     }
 }
@@ -1007,6 +1032,7 @@ fn draw_content(
     let mut perf_diag = session.perf_diag.take();
     let offline_tts_voices = session.offline_tts_voices.clone();
     let edge_tts_voices = session.edge_tts_voices.clone();
+    let official_notices = session.official_notices.clone();
     {
         let draft = session.draft.as_mut().unwrap();
         let login_key = &mut session.login_key;
@@ -1034,6 +1060,11 @@ fn draw_content(
                 }
             }
             SettingsTab::Advanced => draw_advanced(ui, draft, action),
+            SettingsTab::Notices => {
+                if let Some(a) = draw_notices(ui, &official_notices) {
+                    *action = Some(a);
+                }
+            }
             SettingsTab::About => draw_about(ui, draft),
         }
     }
@@ -2399,6 +2430,89 @@ fn snet_station_src_label(s: &str) -> String {
         "original" => "S-Net".into(),
         _ => "S-Net / Jian Project".into(),
     }
+}
+
+fn draw_notices(ui: &mut Ui, notices: &[OfficialNoticeView]) -> Option<SettingsAction> {
+    let mut action = None;
+    let unread = notices.iter().filter(|n| n.unread).count();
+    section(ui, "官方通知", "\u{1f514}", |ui| {
+        ui.label(
+            RichText::new(format!(
+                "{}",
+                t("未读 {} 条 · 每 15 秒自动同步").replace("{}", &unread.to_string())
+            ))
+            .size(12.0)
+            .color(chrome().muted),
+        );
+        ui.add_space(8.0);
+        if unread > 0 && glass_btn(ui, "全部标为已读", true).clicked() {
+            action = Some(SettingsAction::MarkAllNoticesRead);
+        }
+    });
+    ui.add_space(8.0);
+    if notices.is_empty() {
+        ui.label(
+            RichText::new(t("暂无通知"))
+                .size(13.0)
+                .color(chrome().muted),
+        );
+        return action;
+    }
+    for n in notices {
+        egui::Frame::NONE
+            .fill(if n.unread {
+                Color32::from_rgba_unmultiplied(0xF5, 0x9E, 0x0B, 28)
+            } else {
+                Color32::from_rgba_unmultiplied(0x80, 0x80, 0x80, 16)
+            })
+            .inner_margin(Margin::same(10))
+            .corner_radius(8.0)
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(&n.type_label)
+                            .size(11.0)
+                            .color(CAT_NOTICE),
+                    );
+                    if n.unread {
+                        ui.label(
+                            RichText::new(t("未读"))
+                                .size(11.0)
+                                .strong()
+                                .color(Color32::from_rgb(0xEF, 0x44, 0x44)),
+                        );
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(&n.created_at)
+                                .size(11.0)
+                                .color(chrome().muted),
+                        );
+                    });
+                });
+                ui.label(
+                    RichText::new(&n.title)
+                        .size(14.0)
+                        .strong()
+                        .color(chrome().text),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(&n.content)
+                        .size(12.5)
+                        .color(chrome().text),
+                );
+                if n.unread {
+                    ui.add_space(6.0);
+                    if glass_btn(ui, "标为已读", true).clicked() {
+                        action = Some(SettingsAction::MarkNoticeRead(n.id));
+                    }
+                }
+            });
+        ui.add_space(8.0);
+    }
+    action
 }
 
 fn draw_about(ui: &mut Ui, _draft: &mut AppConfig) {

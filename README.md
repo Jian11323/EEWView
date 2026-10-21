@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
   <img src="https://img.shields.io/badge/Rust-1.70%2B-orange.svg" alt="Rust" />
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6.svg" alt="Windows" />
-  <img src="https://img.shields.io/badge/Release-2.1.0-informational.svg" alt="2.1.0" />
+  <img src="https://img.shields.io/badge/Release-2.1.1-informational.svg" alt="2.1.1" />
 </p>
 
 <p align="center">
@@ -43,7 +43,8 @@
 - 各数据源健康状态：**正常** / **波动** / **异常**
 - 界面语言切换：简体中文 / 繁体中文 / 日本語 / English（设置 → 通用）
 - 右侧情报侧栏可开关（设置、向右拖关闭或右缘拉开）；关闭后地图右键可打开设置、跳转所在地、图例、设置所在地与关于
-- 主窗内嵌设置（数据源、地图与显示、音频、性能、高级、关于）
+- 主窗内嵌设置（数据源、地图与显示、音频、性能、高级、通知中心、关于）
+- 官方通知中心：每 15 秒拉取 [Jian Project 通知](https://api.sismotide.top/api/v1/notifications/updates)，未读弹窗 + 设置页列表（与地震情报实况栏共用）
 - 自定义告警音：NHK 一级新闻铃、JMA 警报音、津波紧急警报放送；可开关
 - 桌面系统通知（预警 / 速报 / 海啸，可分别开关）
 

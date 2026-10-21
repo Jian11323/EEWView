@@ -5,6 +5,7 @@
 
 mod logging;
 mod notify;
+mod official_notice;
 mod update;
 
 use anyhow::Result;
@@ -26,11 +27,14 @@ use std::collections::{HashMap, HashSet};
 use starquake_net::{load_place_fix, spawn_hub_with_assets, NetEvent, NetHub};
 use starquake_travel::{s_wave_still_spreading_to, TravelEngine};
 use starquake_map::{zoom_to_fit_radius_km, BasemapMode, ProjectionMode};
-use starquake_ui::{draw_splash, MainShell, SettingsAction, SplashGate, AppUiTheme};
+use starquake_ui::{
+    draw_splash, MainShell, OfficialNoticeView, SettingsAction, SplashGate, AppUiTheme,
+};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Instant;
 use tokio::runtime::Runtime;
+use official_notice::{fetch_notices, OfficialNoticeState, RemoteNotice};
 use update::{AvailableUpdate, check_latest, download_asset, apply_and_relaunch, open_release_page};
 
 fn looks_like_resource_root(dir: &Path) -> bool {
@@ -379,6 +383,9 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
                 update_busy: false,
                 update_checked: false,
                 update_check_manual: false,
+                official_notices: OfficialNoticeState::load(),
+                notice_rx: None,
+                notice_fetching: false,
             }))
         }),
     );
@@ -596,6 +603,10 @@ struct StarQuakeApp {
     update_checked: bool,
     /// 本次检查是否由用户手动触发（启动自动检查无更新时不弹「已是最新」）
     update_check_manual: bool,
+    /// 官方通知中心
+    official_notices: OfficialNoticeState,
+    notice_rx: Option<mpsc::Receiver<Result<Vec<RemoteNotice>, String>>>,
+    notice_fetching: bool,
 }
 
 impl eframe::App for StarQuakeApp {
@@ -603,6 +614,7 @@ impl eframe::App for StarQuakeApp {
         ctx.set_embed_viewports(true);
         self.tick_window_geometry(ctx);
         self.tick_update_check(ctx);
+        self.tick_official_notices(ctx);
 
         if let Some(rx) = self.net_rx.as_mut() {
             while let Ok(ev) = rx.try_recv() {
@@ -1102,6 +1114,19 @@ impl eframe::App for StarQuakeApp {
             );
         }
 
+        self.shell.settings.official_notices = self
+            .official_notices
+            .items
+            .iter()
+            .map(|n| OfficialNoticeView {
+                id: n.id,
+                title: n.title.clone(),
+                content: n.content.clone(),
+                type_label: n.type_label().to_string(),
+                created_at: n.created_at.clone(),
+                unread: !self.official_notices.is_read(n.id),
+            })
+            .collect();
         let (ui_action, persist_cfg) = self.shell.ui(
             ctx,
             &mut self.snap,
@@ -1207,6 +1232,12 @@ impl eframe::App for StarQuakeApp {
                 SettingsAction::CheckForUpdate => {
                     self.begin_update_check(true);
                 }
+                SettingsAction::MarkNoticeRead(id) => {
+                    self.official_notices.mark_read(id);
+                }
+                SettingsAction::MarkAllNoticesRead => {
+                    self.official_notices.mark_all_read();
+                }
             }
         }
 
@@ -1225,6 +1256,7 @@ impl eframe::App for StarQuakeApp {
         }
 
         self.draw_update_dialog(ctx);
+        self.draw_official_notice_popup(ctx);
 
         // 有指针活动立即重绘，避免空闲降频把点击「吃掉」
         let pointer_busy = ctx.input(|i| {
@@ -1257,6 +1289,79 @@ impl eframe::App for StarQuakeApp {
 }
 
 impl StarQuakeApp {
+
+    fn tick_official_notices(&mut self, ctx: &egui::Context) {
+        if self.splash.active() {
+            return;
+        }
+        if let Some(rx) = self.notice_rx.as_ref() {
+            match rx.try_recv() {
+                Ok(Ok(items)) => {
+                    self.notice_fetching = false;
+                    self.notice_rx = None;
+                    self.official_notices.apply_fetched(items);
+                    ctx.request_repaint();
+                }
+                Ok(Err(e)) => {
+                    self.notice_fetching = false;
+                    self.notice_rx = None;
+                    tracing::debug!("官方通知拉取失败: {e}");
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.notice_fetching = false;
+                    self.notice_rx = None;
+                }
+            }
+        }
+        if self.notice_fetching {
+            return;
+        }
+        if !self.official_notices.needs_poll() {
+            return;
+        }
+        self.notice_fetching = true;
+        let (tx, rx) = mpsc::channel();
+        self.notice_rx = Some(rx);
+        std::thread::spawn(move || {
+            let res = fetch_notices().map_err(|e| format!("{e:#}"));
+            let _ = tx.send(res);
+        });
+    }
+
+    fn draw_official_notice_popup(&mut self, ctx: &egui::Context) {
+        let Some(n) = self.official_notices.popup_queue.first().cloned() else {
+            return;
+        };
+        let mut close = false;
+        egui::Window::new(format!("{} · {}", n.type_label(), n.title))
+            .id(egui::Id::new("official_notice_popup"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_min_width(320.0);
+                ui.set_max_width(420.0);
+                if !n.created_at.is_empty() {
+                    ui.label(
+                        egui::RichText::new(&n.created_at)
+                            .size(11.0)
+                            .color(egui::Color32::GRAY),
+                    );
+                    ui.add_space(4.0);
+                }
+                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                    ui.label(&n.content);
+                });
+                ui.add_space(10.0);
+                if ui.button("知道了").clicked() {
+                    close = true;
+                }
+            });
+        if close {
+            self.official_notices.mark_read(n.id);
+        }
+    }
 
     fn begin_update_check(&mut self, manual: bool) {
         if self.update_busy {

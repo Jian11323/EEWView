@@ -32,7 +32,9 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use theme::{ThemePalette, UiTheme};
 
-pub use settings::{MapPickKind, SettingsAction, SettingsSession, SourceHealthView};
+pub use settings::{
+    MapPickKind, OfficialNoticeView, SettingsAction, SettingsSession, SourceHealthView,
+};
 pub use theme::UiTheme as AppUiTheme;
 
 /// 左上预警条 / 波圈 / 叉标共用：有走时表时按表半径判定，与倒计时卸除条件一致。
