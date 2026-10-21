@@ -6,7 +6,8 @@
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{info, warn};
@@ -222,41 +223,18 @@ fn staging_root() -> Result<PathBuf> {
 }
 
 fn sha256_hex(path: &Path) -> Result<String> {
-    // 无额外 crate：用系统工具做可选校验；清单 sha256 为空则跳过。
-    #[cfg(windows)]
-    {
-        let out = Command::new("certutil")
-            .args(["-hashfile", &path.to_string_lossy(), "SHA256"])
-            .output()
-            .context("certutil SHA256")?;
-        let text = String::from_utf8_lossy(&out.stdout);
-        for line in text.lines() {
-            let t = line.trim();
-            if t.len() == 64 && t.chars().all(|c| c.is_ascii_hexdigit()) {
-                return Ok(t.to_ascii_lowercase());
-            }
+    // 进程内计算，避免 certutil 输出带空格/本地化文案导致解析失败。
+    let mut file = File::open(path).with_context(|| format!("打开 {}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).context("读取更新包")?;
+        if n == 0 {
+            break;
         }
-        bail!("无法解析 certutil SHA256 输出");
+        hasher.update(&buf[..n]);
     }
-    #[cfg(not(windows))]
-    {
-        let out = Command::new("sha256sum")
-            .arg(path)
-            .output()
-            .or_else(|_| Command::new("shasum").args(["-a", "256"]).arg(path).output())
-            .context("sha256sum")?;
-        let text = String::from_utf8_lossy(&out.stdout);
-        let hex = text
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if hex.len() == 64 {
-            return Ok(hex);
-        }
-        bail!("无法解析 sha256 输出");
-    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 /// 下载资源到暂存目录，返回本地文件路径。

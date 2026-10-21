@@ -34,3 +34,4 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 notify-rust = "4"
 # msedge-tts 与 reqwest 同时链入 aws-lc / ring 时需显式选定 CryptoProvider
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+sha2 = "0.10"
