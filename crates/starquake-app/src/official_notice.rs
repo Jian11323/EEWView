@@ -48,6 +48,45 @@ impl RemoteNotice {
             _ => "其他通知",
         }
     }
+
+    /// 将远端 ISO/UTC 时间转为东八区展示（`YYYY-MM-DD HH:MM:SS`）。
+    pub fn created_at_display(&self) -> String {
+        format_notice_time_cst(&self.created_at)
+    }
+}
+
+/// 解析通知时间戳并格式化为 UTC+8；无法解析时原样返回。
+pub fn format_notice_time_cst(raw: &str) -> String {
+    let s = raw.trim();
+    if s.is_empty() {
+        return String::new();
+    }
+    let parsed = chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .or_else(|| {
+            // 兼容无偏移 / 仅以 Z 结尾的 ISO
+            let norm = s.trim_end_matches('Z').trim_end_matches('z');
+            let candidates = [
+                "%Y-%m-%dT%H:%M:%S%.f",
+                "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%d %H:%M:%S%.f",
+                "%Y-%m-%d %H:%M:%S",
+            ];
+            for fmt in candidates {
+                if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(norm, fmt) {
+                    return Some(naive.and_utc());
+                }
+            }
+            None
+        });
+    let Some(utc) = parsed else {
+        return s.to_string();
+    };
+    let cst = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+    utc.with_timezone(&cst)
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string()
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

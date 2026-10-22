@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
   <img src="https://img.shields.io/badge/Rust-1.70%2B-orange.svg" alt="Rust" />
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6.svg" alt="Windows" />
-  <img src="https://img.shields.io/badge/Release-2.1.2-informational.svg" alt="2.1.2" />
+  <img src="https://img.shields.io/badge/Release-2.1.3-informational.svg" alt="2.1.3" />
 </p>
 
 <p align="center">

@@ -1123,7 +1123,7 @@ impl eframe::App for StarQuakeApp {
                 title: n.title.clone(),
                 content: n.content.clone(),
                 type_label: n.type_label().to_string(),
-                created_at: n.created_at.clone(),
+                created_at: n.created_at_display(),
                 unread: !self.official_notices.is_read(n.id),
             })
             .collect();
@@ -1342,9 +1342,10 @@ impl StarQuakeApp {
             .show(ctx, |ui| {
                 ui.set_min_width(320.0);
                 ui.set_max_width(420.0);
-                if !n.created_at.is_empty() {
+                let created_disp = n.created_at_display();
+                if !created_disp.is_empty() {
                     ui.label(
-                        egui::RichText::new(&n.created_at)
+                        egui::RichText::new(created_disp)
                             .size(11.0)
                             .color(egui::Color32::GRAY),
                     );
