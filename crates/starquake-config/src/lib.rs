@@ -128,6 +128,12 @@ pub struct UiConfig {
     /// 地图绘制火山三角标，并在火山列表显示图标
     #[serde(default = "default_true")]
     pub show_volcanoes: bool,
+    /// 地图绘制气象预警图标
+    #[serde(default = "default_true")]
+    pub show_weather: bool,
+    /// 地图绘制烈度速报震中/计测点
+    #[serde(default = "default_true")]
+    pub show_cenc_int: bool,
     /// 地图绘制台风路径 / 风圈 / 预报
     #[serde(default = "default_true")]
     pub show_typhoons: bool,
@@ -482,6 +488,12 @@ pub struct SourcesConfig {
     /// 活跃台风路径
     #[serde(default)]
     pub typhoon: TyphoonSourceConfig,
+    /// 中央台气象预警（Jian `/weather`）
+    #[serde(default)]
+    pub weather: WeatherSourceConfig,
+    /// CENC 烈度速报（NowQuake）
+    #[serde(default)]
+    pub cenc_int: CencIntSourceConfig,
 }
 
 /// 台风实时路径（HTTP 轮询）。
@@ -501,6 +513,48 @@ impl Default for TyphoonSourceConfig {
             enabled: true,
             url: default_typhoon_url(),
             poll_secs: default_typhoon_poll(),
+        }
+    }
+}
+
+/// 气象预警 WebSocket（鉴权复用 `sources.jian` 的 at_/rt_）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeatherSourceConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_weather_ws")]
+    pub ws_url: String,
+}
+
+impl Default for WeatherSourceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ws_url: default_weather_ws(),
+        }
+    }
+}
+
+/// NowQuake CENC 烈度速报（冷启动 GET + WebSocket）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CencIntSourceConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_cenc_int_http")]
+    pub http_base: String,
+    #[serde(default = "default_cenc_int_ws")]
+    pub ws_url: String,
+    #[serde(default = "default_cenc_int_page_size")]
+    pub list_page_size: u32,
+}
+
+impl Default for CencIntSourceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            http_base: default_cenc_int_http(),
+            ws_url: default_cenc_int_ws(),
+            list_page_size: default_cenc_int_page_size(),
         }
     }
 }
@@ -845,6 +899,18 @@ fn default_gq_min_mag() -> f64 {
 fn default_typhoon_url() -> String {
     "https://api.sismotide.top/get/typhoon.json".into()
 }
+fn default_weather_ws() -> String {
+    "wss://api.sismotide.top/weather".into()
+}
+fn default_cenc_int_http() -> String {
+    "https://api-cencint-public.nowquake.cn".into()
+}
+fn default_cenc_int_ws() -> String {
+    "wss://api-cencint-public.nowquake.cn/websocket".into()
+}
+fn default_cenc_int_page_size() -> u32 {
+    20
+}
 fn default_typhoon_poll() -> u64 {
     15
 }
@@ -883,6 +949,8 @@ impl Default for AppConfig {
                 show_wave_rings: true,
                 show_legend: true,
                 show_volcanoes: true,
+                show_weather: true,
+                show_cenc_int: true,
                 show_typhoons: true,
                 show_faults: false,
                 show_terminator: false,
@@ -974,6 +1042,8 @@ impl Default for AppConfig {
                 pancakes: PancakesSourceConfig::default(),
                 stations: StationsConfig::default(),
                 typhoon: TyphoonSourceConfig::default(),
+                weather: WeatherSourceConfig::default(),
+                cenc_int: CencIntSourceConfig::default(),
             },
             filters: FiltersConfig::default(),
             log: LogConfig::default(),
@@ -1488,6 +1558,12 @@ impl AppConfig {
             && self.sources.typhoon.enabled == other.sources.typhoon.enabled
             && self.sources.typhoon.url == other.sources.typhoon.url
             && self.sources.typhoon.poll_secs == other.sources.typhoon.poll_secs
+            && self.sources.weather.enabled == other.sources.weather.enabled
+            && self.sources.weather.ws_url == other.sources.weather.ws_url
+            && self.sources.cenc_int.enabled == other.sources.cenc_int.enabled
+            && self.sources.cenc_int.http_base == other.sources.cenc_int.http_base
+            && self.sources.cenc_int.ws_url == other.sources.cenc_int.ws_url
+            && self.sources.cenc_int.list_page_size == other.sources.cenc_int.list_page_size
     }
 }
 

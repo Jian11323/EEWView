@@ -92,13 +92,15 @@ pub fn spawn_hub_with_assets(
         snet = sources.stations.snet_enabled,
         kma = sources.stations.kma_enabled,
         typhoon = sources.typhoon.enabled,
+        weather = sources.weather.enabled,
+        cenc_int = sources.cenc_int.enabled,
         "starquake-net: spawning source tasks"
     );
     let mut tasks = Vec::new();
     // 测站由 stations 模块统一管理（无需鉴权）；jian 侧不再重复拉 /kmoni
     let mut jian_cfg = sources.jian.clone();
     jian_cfg.station_enabled = false;
-    tasks.extend(sources::jian::spawn(tx.clone(), jian_cfg));
+    tasks.extend(sources::jian::spawn(tx.clone(), jian_cfg.clone()));
     tasks.extend(sources::wolfx::spawn(tx.clone(), sources.wolfx.clone()));
     tasks.extend(sources::p2pquake::spawn(tx.clone(), sources.p2pquake.clone()));
     tasks.extend(sources::fssn::spawn(tx.clone(), sources.fssn.clone()));
@@ -109,6 +111,12 @@ pub fn spawn_hub_with_assets(
         assets_stations,
     ));
     tasks.extend(sources::typhoon::spawn(tx.clone(), sources.typhoon.clone()));
+    tasks.extend(sources::weather::spawn(
+        tx.clone(),
+        sources.weather.clone(),
+        jian_cfg,
+    ));
+    tasks.extend(sources::cenc_int::spawn(tx.clone(), sources.cenc_int.clone()));
     NetHub { rx, tx, tasks }
 }
 
@@ -146,6 +154,9 @@ pub fn apply_event_filtered(
         NetEvent::StationClock { network, ts_ms } => snap.touch_station_clock(network, ts_ms),
         NetEvent::Tsunami(t) => snap.upsert_tsunami(t),
         NetEvent::Volcano(v) => snap.upsert_volcano(v),
+        NetEvent::Weather(w) => snap.upsert_weather(w),
+        NetEvent::CencInt(e) => snap.upsert_cenc_int(e),
+        NetEvent::CencIntList(list) => snap.merge_cenc_int_list(list),
         NetEvent::Typhoons(list) => snap.replace_typhoons(list),
         NetEvent::UserNotice(n) => snap.push_notice(n),
     }

@@ -70,7 +70,10 @@ impl Default for MapUiResult {
 }
 
 use egui::{Color32, Sense, Stroke, Ui};
-use starquake_core::{EewReport, EqRecord, StationSample, TsunamiInfo, TyphoonInfo, VolcanoNotice};
+use starquake_core::{
+    CencIntEvent, EewReport, EqRecord, StationSample, TsunamiInfo, TyphoonInfo, VolcanoNotice,
+    WeatherAlert,
+};
 use starquake_travel::TravelEngine;
 use marker_icons::MarkerIcons;
 use projection::ViewCtx;
@@ -420,6 +423,9 @@ impl MapViewport {
         records: &[EqRecord],
         volcanoes: &[VolcanoNotice],
         selected_volcano: Option<usize>,
+        weather: &[WeatherAlert],
+        selected_weather: Option<usize>,
+        cenc_int: Option<&CencIntEvent>,
         typhoons: &[TyphoonInfo],
         typhoon_forecast_agency: &str,
         home: Option<(f64, f64)>,
@@ -642,6 +648,10 @@ impl MapViewport {
             overlay::paint_records(ui, &view, records, selected_record, icons);
             if !flying {
                 overlay::paint_volcanoes(ui, &view, volcanoes, selected_volcano);
+                overlay::paint_weather_alerts(ui, &view, weather, selected_weather);
+                if let Some(ev) = cenc_int {
+                    overlay::paint_cenc_int_event(ui, &view, ev, icons);
+                }
                 if !typhoons.is_empty() {
                     let hover = resp.hover_pos();
                     typhoon_hover = overlay::paint_typhoons(

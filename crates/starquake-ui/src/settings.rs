@@ -232,11 +232,15 @@ pub struct SourceHealthView {
     pub p2p: HealthStatus,
     pub pancakes: HealthStatus,
     pub fssn: HealthStatus,
+    pub weather: HealthStatus,
+    pub cenc_int: HealthStatus,
     pub jian_enabled: bool,
     pub wolfx_enabled: bool,
     pub p2p_enabled: bool,
     pub pancakes_enabled: bool,
     pub fssn_enabled: bool,
+    pub weather_enabled: bool,
+    pub cenc_int_enabled: bool,
 }
 
 pub struct SettingsSession {
@@ -1263,6 +1267,10 @@ fn draw_sources(
         status_row(ui, "PancakesAPI", health.pancakes, health.pancakes_enabled);
         row_divider(ui);
         status_row(ui, "FSSN", health.fssn, health.fssn_enabled);
+        row_divider(ui);
+        status_row(ui, "气象预警", health.weather, health.weather_enabled);
+        row_divider(ui);
+        status_row(ui, "烈度速报", health.cenc_int, health.cenc_int_enabled);
     });
 
     section(ui, "Jian Project", "\u{25ce}", |ui| {
@@ -1446,6 +1454,30 @@ fn draw_sources(
                 );
             });
         }
+    });
+
+    section(ui, "气象预警", "\u{25ce}", |ui| {
+        control_row(
+            ui,
+            "启用气象预警",
+            "Jian /weather 中央台预警（需 at_/rt_）",
+            "\u{26a1}",
+            |ui| {
+                toggle(ui, &mut draft.sources.weather.enabled);
+            },
+        );
+    });
+
+    section(ui, "烈度速报", "\u{25ce}", |ui| {
+        control_row(
+            ui,
+            "启用烈度速报",
+            "NowQuake CENC 计测烈度（GET 冷启动 + WS）",
+            "\u{26a1}",
+            |ui| {
+                toggle(ui, &mut draft.sources.cenc_int.enabled);
+            },
+        );
     });
 
     section(ui, "实时测站", "\u{25ce}", |ui| {
@@ -1993,6 +2025,14 @@ fn draw_general(
         row_divider(ui);
         control_row(ui, "火山标注", "地图三角标与火山列表图标", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_volcanoes);
+        });
+        row_divider(ui);
+        control_row(ui, "气象标注", "地图上的中央台预警色点", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.ui.show_weather);
+        });
+        row_divider(ui);
+        control_row(ui, "烈度速报标注", "选中烈度事件时画震中与计测点", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.ui.show_cenc_int);
         });
         row_divider(ui);
         control_row(ui, "台风路径", "活跃台风路径、风圈与预报线", "\u{25ce}", |ui| {

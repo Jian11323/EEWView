@@ -322,10 +322,33 @@ impl MainShell {
                         None
                     }
                 });
+                let selected_weather = snap.selection.and_then(|s| {
+                    if s.tab == SidebarTab::Weather {
+                        Some(s.index)
+                    } else {
+                        None
+                    }
+                });
                 let volcanoes_for_map = if cfg.ui.show_volcanoes {
                     snap.volcanoes.as_slice()
                 } else {
                     &[]
+                };
+                let weather_for_map = if cfg.ui.show_weather {
+                    snap.weather.as_slice()
+                } else {
+                    &[]
+                };
+                let cenc_int_for_map = if cfg.ui.show_cenc_int {
+                    snap.selection.and_then(|s| {
+                        if s.tab == SidebarTab::CencInt {
+                            snap.cenc_int.get(s.index)
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    None
                 };
                 let show_typhoons_map =
                     cfg.ui.show_typhoons && cfg.sources.typhoon.enabled;
@@ -342,6 +365,9 @@ impl MainShell {
                     &snap.records,
                     volcanoes_for_map,
                     selected_volcano,
+                    weather_for_map,
+                    selected_weather,
+                    cenc_int_for_map,
                     if show_typhoons_map {
                         snap.typhoons.as_slice()
                     } else {
@@ -585,7 +611,9 @@ impl MainShell {
                                 self.map.fly_to_centered(lon, lat, Some(z), 0.4);
                                 self.map.mark_user_camera();
                             }
-                            SidebarTab::Volcano => {
+                            SidebarTab::Volcano
+                            | SidebarTab::Weather
+                            | SidebarTab::CencInt => {
                                 self.map.fly_to_centered(lon, lat, Some(zoom.max(9.0)), 0.85);
                                 self.map.mark_user_camera();
                             }
@@ -637,11 +665,15 @@ impl MainShell {
             p2p: snap.health_p2p,
             pancakes: snap.health_pancakes,
             fssn: snap.health_fssn,
+            weather: snap.health_weather,
+            cenc_int: snap.health_cenc_int,
             jian_enabled: cfg.sources.jian.enabled,
             wolfx_enabled: cfg.sources.wolfx.enabled,
             p2p_enabled: cfg.sources.p2pquake.enabled,
             pancakes_enabled: cfg.sources.pancakes.enabled,
             fssn_enabled: cfg.sources.fssn.enabled,
+            weather_enabled: cfg.sources.weather.enabled,
+            cenc_int_enabled: cfg.sources.cenc_int.enabled,
         };
         self.draw_user_notice(ctx);
         let settings_action = self.settings.ui(ctx, cfg, &health);
@@ -2282,6 +2314,85 @@ fn draw_sidebar(
                                     }
                                 }
                             }
+                            SidebarTab::Weather => {
+                                if snap.weather.is_empty() {
+                                    empty_hint(
+                                        ui,
+                                        p,
+                                        crate::i18n::t("暂无气象预警"),
+                                        crate::i18n::t("启用气象源并登录 Jian 令牌后，中央台预警会出现在此列表。"),
+                                    );
+                                }
+                                for (i, w) in snap.weather.iter().enumerate() {
+                                    let selected = sel
+                                        == Some(ListSelection {
+                                            tab: SidebarTab::Weather,
+                                            index: i,
+                                        });
+                                    let sub = match (
+                                        w.origin_time.is_empty(),
+                                        w.headline.is_empty(),
+                                    ) {
+                                        (false, false) => {
+                                            format!("{} · {}", w.origin_time, w.headline)
+                                        }
+                                        (false, true) => w.origin_time.clone(),
+                                        (true, false) => w.headline.clone(),
+                                        (true, true) => String::new(),
+                                    };
+                                    if simple_list_row(
+                                        ui,
+                                        p,
+                                        &w.title,
+                                        &sub,
+                                        selected,
+                                        egui::Id::new(("wx", i)),
+                                    ) {
+                                        clicked = Some(SideAction::List(SidebarTab::Weather, i));
+                                    }
+                                }
+                            }
+                            SidebarTab::CencInt => {
+                                if snap.cenc_int.is_empty() {
+                                    empty_hint(
+                                        ui,
+                                        p,
+                                        crate::i18n::t("暂无烈度速报"),
+                                        crate::i18n::t("启用烈度速报源后，CENC 计测烈度事件会出现在此列表。"),
+                                    );
+                                }
+                                for (i, e) in snap.cenc_int.iter().enumerate() {
+                                    let selected = sel
+                                        == Some(ListSelection {
+                                            tab: SidebarTab::CencInt,
+                                            index: i,
+                                        });
+                                    let roman = e.max_intensity_roman();
+                                    let title = if roman.is_empty() {
+                                        format!("{}  M{:.1}", e.hypocenter, e.magnitude)
+                                    } else {
+                                        format!(
+                                            "{}  M{:.1}  {}",
+                                            e.hypocenter, e.magnitude, roman
+                                        )
+                                    };
+                                    let sub = if e.happen_time.is_empty() {
+                                        e.update_time.as_str()
+                                    } else {
+                                        e.happen_time.as_str()
+                                    };
+                                    if simple_list_row(
+                                        ui,
+                                        p,
+                                        &title,
+                                        sub,
+                                        selected,
+                                        egui::Id::new(("cint", i)),
+                                    ) {
+                                        clicked = Some(SideAction::List(SidebarTab::CencInt, i));
+                                    }
+                                }
+                            }
                         }
                     });
             }
@@ -2310,6 +2421,8 @@ fn draw_side_tabs(ui: &mut Ui, p: &ThemePalette, cur: &mut SidebarTab) {
             (SidebarTab::Eew, crate::i18n::t("预警")),
             (SidebarTab::Station, crate::i18n::t("测站")),
             (SidebarTab::Volcano, crate::i18n::t("火山")),
+            (SidebarTab::Weather, crate::i18n::t("气象")),
+            (SidebarTab::CencInt, crate::i18n::t("烈度")),
         ] {
             let selected = *cur == tab;
             let text = if selected {
@@ -2363,6 +2476,46 @@ fn volcano_list_headline(name: &str, title: &str) -> String {
     } else {
         format!("{name}\u{3000}{title}")
     }
+}
+
+fn simple_list_row(
+    ui: &mut Ui,
+    p: &ThemePalette,
+    title: &str,
+    sub: &str,
+    selected: bool,
+    id: egui::Id,
+) -> bool {
+    let mut clicked = false;
+    let bg = if selected {
+        p.row_selected
+    } else {
+        Color32::TRANSPARENT
+    };
+    Frame::NONE
+        .fill(bg)
+        .inner_margin(Margin::symmetric(10, 8))
+        .corner_radius(8.0)
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.vertical(|ui| {
+                ui.label(RichText::new(title).strong().size(13.5).color(p.text));
+                if !sub.is_empty() {
+                    ui.add_space(2.0);
+                    ui.label(RichText::new(sub).size(12.0).color(p.text_dim));
+                }
+            });
+            let resp = ui.interact(
+                ui.min_rect(),
+                id,
+                egui::Sense::click(),
+            );
+            if resp.clicked() {
+                clicked = true;
+            }
+        });
+    ui.add_space(2.0);
+    clicked
 }
 
 fn volcano_list_row(

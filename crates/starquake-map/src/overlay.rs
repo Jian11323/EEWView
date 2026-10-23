@@ -6,7 +6,10 @@ use crate::projection::{self, ViewCtx};
 use egui::epaint::{Mesh, Vertex};
 use egui::{Color32, Pos2, Rect, Stroke, TextureHandle, Ui, Vec2};
 use starquake_core::palette::color_for;
-use starquake_core::{EewReport, EqRecord, StationSample, VolcanoNotice};
+use starquake_core::{
+    cn_intensity_round, CencIntEvent, EewReport, EqRecord, StationSample, VolcanoNotice,
+    WeatherAlert,
+};
 use starquake_travel::{max_s_wave_spread_km, TravelEngine, Wave};
 use std::sync::Once;
 
@@ -307,6 +310,8 @@ pub fn paint_stations(
     let painter = ui.painter_at(rect);
     let pad = 16.0_f32;
     let _ = eew_active;
+    // Qt MapQuickItem 的 width 按屏像素量；egui 用点，须 / ppp 才与 eewcn 观感一致
+    let ppp = ui.ctx().pixels_per_point().max(1.0);
     // 低缩放用地理网格抽稀；放宽格距与上限，避免缩小时大片消失
     let (grid_deg, quiet_cap) = match quality {
         crate::PaintQuality::Eco => {
@@ -339,7 +344,7 @@ pub fn paint_stations(
         }
     };
 
-    let data_fp = station_quiet_fp(stations, selected_id, quality, view, grid_deg, quiet_cap);
+    let data_fp = station_quiet_fp(stations, selected_id, quality, view, grid_deg, quiet_cap, ppp);
     let flat = !view.mode.is_globe();
     let can_shift = flat
         && cache.mesh.is_some()
@@ -390,6 +395,7 @@ pub fn paint_stations(
             grid_deg,
             quiet_cap,
             pad,
+            ppp,
         );
         painter.add(egui::Shape::Mesh(mesh.clone()));
         cache.data_fp = data_fp;
@@ -437,7 +443,7 @@ pub fn paint_stations(
                 }
                 quiet_drawn += 1;
             }
-            paint_station_dot(&painter, view, icons, s, p, selected, true);
+            paint_station_dot(&painter, view, icons, s, p, selected, true, ppp);
         }
     }
 
@@ -453,7 +459,7 @@ pub fn paint_stations(
         {
             continue;
         }
-        paint_station_dot(&painter, view, icons, s, p, true, true);
+        paint_station_dot(&painter, view, icons, s, p, true, true, ppp);
     }
 
     felt_idx.sort_by(|&a, &b| {
@@ -480,7 +486,7 @@ pub fn paint_stations(
             continue;
         }
         let selected = selected_id == Some(s.id.as_str());
-        paint_station_dot(&painter, view, icons, s, p, selected, false);
+        paint_station_dot(&painter, view, icons, s, p, selected, false, ppp);
     }
 }
 
@@ -491,6 +497,7 @@ fn station_quiet_fp(
     view: &ViewCtx,
     grid_deg: f64,
     quiet_cap: usize,
+    ppp: f32,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -502,6 +509,7 @@ fn station_quiet_fp(
     grid_deg.to_bits().hash(&mut h);
     quiet_cap.hash(&mut h);
     selected_id.hash(&mut h);
+    ((ppp * 100.0).round() as i32).hash(&mut h);
     std::mem::discriminant(&view.mode).hash(&mut h);
     for s in stations {
         s.id.hash(&mut h);
@@ -533,6 +541,7 @@ fn build_quiet_station_mesh(
     grid_deg: f64,
     quiet_cap: usize,
     pad: f32,
+    ppp: f32,
 ) -> std::sync::Arc<Mesh> {
     let rect = view.rect;
     let mut mesh = Mesh::default();
@@ -581,26 +590,34 @@ fn build_quiet_station_mesh(
             }
         };
         let fill = Color32::from_rgb(rgb.r, rgb.g, rgb.b);
-        append_filled_circle(&mut mesh, p, station_dot_radius(view.zoom, false), fill);
+        append_filled_circle(&mut mesh, p, station_dot_radius(view.zoom, false, ppp), fill);
     }
     std::sync::Arc::new(mesh)
 }
 
-/// 测站点半径随地图缩放（对齐 eewcn `5+max(0,zoom-8)*5` 思路，适配本仓库 zoom 档）
-fn station_dot_radius(zoom: f64, selected: bool) -> f32 {
-    let base = (2.2 + (zoom - 4.5).max(0.0) * 1.35).clamp(2.0, 10.0) as f32;
+/// eewcn 公式 `5+max(0,zoom-8)*5` 为参考；egui 实心圆+抗锯齿观感偏大，再乘缩放并 `/ppp`。
+fn station_dot_diameter_pts(zoom: f64, ppp: f32) -> f32 {
+    const VISUAL_SCALE: f64 = 0.45;
+    let px = (5.0 + (zoom - 8.0).max(0.0) * 5.0) * VISUAL_SCALE;
+    let ppp = f64::from(ppp).max(1.0);
+    (px / ppp).clamp(1.2, 14.0) as f32
+}
+
+fn station_dot_radius(zoom: f64, selected: bool, ppp: f32) -> f32 {
+    let r = station_dot_diameter_pts(zoom, ppp) * 0.5;
     if selected {
-        base + 2.5
+        r + 1.0 / ppp.max(1.0)
     } else {
-        base
+        r
     }
 }
 
-fn station_icon_size(zoom: f64, base: f32, selected: bool) -> f32 {
-    let scale = (1.0 + (zoom - 5.0).max(0.0) * 0.12).clamp(1.0, 2.2) as f32;
-    let s = base * scale;
+/// 有感震度/烈度图标边长：相对 eewcn 点径放大。
+fn station_icon_size(zoom: f64, base: f32, selected: bool, ppp: f32) -> f32 {
+    let diam = station_dot_diameter_pts(zoom, ppp);
+    let s = diam * (base / 5.0).clamp(1.8, 4.0);
     if selected {
-        s + 4.0
+        s + 4.0 / ppp.max(1.0)
     } else {
         s
     }
@@ -637,6 +654,7 @@ fn paint_station_dot(
     p: Pos2,
     selected: bool,
     quiet: bool,
+    ppp: f32,
 ) {
     let jma_lv = if s.intensity_kind == starquake_core::IntensityKind::JmaShindo {
         if s.intensity_level >= 1 {
@@ -658,7 +676,7 @@ fn paint_station_dot(
                 5 | 6 => 18.0,
                 _ => 20.0,
             };
-            let size = station_icon_size(view.zoom, base, selected);
+            let size = station_icon_size(view.zoom, base, selected, ppp);
             paint_tex(
                 painter,
                 view,
@@ -694,7 +712,7 @@ fn paint_station_dot(
                 7..=9 => 18.0,
                 _ => 20.0,
             };
-            let size = station_icon_size(view.zoom, base, selected);
+            let size = station_icon_size(view.zoom, base, selected, ppp);
             paint_tex(
                 painter,
                 view,
@@ -735,22 +753,17 @@ fn paint_station_dot(
         }
     };
     let fill = Color32::from_rgb(rgb.r, rgb.g, rgb.b);
-    let base_r = if s.intensity_kind == starquake_core::IntensityKind::CnIntensity && felt {
-        match s.intensity_level {
-            1..=3 => 3.6,
-            4..=6 => 4.4,
-            _ => 5.2,
-        }
-    } else if quiet {
-        station_dot_radius(view.zoom, false)
-    } else {
-        station_dot_radius(view.zoom, false) + 1.0
-    };
-    let r = if selected {
-        base_r.max(station_dot_radius(view.zoom, true))
-    } else {
-        base_r
-    };
+    // 静默点：eewcn 屏像素换算；有感色点略放大
+    let mut r = station_dot_radius(view.zoom, selected, ppp);
+    if felt && !quiet {
+        let bump_px = match s.intensity_level {
+            0 => 0.0,
+            1..=3 => 1.0,
+            4..=6 => 2.0,
+            _ => 3.0,
+        };
+        r += bump_px / ppp.max(1.0);
+    }
     painter.circle_filled(p, r, fill);
     if selected {
         painter.circle_stroke(p, r, Stroke::new(1.5_f32, Color32::WHITE));
@@ -765,6 +778,121 @@ fn paint_station_dot(
 }
 
 
+
+/// 气象预警：有经纬时画色点（等级色取自图标码末三位）。
+pub fn paint_weather_alerts(
+    ui: &mut Ui,
+    view: &ViewCtx,
+    alerts: &[WeatherAlert],
+    selected_idx: Option<usize>,
+) {
+    if alerts.is_empty() {
+        return;
+    }
+    let rect = view.rect;
+    let painter = ui.painter_at(rect);
+    let pad = 20.0_f32;
+    for (i, a) in alerts.iter().enumerate() {
+        let (Some(lon), Some(lat)) = (a.longitude, a.latitude) else {
+            continue;
+        };
+        if lon.abs() <= 0.01 && lat.abs() <= 0.01 {
+            continue;
+        }
+        let Some(p) = view.project(lon, lat) else {
+            continue;
+        };
+        if p.x < rect.left() - pad
+            || p.x > rect.right() + pad
+            || p.y < rect.top() - pad
+            || p.y > rect.bottom() + pad
+        {
+            continue;
+        }
+        let selected = selected_idx == Some(i);
+        let fill = weather_level_color(&a.icon_type);
+        let r = if selected { 7.0_f32 } else { 5.0_f32 };
+        painter.circle_filled(p, r, fill);
+        painter.circle_stroke(
+            p,
+            r,
+            Stroke::new(if selected { 2.0_f32 } else { 1.0_f32 }, Color32::WHITE),
+        );
+        if selected && !a.title.is_empty() {
+            painter.text(
+                p + Vec2::new(8.0, -10.0),
+                egui::Align2::LEFT_BOTTOM,
+                &a.title,
+                egui::FontId::proportional(12.0),
+                Color32::WHITE,
+            );
+        }
+    }
+}
+
+fn weather_level_color(icon_type: &str) -> Color32 {
+    // p00TTLLL：末三位 001红 / 002橙 / 003黄 / 004蓝
+    let digits: String = icon_type
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect();
+    let code = if digits.len() >= 3 {
+        &digits[digits.len() - 3..]
+    } else {
+        ""
+    };
+    match code {
+        "001" => Color32::from_rgb(0xE6, 0x00, 0x12),
+        "002" => Color32::from_rgb(0xFA, 0x8C, 0x16),
+        "003" => Color32::from_rgb(0xFA, 0xDB, 0x14),
+        "004" => Color32::from_rgb(0x18, 0x90, 0xFF),
+        _ => Color32::from_rgb(0x8C, 0x8C, 0x8C),
+    }
+}
+
+/// 烈度速报：震中 + 计测台站点（仅传入当前选中事件）。
+pub fn paint_cenc_int_event(ui: &mut Ui, view: &ViewCtx, event: &CencIntEvent, icons: Option<&MarkerIcons>) {
+    let rect = view.rect;
+    let painter = ui.painter_at(rect);
+    let pad = 20.0_f32;
+    if let Some(epi) = view.project(event.longitude, event.latitude) {
+        if epi.x >= rect.left() - pad
+            && epi.x <= rect.right() + pad
+            && epi.y >= rect.top() - pad
+            && epi.y <= rect.bottom() + pad
+        {
+            if let Some(tex) = icons.and_then(|i| i.cross()) {
+                let size = 22.0_f32;
+                let r = Rect::from_center_size(epi, Vec2::splat(size));
+                painter.image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            } else {
+                painter.circle_filled(epi, 5.0, MARKER_RED);
+                painter.circle_stroke(epi, 5.0, Stroke::new(1.5_f32, Color32::WHITE));
+            }
+        }
+    }
+    for s in &event.stations {
+        let Some(p) = view.project(s.longitude, s.latitude) else {
+            continue;
+        };
+        if p.x < rect.left() - pad
+            || p.x > rect.right() + pad
+            || p.y < rect.top() - pad
+            || p.y > rect.bottom() + pad
+        {
+            continue;
+        }
+        let level = s.intensity.map(cn_intensity_round).unwrap_or(0);
+        let rgb = if level >= 1 {
+            starquake_core::palette::cn_intensity_rgb(level)
+        } else {
+            starquake_core::palette::Rgb::new(0x88, 0x88, 0x88)
+        };
+        let fill = Color32::from_rgb(rgb.r, rgb.g, rgb.b);
+        let r = 3.2_f32;
+        painter.circle_filled(p, r, fill);
+    }
+}
 
 /// 火山：按经纬度画实心三角 ▲
 pub fn paint_volcanoes(

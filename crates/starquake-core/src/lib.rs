@@ -541,6 +541,104 @@ pub struct VolcanoNotice {
     pub longitude: f64,
 }
 
+/// 中央台气象预警（Jian `/weather`）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeatherAlert {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub headline: String,
+    /// 生效/发布时间原文（UTC+8）
+    pub origin_time: String,
+    #[serde(default)]
+    pub relieve_time: Option<String>,
+    #[serde(default)]
+    pub province: String,
+    #[serde(default)]
+    pub city: String,
+    #[serde(default)]
+    pub district: String,
+    #[serde(default)]
+    pub adcode: Option<String>,
+    /// 区域中心；上游无坐标时省略（用 Option 语义：NaN 表示无）
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    #[serde(default)]
+    pub longitude: Option<f64>,
+    /// 中央台图标码 p00…
+    #[serde(default)]
+    pub icon_type: String,
+    #[serde(default)]
+    pub description: String,
+    /// 排序用：解析 origin_time 失败则为 0
+    #[serde(default)]
+    pub origin_ms: i64,
+}
+
+/// CENC 烈度速报计测台站（NowQuake）；经纬仅供投影，UI 不展示明文坐标。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CencIntStation {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub place: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    /// 计测烈度（仪器）
+    #[serde(default)]
+    pub intensity: Option<f64>,
+    #[serde(default)]
+    pub forecast_int: Option<f64>,
+    #[serde(default)]
+    pub pga: Option<f64>,
+    #[serde(default)]
+    pub pgv: Option<f64>,
+}
+
+/// CENC 烈度速报事件（NowQuake）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CencIntEvent {
+    pub eq_id: String,
+    pub happen_time: String,
+    #[serde(default)]
+    pub update_time: String,
+    #[serde(default)]
+    pub hypocenter: String,
+    pub magnitude: f64,
+    #[serde(default)]
+    pub depth_km: Option<f64>,
+    pub latitude: f64,
+    pub longitude: f64,
+    #[serde(default)]
+    pub max_intensity: Option<f64>,
+    #[serde(default)]
+    pub max_forecast_intensity: Option<f64>,
+    #[serde(default)]
+    pub info: String,
+    #[serde(default)]
+    pub stations: Vec<CencIntStation>,
+    /// 发震毫秒（UTC+8 墙钟解析）
+    #[serde(default)]
+    pub happen_ms: i64,
+}
+
+impl CencIntEvent {
+    /// 最大计测烈度罗马数字文案（四舍五入）。
+    pub fn max_intensity_roman(&self) -> String {
+        self.max_intensity
+            .map(|v| cn_intensity_text(cn_intensity_round(v)).to_string())
+            .unwrap_or_default()
+    }
+}
+
+/// 仪器烈度 → CSIS 档位（四舍五入，1–12）。
+pub fn cn_intensity_round(v: f64) -> u8 {
+    if !v.is_finite() || v <= 0.0 {
+        return 0;
+    }
+    ((v + 0.5).floor() as u8).clamp(1, 12)
+}
+
 impl StationSample {
     /// 测站选中时的 Header 展示（无震级/深度波圈语义）
     pub fn as_header_report(&self) -> EewReport {
@@ -594,6 +692,10 @@ pub enum SidebarTab {
     Station,
     /// JMA 火山情报（与地震速报分离）
     Volcano,
+    /// 中央台气象预警
+    Weather,
+    /// CENC 烈度速报（NowQuake）
+    CencInt,
 }
 
 /// 列表选中项（驱动高亮 + 地图居中）
@@ -628,6 +730,8 @@ pub struct AppSnapshot {
     pub health_p2p: HealthStatus,
     pub health_pancakes: HealthStatus,
     pub health_fssn: HealthStatus,
+    pub health_weather: HealthStatus,
+    pub health_cenc_int: HealthStatus,
     pub tab: SidebarTab,
     pub selection: Option<ListSelection>,
     /// 图例 P-S：是否绘制走时波圈
@@ -636,6 +740,10 @@ pub struct AppSnapshot {
     pub tsunami: Option<TsunamiInfo>,
     /// JMA 火山情报（与 records 分离）
     pub volcanoes: Vec<VolcanoNotice>,
+    /// 中央台气象预警
+    pub weather: Vec<WeatherAlert>,
+    /// CENC 烈度速报
+    pub cenc_int: Vec<CencIntEvent>,
     /// 活跃台风（路径 / 风圈 / 预报）
     pub typhoons: Vec<TyphoonInfo>,
     /// 待弹窗用户提示（鉴权 / 超限 / 封禁）；主循环 take
@@ -832,6 +940,8 @@ impl AppSnapshot {
             health_p2p: HealthStatus::Fluctuating,
             health_pancakes: HealthStatus::Abnormal,
             health_fssn: HealthStatus::Abnormal,
+            health_weather: HealthStatus::Normal,
+            health_cenc_int: HealthStatus::Normal,
             tab: SidebarTab::Eew,
             selection: Some(ListSelection {
                 tab: SidebarTab::Eew,
@@ -840,6 +950,8 @@ impl AppSnapshot {
             show_wave_rings: true,
             tsunami: None,
             volcanoes: Vec::new(),
+            weather: Vec::new(),
+            cenc_int: Vec::new(),
             typhoons: Vec::new(),
             pending_notices: Vec::new(),
             typhoon_fingerprint: String::new(),
@@ -899,6 +1011,29 @@ impl AppSnapshot {
                     Some((lon, lat, 8.0))
                 }
             }
+            SidebarTab::Weather => {
+                let w = self.weather.get(index)?;
+                self.active = None;
+                self.overlay_mode = OverlayMode::MarkerOnly;
+                match (w.longitude, w.latitude) {
+                    (Some(lon), Some(lat)) if lon.abs() > 0.01 || lat.abs() > 0.01 => {
+                        Some((lon, lat, 7.5))
+                    }
+                    _ => None,
+                }
+            }
+            SidebarTab::CencInt => {
+                let e = self.cenc_int.get(index)?;
+                let lon = e.longitude;
+                let lat = e.latitude;
+                self.active = None;
+                self.overlay_mode = OverlayMode::MarkerOnly;
+                if lat.abs() <= 0.01 && lon.abs() <= 0.01 {
+                    None
+                } else {
+                    Some((lon, lat, 7.5))
+                }
+            }
         }
     }
 
@@ -919,11 +1054,15 @@ impl AppSnapshot {
             health_p2p: HealthStatus::Abnormal,
             health_pancakes: HealthStatus::Abnormal,
             health_fssn: HealthStatus::Abnormal,
+            health_weather: HealthStatus::Abnormal,
+            health_cenc_int: HealthStatus::Abnormal,
             tab: SidebarTab::Eew,
             selection: None,
             show_wave_rings: true,
             tsunami: None,
             volcanoes: Vec::new(),
+            weather: Vec::new(),
+            cenc_int: Vec::new(),
             typhoons: Vec::new(),
             pending_notices: Vec::new(),
             typhoon_fingerprint: String::new(),
@@ -1044,6 +1183,8 @@ impl AppSnapshot {
             "p2pquake" | "p2p" => self.health_p2p = status,
             "pancakes" => self.health_pancakes = status,
             "fssn" => self.health_fssn = status,
+            "weather" => self.health_weather = status,
+            "cenc_int" | "cenc-int" => self.health_cenc_int = status,
             _ => {}
         }
     }
@@ -1239,6 +1380,56 @@ impl AppSnapshot {
         self.volcanoes.sort_by(|a, b| b.issued_ms.cmp(&a.issued_ms));
         if self.volcanoes.len() > 40 {
             self.volcanoes.truncate(40);
+        }
+    }
+
+    /// 插入/更新气象预警（按 id）；新→旧，上限 100。
+    pub fn upsert_weather(&mut self, alert: WeatherAlert) {
+        if let Some(i) = self.weather.iter().position(|w| w.id == alert.id) {
+            self.weather[i] = alert;
+        } else {
+            self.weather.push(alert);
+        }
+        self.weather.sort_by(|a, b| b.origin_ms.cmp(&a.origin_ms));
+        if self.weather.len() > 100 {
+            self.weather.truncate(100);
+        }
+    }
+
+    /// 整表替换气象预警（冷启动少见；一般用 upsert）。
+    pub fn replace_weather(&mut self, list: Vec<WeatherAlert>) {
+        self.weather = list;
+        self.weather.sort_by(|a, b| b.origin_ms.cmp(&a.origin_ms));
+        if self.weather.len() > 100 {
+            self.weather.truncate(100);
+        }
+    }
+
+    /// 插入/更新烈度速报（按 eq_id）；有 stations 的覆盖无 stations 的；新→旧，上限 50。
+    pub fn upsert_cenc_int(&mut self, event: CencIntEvent) {
+        if let Some(i) = self.cenc_int.iter().position(|e| e.eq_id == event.eq_id) {
+            let old = &self.cenc_int[i];
+            // 新包无测站且旧包有测站：保留测站，只刷新摘要字段
+            if event.stations.is_empty() && !old.stations.is_empty() {
+                let mut merged = event;
+                merged.stations = old.stations.clone();
+                self.cenc_int[i] = merged;
+            } else {
+                self.cenc_int[i] = event;
+            }
+        } else {
+            self.cenc_int.push(event);
+        }
+        self.cenc_int.sort_by(|a, b| b.happen_ms.cmp(&a.happen_ms));
+        if self.cenc_int.len() > 50 {
+            self.cenc_int.truncate(50);
+        }
+    }
+
+    /// 冷启动列表批量写入（不覆盖已有 stations）。
+    pub fn merge_cenc_int_list(&mut self, list: Vec<CencIntEvent>) {
+        for e in list {
+            self.upsert_cenc_int(e);
         }
     }
 

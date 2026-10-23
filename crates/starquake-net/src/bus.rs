@@ -1,8 +1,8 @@
 //! 网络事件总线（tokio mpsc）。
 
 use starquake_core::{
-    EewReport, EqRecord, HealthStatus, StationSample, TsunamiInfo, TyphoonInfo, UserNotice,
-    VolcanoNotice,
+    CencIntEvent, EewReport, EqRecord, HealthStatus, StationSample, TsunamiInfo, TyphoonInfo,
+    UserNotice, VolcanoNotice, WeatherAlert,
 };
 use tokio::sync::mpsc;
 
@@ -29,6 +29,12 @@ pub enum NetEvent {
     Tsunami(TsunamiInfo),
     /// JMA 火山情报（与地震速报分离）
     Volcano(VolcanoNotice),
+    /// 中央台气象预警
+    Weather(WeatherAlert),
+    /// CENC 烈度速报（单条，含测站时覆盖）
+    CencInt(CencIntEvent),
+    /// CENC 烈度速报冷启动列表
+    CencIntList(Vec<CencIntEvent>),
     /// 活跃台风快照（整表替换）
     Typhoons(Vec<TyphoonInfo>),
     /// 需弹窗提醒用户（鉴权 / 超限 / 封禁）

@@ -220,6 +220,16 @@ enabled = true
 url = "https://api.sismotide.top/get/typhoon.json"
 poll_secs = 15
 
+[sources.weather]
+enabled = true
+ws_url = "wss://api.sismotide.top/weather"
+
+[sources.cenc_int]
+enabled = true
+http_base = "https://api-cencint-public.nowquake.cn"
+ws_url = "wss://api-cencint-public.nowquake.cn/websocket"
+list_page_size = 20
+
 [update]
 # 启动后拉取 update/manifest.json（raw / jsDelivr）检查新版本
 check_on_startup = true

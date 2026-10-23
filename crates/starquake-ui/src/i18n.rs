@@ -774,9 +774,63 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "火山"), "火山");
         m.insert((Lang::Ja, "火山"), "火山");
         m.insert((Lang::En, "火山"), "Volcano");
+        m.insert((Lang::ZhTw, "气象"), "氣象");
+        m.insert((Lang::Ja, "气象"), "気象");
+        m.insert((Lang::En, "气象"), "Weather");
+        m.insert((Lang::ZhTw, "烈度"), "烈度");
+        m.insert((Lang::Ja, "烈度"), "震度速報");
+        m.insert((Lang::En, "烈度"), "Intensity");
+        m.insert((Lang::ZhTw, "暂无气象预警"), "暫無氣象預警");
+        m.insert((Lang::Ja, "暂无气象预警"), "気象警報なし");
+        m.insert((Lang::En, "暂无气象预警"), "No weather alerts");
+        m.insert(
+            (Lang::ZhTw, "启用气象源并登录 Jian 令牌后，中央台预警会出现在此列表。"),
+            "啟用氣象源並登入 Jian 令牌後，中央台預警會出現在此列表。",
+        );
+        m.insert(
+            (Lang::Ja, "启用气象源并登录 Jian 令牌后，中央台预警会出现在此列表。"),
+            "気象源を有効にし Jian トークンで接続すると、中央気象台の警報がここに表示されます。",
+        );
+        m.insert(
+            (Lang::En, "启用气象源并登录 Jian 令牌后，中央台预警会出现在此列表。"),
+            "Enable the weather source and sign in with a Jian token to list CMA alerts here.",
+        );
+        m.insert((Lang::ZhTw, "暂无烈度速报"), "暫無烈度速報");
+        m.insert((Lang::Ja, "暂无烈度速报"), "震度速報なし");
+        m.insert((Lang::En, "暂无烈度速报"), "No intensity reports");
+        m.insert(
+            (Lang::ZhTw, "启用烈度速报源后，CENC 计测烈度事件会出现在此列表。"),
+            "啟用烈度速報源後，CENC 計測烈度事件會出現在此列表。",
+        );
+        m.insert(
+            (Lang::Ja, "启用烈度速报源后，CENC 计测烈度事件会出现在此列表。"),
+            "烈度速報ソースを有効にすると、CENC の計測震度イベントがここに表示されます。",
+        );
+        m.insert(
+            (Lang::En, "启用烈度速报源后，CENC 计测烈度事件会出现在此列表。"),
+            "Enable the intensity-report source to list CENC instrumental intensity events here.",
+        );
         m.insert((Lang::ZhTw, "火山标注"), "火山標註");
         m.insert((Lang::Ja, "火山标注"), "火山表示");
         m.insert((Lang::En, "火山标注"), "Volcano markers");
+        m.insert((Lang::ZhTw, "气象标注"), "氣象標註");
+        m.insert((Lang::Ja, "气象标注"), "気象表示");
+        m.insert((Lang::En, "气象标注"), "Weather markers");
+        m.insert((Lang::ZhTw, "烈度速报标注"), "烈度速報標註");
+        m.insert((Lang::Ja, "烈度速报标注"), "震度速報表示");
+        m.insert((Lang::En, "烈度速报标注"), "Intensity-report markers");
+        m.insert((Lang::ZhTw, "启用气象预警"), "啟用氣象預警");
+        m.insert((Lang::Ja, "启用气象预警"), "気象警報を有効化");
+        m.insert((Lang::En, "启用气象预警"), "Enable weather alerts");
+        m.insert((Lang::ZhTw, "启用烈度速报"), "啟用烈度速報");
+        m.insert((Lang::Ja, "启用烈度速报"), "震度速報を有効化");
+        m.insert((Lang::En, "启用烈度速报"), "Enable intensity reports");
+        m.insert((Lang::ZhTw, "气象预警"), "氣象預警");
+        m.insert((Lang::Ja, "气象预警"), "気象警報");
+        m.insert((Lang::En, "气象预警"), "Weather alerts");
+        m.insert((Lang::ZhTw, "烈度速报"), "烈度速報");
+        m.insert((Lang::Ja, "烈度速报"), "震度速報");
+        m.insert((Lang::En, "烈度速报"), "Intensity reports");
         m.insert((Lang::ZhTw, "火山活动情报"), "火山活動情報");
         m.insert((Lang::Ja, "火山活动情报"), "火山活動情報");
         m.insert((Lang::En, "火山活动情报"), "Volcano activity notices");
