@@ -6,6 +6,7 @@ mod intensity_icons;
 mod settings;
 mod splash;
 mod theme;
+mod weather_icons;
 
 pub use brand::{app_icon_data, logo_texture, APP_DISPLAY_NAME};
 pub use i18n::{set_lang_from_config, Lang};
@@ -19,8 +20,9 @@ use starquake_core::{
     agency_bracket, dedupe_same_eew_events, eew_sidebar_entries, eew_sidebar_group_key,
     eew_wave_active_spread, format_hm_minutes, is_wave_candidate, max_s_spread_km, place_with_agency,
     prefer_intensity_scale, same_eew_event, sunrise_sunset_local_hm, AppSnapshot, EewReport,
-    IntensityKind, ListSelection, OverlayMode, SidebarTab, UserNotice,
+    IntensityKind, ListSelection, OverlayMode, SidebarTab, UserNotice, WeatherAlert,
 };
+use weather_icons::{weather_level_color, WeatherIconCache};
 use starquake_core::palette::{cn_intensity_rgb, instrumental_band_rgb};
 use starquake_map::{
     zoom_to_fit_radius_km, BasemapLoadState, BasemapMode, MapUiResult, MapViewport,
@@ -99,6 +101,7 @@ pub struct MainShell {
     pub intensity_scale: String,
     pub settings: SettingsSession,
     intensity_icons: IntensityIcons,
+    weather_icons: WeatherIconCache,
     /// 待确认的服务器提示
     notices: Vec<UserNotice>,
     /// 同类提示冷却，避免重连刷屏
@@ -119,6 +122,7 @@ impl Default for MainShell {
             intensity_scale: "auto".into(),
             settings: SettingsSession::default(),
             intensity_icons: IntensityIcons::default(),
+            weather_icons: WeatherIconCache::default(),
             notices: Vec::new(),
             notice_seen: HashMap::new(),
         }
@@ -215,8 +219,8 @@ impl MainShell {
         // SidePanel：可拖宽；向右拖窄过阈值即关闭；关闭后右缘拉开
         let screen_w = ctx.screen_rect().width();
         const MAP_MIN_W: f32 = 360.0;
-        const SIDE_IDEAL: f32 = 280.0;
-        const SIDE_MIN: f32 = 168.0;
+        const SIDE_IDEAL: f32 = 268.0;
+        const SIDE_MIN: f32 = 176.0;
         /// 允许拖到比内容更窄，便于继续向右拖到关闭
         const SIDE_DRAG_MIN: f32 = 40.0;
         /// 目标宽度（或指针意图宽度）低于此则关闭
@@ -226,7 +230,7 @@ impl MainShell {
             (screen_w * 0.36).clamp(140.0, SIDE_MIN)
         } else {
             let cap = (screen_w - MAP_MIN_W).min(SIDE_IDEAL);
-            cap.min(screen_w * 0.28).max(SIDE_MIN)
+            cap.min(screen_w * 0.27).max(SIDE_MIN)
         };
         let mut side_action = None;
         let show_sidebar = cfg.ui.show_sidebar;
@@ -236,7 +240,7 @@ impl MainShell {
             let panel_resp = egui::SidePanel::right(sidebar_id)
                 .default_width(sidebar_w)
                 .min_width(SIDE_DRAG_MIN)
-                .max_width((screen_w - MAP_MIN_W).clamp(SIDE_MIN, SIDE_IDEAL + 80.0))
+                .max_width((screen_w - MAP_MIN_W).clamp(SIDE_MIN, SIDE_IDEAL + 72.0))
                 .resizable(true)
                 .frame(Frame::NONE.fill(p.sidebar_bg))
                 .show(ctx, |ui| {
@@ -246,6 +250,7 @@ impl MainShell {
                         snap,
                         scale.as_str(),
                         &self.intensity_icons,
+                        &mut self.weather_icons,
                         cfg.ui.show_volcanoes,
                         [
                             cfg.sources.jian.enabled,
@@ -339,17 +344,6 @@ impl MainShell {
                 } else {
                     &[]
                 };
-                let cenc_int_for_map = if cfg.ui.show_cenc_int {
-                    snap.selection.and_then(|s| {
-                        if s.tab == SidebarTab::CencInt {
-                            snap.cenc_int.get(s.index)
-                        } else {
-                            None
-                        }
-                    })
-                } else {
-                    None
-                };
                 let show_typhoons_map =
                     cfg.ui.show_typhoons && cfg.sources.typhoon.enabled;
                 self.map.set_show_terminator(cfg.ui.show_terminator);
@@ -367,7 +361,7 @@ impl MainShell {
                     selected_volcano,
                     weather_for_map,
                     selected_weather,
-                    cenc_int_for_map,
+                    None,
                     if show_typhoons_map {
                         snap.typhoons.as_slice()
                     } else {
@@ -605,15 +599,7 @@ impl MainShell {
                                 // 手动点选：锁定镜头，避免影院轮播 / 跟焦抢走速报跳转
                                 self.map.mark_user_camera();
                             }
-                            SidebarTab::Station => {
-                                // 短飞跃 + 勿强行拉到 9.5（大缩放差会触发底图重建卡顿）
-                                let z = zoom.clamp(7.5, 11.0);
-                                self.map.fly_to_centered(lon, lat, Some(z), 0.4);
-                                self.map.mark_user_camera();
-                            }
-                            SidebarTab::Volcano
-                            | SidebarTab::Weather
-                            | SidebarTab::CencInt => {
+                            SidebarTab::Volcano | SidebarTab::Weather => {
                                 self.map.fly_to_centered(lon, lat, Some(zoom.max(9.0)), 0.85);
                                 self.map.mark_user_camera();
                             }
@@ -2012,6 +1998,7 @@ fn draw_sidebar(
     snap: &mut AppSnapshot,
     scale: &str,
     icons: &IntensityIcons,
+    weather_icons: &mut WeatherIconCache,
     show_volcano_icons: bool,
     source_enabled: [bool; 5],
 ) -> Option<SideAction> {
@@ -2019,14 +2006,14 @@ fn draw_sidebar(
     ui.set_min_width(ui.available_width());
     Frame::NONE
         .fill(p.sidebar_bg)
-        .inner_margin(Margin::symmetric(12, 10))
+        .inner_margin(Margin::symmetric(10, 9))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(crate::i18n::t("地震情报实况"))
                         .color(p.text)
                         .strong()
-                        .size(16.0),
+                        .size(15.5),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
@@ -2099,79 +2086,10 @@ fn draw_sidebar(
 
             let tab = snap.tab;
             let sel = snap.selection;
-            if tab == SidebarTab::Station {
-                if snap.stations.is_empty() {
-                    empty_hint(
-                        ui,
-                        p,
-                        crate::i18n::t("暂无测站"),
-                        crate::i18n::t("启用 Jian 测站 /kmoni 后，实时震度点将显示于此。"),
-                    );
-                } else {
-                    // 顶层虚拟列表（勿套进外层 ScrollArea，否则 available_height 无效）
-                    let row_h = 58.0_f32;
-                    let n = snap.stations.len();
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show_rows(ui, row_h, n, |ui, row_range| {
-                            for i in row_range {
-                                let s = &snap.stations[i];
-                                let selected = sel
-                                    == Some(ListSelection {
-                                        tab: SidebarTab::Station,
-                                        index: i,
-                                    });
-                                let col = match s.intensity_kind {
-                                    IntensityKind::CnIntensity => {
-                                        if s.intensity_level >= 1 {
-                                            let c = starquake_core::palette::cn_intensity_rgb(
-                                                s.intensity_level,
-                                            );
-                                            Color32::from_rgb(c.r, c.g, c.b)
-                                        } else {
-                                            Color32::from_rgb(0x66, 0x66, 0x66)
-                                        }
-                                    }
-                                    IntensityKind::JmaShindo if s.instrumental >= -3.0 => {
-                                        let c = starquake_core::instrumental_rgb(s.instrumental);
-                                        Color32::from_rgb(c.r, c.g, c.b)
-                                    }
-                                    _ => {
-                                        intensity_chip(
-                                            s.intensity_kind,
-                                            s.intensity_level,
-                                            &s.intensity_text,
-                                            scale,
-                                        )
-                                        .2
-                                    }
-                                };
-                                if list_row(
-                                    ui,
-                                    p,
-                                    icons,
-                                    &s.name,
-                                    &s.id,
-                                    "",
-                                    s.intensity_kind,
-                                    s.intensity_level,
-                                    &s.intensity_text,
-                                    scale,
-                                    col,
-                                    selected,
-                                    egui::Id::new(("st", i)),
-                                ) == RowClick::Primary
-                                {
-                                    clicked = Some(SideAction::List(SidebarTab::Station, i));
-                                }
-                            }
-                        });
-                }
-            } else {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        match tab {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    match tab {
                             SidebarTab::Records => {
                                 if snap.records.is_empty() {
                                     empty_hint(
@@ -2276,7 +2194,6 @@ fn draw_sidebar(
                                     }
                                 }
                             }
-                            SidebarTab::Station => {}
                             SidebarTab::Volcano => {
                                 if snap.volcanoes.is_empty() {
                                     empty_hint(
@@ -2323,28 +2240,19 @@ fn draw_sidebar(
                                         crate::i18n::t("启用气象源并登录 Jian 令牌后，中央台预警会出现在此列表。"),
                                     );
                                 }
+                                weather_icons.poll(ui.ctx());
                                 for (i, w) in snap.weather.iter().enumerate() {
                                     let selected = sel
                                         == Some(ListSelection {
                                             tab: SidebarTab::Weather,
                                             index: i,
                                         });
-                                    let sub = match (
-                                        w.origin_time.is_empty(),
-                                        w.headline.is_empty(),
-                                    ) {
-                                        (false, false) => {
-                                            format!("{} · {}", w.origin_time, w.headline)
-                                        }
-                                        (false, true) => w.origin_time.clone(),
-                                        (true, false) => w.headline.clone(),
-                                        (true, true) => String::new(),
-                                    };
-                                    if simple_list_row(
+                                    let icon = weather_icons.get(ui.ctx(), &w.icon_type);
+                                    if weather_list_row(
                                         ui,
                                         p,
-                                        &w.title,
-                                        &sub,
+                                        w,
+                                        icon.as_ref(),
                                         selected,
                                         egui::Id::new(("wx", i)),
                                     ) {
@@ -2352,50 +2260,8 @@ fn draw_sidebar(
                                     }
                                 }
                             }
-                            SidebarTab::CencInt => {
-                                if snap.cenc_int.is_empty() {
-                                    empty_hint(
-                                        ui,
-                                        p,
-                                        crate::i18n::t("暂无烈度速报"),
-                                        crate::i18n::t("启用烈度速报源后，CENC 计测烈度事件会出现在此列表。"),
-                                    );
-                                }
-                                for (i, e) in snap.cenc_int.iter().enumerate() {
-                                    let selected = sel
-                                        == Some(ListSelection {
-                                            tab: SidebarTab::CencInt,
-                                            index: i,
-                                        });
-                                    let roman = e.max_intensity_roman();
-                                    let title = if roman.is_empty() {
-                                        format!("{}  M{:.1}", e.hypocenter, e.magnitude)
-                                    } else {
-                                        format!(
-                                            "{}  M{:.1}  {}",
-                                            e.hypocenter, e.magnitude, roman
-                                        )
-                                    };
-                                    let sub = if e.happen_time.is_empty() {
-                                        e.update_time.as_str()
-                                    } else {
-                                        e.happen_time.as_str()
-                                    };
-                                    if simple_list_row(
-                                        ui,
-                                        p,
-                                        &title,
-                                        sub,
-                                        selected,
-                                        egui::Id::new(("cint", i)),
-                                    ) {
-                                        clicked = Some(SideAction::List(SidebarTab::CencInt, i));
-                                    }
-                                }
-                            }
-                        }
-                    });
-            }
+                    }
+                });
         });
     clicked
 }
@@ -2419,16 +2285,14 @@ fn draw_side_tabs(ui: &mut Ui, p: &ThemePalette, cur: &mut SidebarTab) {
         for (tab, label) in [
             (SidebarTab::Records, crate::i18n::t("速报")),
             (SidebarTab::Eew, crate::i18n::t("预警")),
-            (SidebarTab::Station, crate::i18n::t("测站")),
             (SidebarTab::Volcano, crate::i18n::t("火山")),
             (SidebarTab::Weather, crate::i18n::t("气象")),
-            (SidebarTab::CencInt, crate::i18n::t("烈度")),
         ] {
             let selected = *cur == tab;
             let text = if selected {
-                RichText::new(label).strong().size(14.0).color(p.text)
+                RichText::new(label).strong().size(13.5).color(p.text)
             } else {
-                RichText::new(label).size(14.0).color(p.text_dim)
+                RichText::new(label).size(13.5).color(p.text_dim)
             };
             let resp = ui.add(
                 egui::Button::new(text)
@@ -2439,7 +2303,7 @@ fn draw_side_tabs(ui: &mut Ui, p: &ThemePalette, cur: &mut SidebarTab) {
                     })
                     .stroke(Stroke::NONE)
                     .corner_radius(6.0)
-                    .min_size(Vec2::new(60.0, 30.0)),
+                    .min_size(Vec2::new(52.0, 28.0)),
             );
             if selected {
                 let r = resp.rect;
@@ -2478,11 +2342,12 @@ fn volcano_list_headline(name: &str, title: &str) -> String {
     }
 }
 
-fn simple_list_row(
+/// 气象侧栏行：左图标，右三行 headline / 省市区 / description。
+fn weather_list_row(
     ui: &mut Ui,
     p: &ThemePalette,
-    title: &str,
-    sub: &str,
+    alert: &WeatherAlert,
+    icon: Option<&egui::TextureHandle>,
     selected: bool,
     id: egui::Id,
 ) -> bool {
@@ -2492,30 +2357,122 @@ fn simple_list_row(
     } else {
         Color32::TRANSPARENT
     };
-    Frame::NONE
+    let headline = weather_headline(alert);
+    let region = weather_region_line(alert);
+    let desc = weather_desc_preview(alert.description.trim());
+    let icon_sz = Vec2::splat(42.0);
+    let level = weather_level_color(&alert.icon_type);
+
+    let resp = Frame::NONE
         .fill(bg)
-        .inner_margin(Margin::symmetric(10, 8))
+        .inner_margin(Margin::symmetric(8, 7))
         .corner_radius(8.0)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.vertical(|ui| {
-                ui.label(RichText::new(title).strong().size(13.5).color(p.text));
-                if !sub.is_empty() {
-                    ui.add_space(2.0);
-                    ui.label(RichText::new(sub).size(12.0).color(p.text_dim));
+            ui.horizontal(|ui| {
+                // 左：中央台图标；未就绪时用等级色块占位
+                let (icon_r, painter) = ui.allocate_painter(icon_sz, Sense::hover());
+                if let Some(tex) = icon {
+                    painter.image(
+                        tex.id(),
+                        icon_r.rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                } else {
+                    painter.rect_filled(icon_r.rect, 6.0, level);
+                    painter.rect_stroke(
+                        icon_r.rect,
+                        6.0,
+                        Stroke::new(1.0_f32, p.panel_border),
+                        egui::StrokeKind::Inside,
+                    );
                 }
+
+                ui.add_space(8.0);
+                ui.vertical(|ui| {
+                    let max_w = (ui.available_width() - 4.0).max(40.0);
+                    ui.set_max_width(max_w);
+                    if !headline.is_empty() {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&headline).strong().size(13.5).color(p.text),
+                            )
+                            .truncate(),
+                        );
+                    }
+                    if !region.is_empty() {
+                        ui.add(
+                            egui::Label::new(RichText::new(&region).size(12.5).color(p.text_dim))
+                                .truncate(),
+                        );
+                    }
+                    if !desc.is_empty() {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&desc).size(12.0).color(p.text_muted),
+                            )
+                            .truncate(),
+                        );
+                    }
+                });
             });
-            let resp = ui.interact(
-                ui.min_rect(),
-                id,
-                egui::Sense::click(),
-            );
-            if resp.clicked() {
-                clicked = true;
-            }
-        });
-    ui.add_space(2.0);
+        })
+        .response;
+
+    let full = ui
+        .interact(resp.rect, id, Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if full.hovered() && !selected {
+        ui.painter().rect_stroke(
+            resp.rect,
+            8.0,
+            Stroke::new(1.0_f32, p.panel_border),
+            egui::StrokeKind::Outside,
+        );
+    }
+    if full.clicked() {
+        clicked = true;
+    }
+    ui.add_space(3.0);
     clicked
+}
+
+fn weather_headline(alert: &WeatherAlert) -> String {
+    let h = alert.headline.trim();
+    if !h.is_empty() {
+        return h.to_string();
+    }
+    alert.title.trim().to_string()
+}
+
+fn weather_region_line(alert: &WeatherAlert) -> String {
+    [
+        alert.province.trim(),
+        alert.city.trim(),
+        alert.district.trim(),
+    ]
+    .into_iter()
+    .filter(|s| !s.is_empty())
+    .collect::<Vec<_>>()
+    .join("\u{ff0c}")
+}
+
+fn weather_desc_preview(raw: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    // 侧栏单行预览，过长截断
+    const MAX_CHARS: usize = 72;
+    let count = t.chars().count();
+    if count <= MAX_CHARS {
+        t.to_string()
+    } else {
+        let mut s: String = t.chars().take(MAX_CHARS).collect();
+        s.push('\u{2026}');
+        s
+    }
 }
 
 fn volcano_list_row(

@@ -2,6 +2,7 @@
 """Linux x86_64 便携包：组装目录并打 tar.gz。"""
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -103,6 +104,44 @@ def find_bin(cli_bin: str | None) -> Path:
     )
 
 
+
+def try_wsl_build() -> int:
+    """Windows：在 StarQuakeLinux（或 STARQUAKE_WSL_DISTRO）里原生编译。"""
+    distro = os.environ.get("STARQUAKE_WSL_DISTRO", "StarQuakeLinux")
+    rest = ROOT.as_posix()
+    if len(rest) >= 2 and rest[1] == ":":
+        linux_root = "/mnt/" + rest[0].lower() + rest[2:]
+    else:
+        linux_root = rest
+    # 写到纯 ASCII 路径，避免中文路径经登录 shell / 控制台编码弄坏
+    script = Path(r"D:\tools\_sq_wsl_build.sh")
+    script.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "#!/bin/bash",
+        "set -e",
+        "export RUSTUP_HOME=/root/.rustup",
+        "export CARGO_HOME=/root/.cargo",
+        'export PATH="$CARGO_HOME/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"',
+        '. "$CARGO_HOME/env"',
+        f'cd "{linux_root}"',
+        "cargo build -p starquake-app --release",
+        "",
+    ]
+    script.write_bytes("\n".join(lines).encode("utf-8"))
+    cmd = [
+        "wsl",
+        "-d",
+        distro,
+        "-u",
+        "root",
+        "--",
+        "bash",
+        "/mnt/d/tools/_sq_wsl_build.sh",
+    ]
+    log(" ".join(cmd))
+    return subprocess.run(cmd).returncode
+
+
 def try_zigbuild() -> int:
     """Windows 上优先 cargo zigbuild；失败返回非 0。"""
     cmd = [
@@ -138,11 +177,16 @@ def main() -> int:
             if r.returncode != 0:
                 return r.returncode
         else:
-            # Windows / macOS：交叉编译
-            if try_zigbuild() != 0:
-                raise SystemExit(
-                    "cargo zigbuild 失败。请安装 Zig 并确保在 PATH 中，或手动指定 --bin"
-                )
+            # Windows：优先 WSL（与 CI 一致）；无 WSL 再试 zigbuild
+            if try_wsl_build() == 0:
+                pass
+            else:
+                log("WSL 编译失败，尝试 cargo zigbuild…")
+                if try_zigbuild() != 0:
+                    raise SystemExit(
+                        "Linux 编译失败。请先：python tools/setup_linux_pack_env.py --wsl\n"
+                        "或安装 Zig 后重试 cargo zigbuild，或手动 --bin"
+                    )
 
     bin_src = find_bin(cli_bin)
     log(f"binary: {bin_src}")

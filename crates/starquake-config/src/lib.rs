@@ -131,8 +131,8 @@ pub struct UiConfig {
     /// 地图绘制气象预警图标
     #[serde(default = "default_true")]
     pub show_weather: bool,
-    /// 地图绘制烈度速报震中/计测点
-    #[serde(default = "default_true")]
+    /// 已下线：烈度速报不再侧栏/地图展示；保留字段兼容旧 settings.json
+    #[serde(default = "default_false")]
     pub show_cenc_int: bool,
     /// 地图绘制台风路径 / 风圈 / 预报
     #[serde(default = "default_true")]
@@ -950,7 +950,7 @@ impl Default for AppConfig {
                 show_legend: true,
                 show_volcanoes: true,
                 show_weather: true,
-                show_cenc_int: true,
+                show_cenc_int: false,
                 show_typhoons: true,
                 show_faults: false,
                 show_terminator: false,
@@ -1109,6 +1109,7 @@ impl AppConfig {
         cfg.apply_env_overrides();
         cfg.filters.migrate_legacy_record_off();
         cfg.migrate_removed_station_sources();
+        cfg.migrate_removed_sidebar_tab();
         cfg.migrate_legacy_client_id();
         cfg.restore_refresh_token_if_missing();
         cfg
@@ -1156,6 +1157,7 @@ impl AppConfig {
         let mut sanitized = self.clone();
         sanitized.filters.migrate_legacy_record_off();
         sanitized.migrate_removed_station_sources();
+        sanitized.migrate_removed_sidebar_tab();
         sanitized.migrate_legacy_client_id();
         sanitized.sources.jian.access_token = None;
         // 禁止用 None 覆盖磁盘上已有的 rt_
@@ -1334,6 +1336,17 @@ impl AppConfig {
     pub fn migrate_removed_station_sources(&mut self) {
         if self.sources.stations.jma_source.eq_ignore_ascii_case("yahoo") {
             self.sources.stations.jma_source = "jian".into();
+        }
+    }
+
+    /// 已下线的侧栏页签回落（旧 `station` / `cenc_int` → `eew`）。
+    pub fn migrate_removed_sidebar_tab(&mut self) {
+        let t = self.ui.sidebar_default_tab.to_ascii_lowercase();
+        if matches!(
+            t.as_str(),
+            "station" | "cenc_int" | "cenc-int" | "intensity"
+        ) {
+            self.ui.sidebar_default_tab = "eew".into();
         }
     }
 

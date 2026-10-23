@@ -395,9 +395,6 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "启用 /all"), "啟用 /all");
         m.insert((Lang::Ja, "启用 /all"), "/all を有効化");
         m.insert((Lang::En, "启用 /all"), "Enable /all");
-        m.insert((Lang::ZhTw, "启用 Jian 测站 /kmoni 后，实时震度点将显示于此。"), "啟用 Jian 測站 /kmoni 後，即時震度點將顯示於此。");
-        m.insert((Lang::Ja, "启用 Jian 测站 /kmoni 后，实时震度点将显示于此。"), "Jian 観測点 /kmoni を有効にするとここに表示されます。");
-        m.insert((Lang::En, "启用 Jian 测站 /kmoni 后，实时震度点将显示于此。"), "Enable Jian stations /kmoni to show live intensity points here.");
         m.insert((Lang::ZhTw, "启用 FSSN"), "啟用 FSSN");
         m.insert((Lang::Ja, "启用 FSSN"), "FSSN を有効化");
         m.insert((Lang::En, "启用 FSSN"), "Enable FSSN");
@@ -626,9 +623,6 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "日本 JMA/NIED"), "日本 JMA/NIED");
         m.insert((Lang::Ja, "日本 JMA/NIED"), "日本 JMA/NIED");
         m.insert((Lang::En, "日本 JMA/NIED"), "Japan JMA/NIED");
-        m.insert((Lang::ZhTw, "暂无测站"), "暫無測站");
-        m.insert((Lang::Ja, "暂无测站"), "観測点なし");
-        m.insert((Lang::En, "暂无测站"), "No stations");
         m.insert((Lang::ZhTw, "暂无火山情报"), "暫無火山情報");
         m.insert((Lang::Ja, "暂无火山情报"), "火山情報なし");
         m.insert((Lang::En, "暂无火山情报"), "No volcano notices");

@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
   <img src="https://img.shields.io/badge/Rust-1.70%2B-orange.svg" alt="Rust" />
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6.svg" alt="Windows" />
-  <img src="https://img.shields.io/badge/Release-2.1.3-informational.svg" alt="2.1.3" />
+  <img src="https://img.shields.io/badge/Release-2.2.0-informational.svg" alt="2.2.0" />
 </p>
 
 <p align="center">
@@ -33,9 +33,8 @@
 - 接收中国地震局、台湾中央气象署、日本气象厅、韩国气象厅等地震预警
 - 接收中国地震台网、日本气象厅等地震速报 / 列表
 - 接收日本气象厅海啸情报
-- 接收中央台气象预警（侧栏「气象」列表 + 地图色点）
-- 接收 CENC 烈度速报（侧栏「烈度」列表；选中后地图显示震中与计测台站点）
-- 展示 NIED 強震モニタ、S-Net、KMA 等测站烈度（列表与地图色点）
+- 接收中央台气象预警（侧栏「气象」：图标 / 标题 / 省市区 / 正文 + 地图色点）
+- 展示 NIED 強震モニタ、S-Net、KMA 等测站烈度（地图色点与右上角台网卡片）
 - 地图叠加震中、P/S 波圈（近距 JMA2001，远距 ak135）
 - 暗色矢量底图 / 亮色海洋地形瓦片，可随主题切换
 - 台风路径、风圈与多源预报（可开关）
@@ -55,7 +54,6 @@
 ## 数据来源
 
 - 地震预警（CEA/CWA/JMA/KMA 等）、地震速报、海啸情报、实时测站、台风路径、气象预警：[Jian Project API](https://api.sismotide.top/api/)
-- CENC 烈度速报：[NowQuake CENC 烈度速报 API](https://doc.nowquake.cn/?url=./docs/cencint.json)
 - 地震预警（CEA/SC/FJ/CWA/JMA/CENC）、地震列表（CENC/JMA）：[Wolfx Open API](https://wolfx.jp/api/)（请注意参考接口文档）
 - 地震信息（JMA）：[P2PQuake](https://www.p2pquake.net/)
 - 地震信息（FSSN）：[FSSN WebSocket API](https://fssn-api.fanstudio.tech/#fssn)

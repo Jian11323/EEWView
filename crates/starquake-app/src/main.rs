@@ -307,10 +307,9 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
         ));
     snap.tab = match cfg.ui.sidebar_default_tab.to_ascii_lowercase().as_str() {
         "records" | "record" => starquake_core::SidebarTab::Records,
-        "station" => starquake_core::SidebarTab::Station,
         "volcano" => starquake_core::SidebarTab::Volcano,
         "weather" => starquake_core::SidebarTab::Weather,
-        "cenc_int" | "cenc-int" | "intensity" => starquake_core::SidebarTab::CencInt,
+        // 旧配置 station / cenc_int 已下线侧栏页签，回落到预警
         _ => starquake_core::SidebarTab::Eew,
     };
     if let Some(ev) = &snap.active {

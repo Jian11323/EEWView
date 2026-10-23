@@ -1618,8 +1618,8 @@ fn basemap_preset_label(draft: &AppConfig) -> String {
 fn tab_display(s: &str) -> String {
     match s {
         "records" => t("速报").into(),
-        "station" => t("测站").into(),
         "volcano" => t("火山").into(),
+        "weather" => t("气象").into(),
         _ => t("预警").into(),
     }
 }
@@ -2031,10 +2031,6 @@ fn draw_general(
             toggle(ui, &mut draft.ui.show_weather);
         });
         row_divider(ui);
-        control_row(ui, "烈度速报标注", "选中烈度事件时画震中与计测点", "\u{25ce}", |ui| {
-            toggle(ui, &mut draft.ui.show_cenc_int);
-        });
-        row_divider(ui);
         control_row(ui, "台风路径", "活跃台风路径、风圈与预报线", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_typhoons);
         });
@@ -2081,17 +2077,17 @@ fn draw_general(
                     ui.selectable_value(
                         &mut draft.ui.sidebar_default_tab,
                         "records".into(),
-                        "速报",
-                    );
-                    ui.selectable_value(
-                        &mut draft.ui.sidebar_default_tab,
-                        "station".into(),
-                        "测站",
+                        t("速报"),
                     );
                     ui.selectable_value(
                         &mut draft.ui.sidebar_default_tab,
                         "volcano".into(),
-                        "火山",
+                        t("火山"),
+                    );
+                    ui.selectable_value(
+                        &mut draft.ui.sidebar_default_tab,
+                        "weather".into(),
+                        t("气象"),
                     );
                 });
         });

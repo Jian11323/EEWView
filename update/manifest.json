@@ -1,16 +1,16 @@
 {
-  "latest_version": "2.1.3",
+  "latest_version": "2.2.0",
   "min_supported_version": "2.0.0",
   "channel": "stable",
   "installer": {
-    "url": "https://github.com/Jian11323/StarQuake/releases/download/v2.1.3/StarQuake_2.1.3_setup.exe",
-    "sha256": "37de42f87c7a720b8cec6c7f4a934f9f8645bdff7f90dea757422ac2f90c2221",
+    "url": "https://github.com/Jian11323/StarQuake/releases/download/v2.2.0/StarQuake_2.2.0_setup.exe",
+    "sha256": "",
     "user_interface": "progress"
   },
   "zip": {
-    "url": "https://github.com/Jian11323/StarQuake/releases/download/v2.1.3/StarQuake_2.1.3_portable.zip",
-    "sha256": "e17f1a8703368ef8134b6c709410eca92e2f6fbd579cefe5974bfe0f85a4f52c"
+    "url": "https://github.com/Jian11323/StarQuake/releases/download/v2.2.0/StarQuake_2.2.0_portable.zip",
+    "sha256": ""
   },
-  "release_notes_url": "https://github.com/Jian11323/StarQuake/releases/tag/v2.1.3",
-  "html_url": "https://github.com/Jian11323/StarQuake/releases/tag/v2.1.3"
+  "release_notes_url": "https://github.com/Jian11323/StarQuake/releases/tag/v2.2.0",
+  "html_url": "https://github.com/Jian11323/StarQuake/releases/tag/v2.2.0"
 }

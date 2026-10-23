@@ -86,7 +86,7 @@ pub fn jma_from_instrumental(v: f64) -> (u8, &'static str) {
     (level, jma_shindo_text(level))
 }
 
-/// 测站列表/地图用展示文案：低于 0.5 显示取整計測值（含 -3～0），否则用震度阶级。
+/// 测站/地图用展示文案：低于 0.5 显示取整計測值（含 -3～0），否则用震度阶级。
 /// 計測震度半档展示（-3…7 步长 0.5）。
 pub fn instrumental_half_step_text(v: f64) -> String {
     if !v.is_finite() || v < -3.0 {

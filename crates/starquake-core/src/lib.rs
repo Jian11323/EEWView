@@ -689,13 +689,10 @@ pub enum SidebarTab {
     Records,
     #[default]
     Eew,
-    Station,
     /// JMA 火山情报（与地震速报分离）
     Volcano,
     /// 中央台气象预警
     Weather,
-    /// CENC 烈度速报（NowQuake）
-    CencInt,
 }
 
 /// 列表选中项（驱动高亮 + 地图居中）
@@ -990,14 +987,6 @@ impl AppSnapshot {
                     None
                 }
             }
-            SidebarTab::Station => {
-                let s = self.stations.get(index)?;
-                let lon = s.longitude;
-                let lat = s.latitude;
-                self.active = Some(s.as_header_report());
-                self.overlay_mode = OverlayMode::MarkerOnly;
-                Some((lon, lat, 9.0))
-            }
             SidebarTab::Volcano => {
                 let v = self.volcanoes.get(index)?;
                 let lon = v.longitude;
@@ -1020,18 +1009,6 @@ impl AppSnapshot {
                         Some((lon, lat, 7.5))
                     }
                     _ => None,
-                }
-            }
-            SidebarTab::CencInt => {
-                let e = self.cenc_int.get(index)?;
-                let lon = e.longitude;
-                let lat = e.latitude;
-                self.active = None;
-                self.overlay_mode = OverlayMode::MarkerOnly;
-                if lat.abs() <= 0.01 && lon.abs() <= 0.01 {
-                    None
-                } else {
-                    Some((lon, lat, 7.5))
                 }
             }
         }
@@ -1509,26 +1486,23 @@ impl AppSnapshot {
                 let kb = station_rank_key(b);
                 ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
             });
-        let (idx, s) = best?;
+        let (_, s) = best?;
         let lon = s.longitude;
         let lat = s.latitude;
         let report = s.as_header_report();
-        self.tab = SidebarTab::Station;
-        self.selection = Some(ListSelection {
-            tab: SidebarTab::Station,
-            index: idx,
-        });
+        // 测站不再进侧栏列表；仅更新 Header / 镜头，不改侧栏页签
+        self.selection = None;
         self.active = Some(report);
-        self.overlay_mode = OverlayMode::Wave;
+        self.overlay_mode = OverlayMode::MarkerOnly;
         Some((lon, lat, 10.0))
     }
 
-    /// 用一帧有感测站快照替换列表（按震度降序，上限 120）
+    /// 用一帧有感测站快照替换数据（按震度降序）
     pub fn replace_stations(&mut self, stations: Vec<StationSample>) {
         self.merge_stations("default", stations);
     }
 
-    /// 刷新测站网卡片时钟（中转对时帧 / 原版轮询保活）；不改测站列表。
+    /// 刷新测站网卡片时钟（中转对时帧 / 原版轮询保活）；不改测站数据。
     pub fn touch_station_clock(&mut self, network: &str, ts_ms: Option<i64>) {
         let ts = ts_ms.filter(|t| *t > 0).unwrap_or_else(|| {
             std::time::SystemTime::now()
@@ -1572,7 +1546,7 @@ impl AppSnapshot {
                 .then_with(|| b.intensity_level.cmp(&a.intensity_level))
                 .then_with(|| a.id.cmp(&b.id))
         });
-        // 全网测站上图与侧栏；上限放宽以免截掉低計測值点
+        // 全网测站上图；上限放宽以免截掉低計測值点
         if self.stations.len() > 2500 {
             self.stations.truncate(2500);
         }
@@ -1581,18 +1555,9 @@ impl AppSnapshot {
         let has_live_eew = self.eew_list.iter().any(|e| eew_wave_active(e, now_ms));
         if let Some(id) = keep_id {
             if !has_live_eew {
-                if let Some((i, s)) = self
-                    .stations
-                    .iter()
-                    .enumerate()
-                    .find(|(_, s)| s.id == id)
-                {
+                if let Some(s) = self.stations.iter().find(|s| s.id == id) {
                     self.active = Some(s.as_header_report());
                     self.overlay_mode = OverlayMode::MarkerOnly;
-                    self.selection = Some(ListSelection {
-                        tab: SidebarTab::Station,
-                        index: i,
-                    });
                 }
             }
         }
