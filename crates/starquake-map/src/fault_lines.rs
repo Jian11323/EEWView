@@ -1037,13 +1037,13 @@ fn paint_line_mesh(
     color: Color32,
     pts: &mut Vec<Pos2>,
 ) {
+    if view.mode.is_globe() {
+        paint_line_mesh_globe(mesh, line, view, width, color);
+        return;
+    }
     pts.clear();
     let mut last: Option<Pos2> = None;
-    let max_jump = if view.mode.is_globe() {
-        view.horizon_radius().unwrap_or(80.0) * 0.35
-    } else {
-        projection::world_size(view.zoom) as f32 * (80.0 / 360.0)
-    };
+    let max_jump = projection::world_size(view.zoom) as f32 * (80.0 / 360.0);
     for p in line {
         let Some(sp) = view.project(p[0] as f64, p[1] as f64) else {
             stroke_poly(mesh, pts, width, color);
@@ -1061,6 +1061,88 @@ fn paint_line_mesh(
         last = Some(sp);
     }
     stroke_poly(mesh, pts, width, color);
+}
+
+/// 球体：大圆加密 + 左右地表偏移生成贴面带宽（对齐 GQ createSquare / move_on_globe）。
+fn paint_line_mesh_globe(
+    mesh: &mut Mesh,
+    line: &[[f32; 2]],
+    view: &ViewCtx,
+    width_px: f32,
+    color: Color32,
+) {
+    if line.len() < 2 {
+        return;
+    }
+    let half_km = view
+        .px_to_km((width_px * 0.5).max(0.6))
+        .unwrap_or(2.5)
+        .clamp(0.8, 18.0);
+    // 先按视距加密折线，再逐段贴面
+    let densified = densify_fault_line_globe(line, view);
+    for w in densified.windows(2) {
+        let (lon0, lat0) = (w[0][0] as f64, w[0][1] as f64);
+        let (lon1, lat1) = (w[1][0] as f64, w[1][1] as f64);
+        let br = crate::globe::bearing_deg(lon0, lat0, lon1, lat1);
+        let left_br = (br + 90.0).rem_euclid(360.0);
+        let right_br = (br + 270.0).rem_euclid(360.0);
+        let (l0lon, l0lat) = crate::globe::move_on_globe(lon0, lat0, half_km, left_br);
+        let (r0lon, r0lat) = crate::globe::move_on_globe(lon0, lat0, half_km, right_br);
+        let (l1lon, l1lat) = crate::globe::move_on_globe(lon1, lat1, half_km, left_br);
+        let (r1lon, r1lat) = crate::globe::move_on_globe(lon1, lat1, half_km, right_br);
+        let (Some(l0), Some(r0), Some(l1), Some(r1)) = (
+            view.project(l0lon, l0lat),
+            view.project(r0lon, r0lat),
+            view.project(l1lon, l1lat),
+            view.project(r1lon, r1lat),
+        ) else {
+            continue;
+        };
+        let i0 = mesh.vertices.len() as u32;
+        mesh.colored_vertex(l0, color);
+        mesh.colored_vertex(r0, color);
+        mesh.colored_vertex(l1, color);
+        mesh.colored_vertex(r1, color);
+        mesh.add_triangle(i0, i0 + 1, i0 + 2);
+        mesh.add_triangle(i0 + 1, i0 + 3, i0 + 2);
+    }
+}
+
+fn densify_fault_line_globe(line: &[[f32; 2]], view: &ViewCtx) -> Vec<[f32; 2]> {
+    let mut out = Vec::with_capacity(line.len() * 2);
+    let step_km = view.px_to_km(14.0).unwrap_or(25.0).clamp(8.0, 80.0);
+    for w in line.windows(2) {
+        let (lon0, lat0) = (w[0][0] as f64, w[0][1] as f64);
+        let (lon1, lat1) = (w[1][0] as f64, w[1][1] as f64);
+        if out.is_empty() {
+            out.push(w[0]);
+        }
+        let dist = haversine_km(lon0, lat0, lon1, lat1);
+        if dist > step_km * 1.4 {
+            let n = ((dist / step_km).ceil() as usize).clamp(2, 24);
+            let br = crate::globe::bearing_deg(lon0, lat0, lon1, lat1);
+            for i in 1..n {
+                let d = dist * (i as f64) / (n as f64);
+                let (lon, lat) = crate::globe::move_on_globe(lon0, lat0, d, br);
+                out.push([lon as f32, lat as f32]);
+            }
+        }
+        out.push(w[1]);
+    }
+    if out.is_empty() && !line.is_empty() {
+        out.extend_from_slice(line);
+    }
+    out
+}
+
+fn haversine_km(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {
+    let r = 6371.0_f64;
+    let p1 = lat1.to_radians();
+    let p2 = lat2.to_radians();
+    let dp = (lat2 - lat1).to_radians();
+    let dl = (lon2 - lon1).to_radians();
+    let a = (dp * 0.5).sin().powi(2) + p1.cos() * p2.cos() * (dl * 0.5).sin().powi(2);
+    2.0 * r * a.sqrt().asin()
 }
 
 fn stroke_poly(mesh: &mut Mesh, pts: &mut Vec<Pos2>, width: f32, color: Color32) {

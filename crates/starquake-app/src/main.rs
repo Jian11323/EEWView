@@ -6,6 +6,7 @@
 mod logging;
 mod notify;
 mod official_notice;
+mod tray;
 mod update;
 
 use anyhow::Result;
@@ -125,6 +126,8 @@ fn window_title() -> String {
 fn main() {
     // rustls 0.23：多后端并存时必须显式安装，否则 TLS（含 Edge TTS）会 panic
     let _ = rustls::crypto::ring::default_provider().install_default();
+    // Windows Toast 须在首条通知前注册 AUMID
+    notify::register_app_id();
 
     if let Err(e) = run_app() {
         let msg = format!("{e:#}");
@@ -363,6 +366,7 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
                 audio,
                 auto_center_pending: live,
                 last_follow_key: None,
+                last_follow_cinema: None,
                 last_record_follow_key: None,
                 last_eew_tts: HashMap::new(),
                 last_eew_tts_script: HashMap::new(),
@@ -386,6 +390,14 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
                 official_notices: OfficialNoticeState::load(),
                 notice_rx: None,
                 notice_fetching: false,
+                tray: {
+                    let icon = starquake_ui::app_icon_data().map(|i| {
+                        (i.rgba, i.width, i.height)
+                    });
+                    tray::TrayHandle::try_create(icon)
+                },
+                hidden_to_tray: false,
+                force_quit: false,
             }))
         }),
     );
@@ -573,6 +585,8 @@ struct StarQuakeApp {
     auto_center_pending: bool,
     /// 已跟焦的预警 (event_id, serial)，避免每帧重复居中
     last_follow_key: Option<(String, u32)>,
+    /// 已跟焦过的 cinema 键（防 upsert 先写 active 导致首报不飞）
+    last_follow_cinema: Option<String>,
     last_record_follow_key: Option<String>,
     /// 各侧栏源槽上次已播 TTS 的报文（对齐 eewcn last_report_data_dict）
     last_eew_tts: HashMap<String, EewReport>,
@@ -607,11 +621,18 @@ struct StarQuakeApp {
     official_notices: OfficialNoticeState,
     notice_rx: Option<mpsc::Receiver<Result<Vec<RemoteNotice>, String>>>,
     notice_fetching: bool,
+    /// 系统托盘（关闭到托盘）
+    tray: Option<tray::TrayHandle>,
+    /// 已隐藏到托盘（避免重复 CancelClose）
+    hidden_to_tray: bool,
+    /// 托盘「退出」：允许真正关闭
+    force_quit: bool,
 }
 
 impl eframe::App for StarQuakeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.set_embed_viewports(true);
+        self.tick_tray(ctx);
         self.tick_window_geometry(ctx);
         self.tick_update_check(ctx);
         self.tick_official_notices(ctx);
@@ -836,6 +857,8 @@ impl eframe::App for StarQuakeApp {
                 }
             }
         } else if self.cfg.ui.auto_follow_eew {
+            // 拖拽空闲 15s：解除镜头锁并恢复跟焦（对齐 GQ cinemaModeReenable）
+            let _ = self.shell.map.clear_idle_user_camera(15.0);
             // 多震轮播：新震立刻跳；到点切换；更新报只刷数据，不打断停留计时
             // 注意：upsert_eew 已先写入 active，不能用 active==live 判断「是否新震」
             let browsing_station = self
@@ -877,21 +900,17 @@ impl eframe::App for StarQuakeApp {
                 if live.is_empty() {
                     self.cinema_seen_key.clear();
                     self.cinema_prev_live.clear();
+                    self.last_follow_cinema = None;
                 } else if live.len() == 1 {
                     let ev = live[0];
                     let key = (ev.event_id.clone(), ev.serial);
-                    // 同事件换源/换 id（Jian↔Wolfx/GQ）不算新震，避免更新报再次飞跃
-                    let is_new_event = !self.snap.active.as_ref().is_some_and(|a| {
-                        is_eew_camera_target(a) && same_eew_event(a, ev)
-                    }) && !self
-                        .cinema_prev_live
-                        .iter()
-                        .any(|p| same_eew_event(p, ev))
-                        && self
-                            .last_follow_key
-                            .as_ref()
-                            .map(|(id, _)| id.as_str())
-                            != Some(ev.event_id.as_str());
+                    let ck = cinema_event_key(ev);
+                    // 勿用 active 判新震（upsert 已写入）；以 cinema 键 + 上一帧队列为准
+                    let is_new_event = self.last_follow_cinema.as_ref() != Some(&ck)
+                        && !self
+                            .cinema_prev_live
+                            .iter()
+                            .any(|p| same_eew_event(p, ev));
                     let active_is_this_eew = self
                         .snap
                         .active
@@ -902,7 +921,9 @@ impl eframe::App for StarQuakeApp {
                         let z = gq_jump_zoom();
                         self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 0.9);
                         self.shell.map.user_camera_override = false;
+                        self.shell.map.last_user_camera_at = None;
                         self.last_follow_key = Some(key);
+                        self.last_follow_cinema = Some(ck);
                         self.cinema_idx = 0;
                         self.cinema_seen_key = seen_key;
                         self.snap.active = Some(ev.clone());
@@ -914,6 +935,7 @@ impl eframe::App for StarQuakeApp {
                     {
                         // 同震更新报：只刷 active / 侧栏，绝不 fly_to
                         self.last_follow_key = Some(key);
+                        self.last_follow_cinema = Some(ck);
                         self.snap.active = Some(ev.clone());
                         self.snap.tab = starquake_core::SidebarTab::Eew;
                         self.snap.overlay_mode = starquake_core::OverlayMode::Wave;
@@ -944,11 +966,15 @@ impl eframe::App for StarQuakeApp {
                         if jump_idx.is_none() {
                             // 集合变化（有震结束 / 仅换 id）：钉住当前事件，不飞跃
                             let cur_key = self
-                                .snap
-                                .active
-                                .as_ref()
-                                .filter(|a| is_eew_camera_target(a))
-                                .map(cinema_event_key)
+                                .last_follow_cinema
+                                .clone()
+                                .or_else(|| {
+                                    self.snap
+                                        .active
+                                        .as_ref()
+                                        .filter(|a| is_eew_camera_target(a))
+                                        .map(cinema_event_key)
+                                })
                                 .or_else(|| {
                                     self.last_follow_key.as_ref().and_then(|(id, _)| {
                                         live.iter()
@@ -984,8 +1010,10 @@ impl eframe::App for StarQuakeApp {
                             self.shell.map.fly_to(ev.longitude, ev.latitude, Some(z), 0.9);
                             if is_new_arrival {
                                 self.shell.map.user_camera_override = false;
+                                self.shell.map.last_user_camera_at = None;
                             }
                             self.last_follow_key = Some((ev.event_id.clone(), ev.serial));
+                            self.last_follow_cinema = Some(cinema_event_key(ev));
                             self.cinema_idx = idx;
                             // GlobalQuake cinemaModeSwitchTime 默认 10 秒
                             self.cinema_next_at =
@@ -1009,6 +1037,7 @@ impl eframe::App for StarQuakeApp {
                         let idx = self.cinema_idx.min(live.len() - 1);
                         let ev = live[idx];
                         let key = (ev.event_id.clone(), ev.serial);
+                        let ck = cinema_event_key(ev);
                         if self.last_follow_key.as_ref() != Some(&key)
                             || self.snap.active.as_ref().map(|a| a.serial) != Some(ev.serial)
                             || !self
@@ -1018,6 +1047,7 @@ impl eframe::App for StarQuakeApp {
                                 .is_some_and(|a| same_eew_event(a, ev))
                         {
                             self.last_follow_key = Some(key);
+                            self.last_follow_cinema = Some(ck);
                             self.snap.active = Some(ev.clone());
                             self.snap.tab = starquake_core::SidebarTab::Eew;
                             self.snap.overlay_mode = starquake_core::OverlayMode::Wave;
@@ -1033,8 +1063,9 @@ impl eframe::App for StarQuakeApp {
             self.snap.prune_expired_tsunami(now);
         }
 
-        // 无预警：相机始终聚焦最新一条速报
+        // 无预警：相机始终聚焦最新一条速报（新速报强制飞，无视拖拽锁）
         if !self.auto_center_pending && self.started.elapsed().as_secs_f64() >= 2.5 {
+            let _ = self.shell.map.clear_idle_user_camera(15.0);
             let now = chrono::Utc::now().timestamp_millis();
             let eew_live = self.snap.eew_list.iter().any(|e| {
                 eew_wave_live(e, now, &self.snap.wave_spread_km, self.travel.as_ref())
@@ -1047,18 +1078,27 @@ impl eframe::App for StarQuakeApp {
             if eew_live {
                 self.snap.pending_record_fly = None;
                 self.last_record_follow_key = None;
-            } else if !browsing_station && !self.shell.map.user_camera_override {
+            } else if !browsing_station {
+                // 新速报 pending：强制飞跃并解锁（对齐「收到即跳」）
                 if let Some((lon, lat, zoom)) = self.snap.pending_record_fly.take() {
                     if lat.abs() > 0.01 || lon.abs() > 0.01 {
                         self.shell.map.fly_to_centered(lon, lat, Some(zoom), 1.0);
+                        self.shell.map.user_camera_override = false;
+                        self.shell.map.last_user_camera_at = None;
+                        if let Some((_, _, _, key)) = self.snap.latest_record_camera() {
+                            let _ = self.snap.focus_latest_record();
+                            self.last_record_follow_key = Some(key);
+                        }
                     }
                 }
-                // 无预警：列表头变化时选中并跟焦最新有坐标速报（对准震中，不做日本构图东偏）
-                if let Some((lon, lat, zoom, key)) = self.snap.latest_record_camera() {
-                    if self.last_record_follow_key.as_ref() != Some(&key) {
-                        let _ = self.snap.focus_latest_record();
-                        self.shell.map.fly_to_centered(lon, lat, Some(zoom), 1.0);
-                        self.last_record_follow_key = Some(key);
+                // 无预警且未锁镜头：列表头变化时跟焦最新速报
+                if !self.shell.map.user_camera_override {
+                    if let Some((lon, lat, zoom, key)) = self.snap.latest_record_camera() {
+                        if self.last_record_follow_key.as_ref() != Some(&key) {
+                            let _ = self.snap.focus_latest_record();
+                            self.shell.map.fly_to_centered(lon, lat, Some(zoom), 1.0);
+                            self.last_record_follow_key = Some(key);
+                        }
                     }
                 }
             }
@@ -1289,6 +1329,37 @@ impl eframe::App for StarQuakeApp {
 }
 
 impl StarQuakeApp {
+    fn tick_tray(&mut self, ctx: &egui::Context) {
+        // 托盘命令
+        while let Some(cmd) = self.tray.as_ref().and_then(|t| t.poll()) {
+            match cmd {
+                tray::TrayCmd::Show => {
+                    self.hidden_to_tray = false;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    ctx.request_repaint();
+                }
+                tray::TrayCmd::Quit => {
+                    self.force_quit = true;
+                    self.hidden_to_tray = false;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        }
+        // 关闭窗口 → 隐藏到托盘
+        let close_requested = ctx.input(|i| i.viewport().close_requested());
+        if close_requested
+            && !self.force_quit
+            && self.cfg.ui.minimize_to_tray
+            && self.tray.is_some()
+            && !self.hidden_to_tray
+        {
+            self.hidden_to_tray = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+    }
 
     fn tick_official_notices(&mut self, ctx: &egui::Context) {
         if self.splash.active() {

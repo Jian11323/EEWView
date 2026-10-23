@@ -200,6 +200,16 @@ fn deg_to_km(deg: f64) -> f64 {
     deg / 360.0 * 2.0 * std::f64::consts::PI * EARTH_RADIUS_KM
 }
 
+/// 两点间初始方位角（度，0=北，顺时针）。
+pub fn bearing_deg(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {
+    let p1 = lat1.to_radians();
+    let p2 = lat2.to_radians();
+    let dl = (lon2 - lon1).to_radians();
+    let y = dl.sin() * p2.cos();
+    let x = p1.cos() * p2.sin() - p1.sin() * p2.cos() * dl.cos();
+    y.atan2(x).to_degrees().rem_euclid(360.0)
+}
+
 /// 从 (lon,lat) 沿方位角 `bearing_deg`（0=北）移动 `distance_km`。
 /// 纬度按地理 ±90° 钳位（勿用 Web Mercator 的 ±85°，否则极区波圈被压扁）。
 pub fn move_on_globe(lon: f64, lat: f64, distance_km: f64, bearing_deg: f64) -> (f64, f64) {

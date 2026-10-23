@@ -104,8 +104,10 @@ pub struct MapViewport {
     flight: Option<CameraFlight>,
     /// 飞跃刚结束后抑制波圈自动缩放，避免落地瞬间被二次改 zoom「弹一下」
     post_flight_until: Option<std::time::Instant>,
-    /// 用户拖拽/滚轮后暂停自动跟焦缩放，直到下一次主动飞跃
+    /// 用户拖拽/滚轮后暂停自动跟焦缩放，直到下一次主动飞跃或空闲超时
     pub user_camera_override: bool,
+    /// 最近一次用户改镜头时刻（用于空闲自动恢复跟焦）
+    pub last_user_camera_at: Option<std::time::Instant>,
     /// 最近一帧视口短边（px），供跟焦时按波圈估 zoom
     pub last_viewport_min_px: f32,
     /// 性能档对应的绘制抽稀
@@ -138,6 +140,7 @@ impl Default for MapViewport {
             flight: None,
             post_flight_until: None,
             user_camera_override: false,
+            last_user_camera_at: None,
             last_viewport_min_px: 720.0,
             paint_quality: PaintQuality::Normal,
             station_cache: overlay::StationPaintCache::default(),
@@ -213,6 +216,32 @@ impl MapViewport {
             self.zoom = z.clamp(ZOOM_MIN, ZOOM_MAX);
         }
         self.user_camera_override = false;
+        self.last_user_camera_at = None;
+    }
+
+    /// 用户拖拽/滚轮：锁镜头并刷新空闲计时。
+    pub fn mark_user_camera(&mut self) {
+        self.user_camera_override = true;
+        self.last_user_camera_at = Some(std::time::Instant::now());
+    }
+
+    /// 空闲超过 `idle_secs` 秒则解除用户镜头锁；返回是否刚解除。
+    pub fn clear_idle_user_camera(&mut self, idle_secs: f64) -> bool {
+        if !self.user_camera_override {
+            return false;
+        }
+        let Some(t) = self.last_user_camera_at else {
+            // 无时间戳的旧锁：立即解除，避免永久卡住
+            self.user_camera_override = false;
+            return true;
+        };
+        if t.elapsed().as_secs_f64() >= idle_secs {
+            self.user_camera_override = false;
+            self.last_user_camera_at = None;
+            true
+        } else {
+            false
+        }
     }
 
     /// GQ 风格跳转：`smoothTransition` 抛物线飞到目标；近距则瞬时到位。
@@ -431,7 +460,7 @@ impl MapViewport {
             if resp.dragged() {
                 self.flight = None;
                 self.post_flight_until = None;
-                self.user_camera_override = true;
+                self.mark_user_camera();
                 let d = resp.drag_delta();
                 let (lon, lat) = view_in.pan_by_delta(d.x, d.y);
                 self.center_lon = lon;
@@ -440,7 +469,7 @@ impl MapViewport {
             if resp.hovered() && scroll_y.abs() > 0.0 {
                 self.flight = None;
                 self.post_flight_until = None;
-                self.user_camera_override = true;
+                self.mark_user_camera();
                 let before = self.zoom;
                 let after = (before + scroll_y as f64 * 0.002).clamp(ZOOM_MIN, ZOOM_MAX);
                 if (after - before).abs() > 1e-9 {

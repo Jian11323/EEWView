@@ -110,6 +110,9 @@ pub struct UiConfig {
     /// 主窗口始终置顶（对齐滚动字幕「窗口置顶」）
     #[serde(default)]
     pub always_on_top: bool,
+    /// 关闭/最小化到系统托盘（默认开）
+    #[serde(default = "default_true")]
+    pub minimize_to_tray: bool,
     /// 新预警/报数更新时地图自动跟焦震中
     #[serde(default = "default_true")]
     pub auto_follow_eew: bool,
@@ -874,6 +877,7 @@ impl Default for AppConfig {
                 show_sidebar: true,
                 intensity_scale: "auto".into(),
                 always_on_top: false,
+                minimize_to_tray: true,
                 auto_follow_eew: true,
                 auto_zoom_waves: true,
                 show_wave_rings: true,
@@ -1036,6 +1040,7 @@ impl AppConfig {
         cfg.filters.migrate_legacy_record_off();
         cfg.migrate_removed_station_sources();
         cfg.migrate_legacy_client_id();
+        cfg.restore_refresh_token_if_missing();
         cfg
     }
 
@@ -1083,9 +1088,176 @@ impl AppConfig {
         sanitized.migrate_removed_station_sources();
         sanitized.migrate_legacy_client_id();
         sanitized.sources.jian.access_token = None;
+        // 禁止用 None 覆盖磁盘上已有的 rt_
+        if sanitized.sources.jian.refresh_token.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true)
+        {
+            if let Some(existing) = Self::read_disk_refresh_token(&path) {
+                sanitized.sources.jian.refresh_token = Some(existing.token);
+                if sanitized.sources.jian.refresh_expire_at <= 0.0 && existing.expire_at > 0.0 {
+                    sanitized.sources.jian.refresh_expire_at = existing.expire_at;
+                }
+                if sanitized.sources.jian.max_connections == 0 && existing.max_connections > 0 {
+                    sanitized.sources.jian.max_connections = existing.max_connections;
+                }
+            }
+        }
         let text = serde_json::to_string_pretty(&sanitized).context("serialize settings.json")?;
         fs::write(&path, text).with_context(|| format!("write {}", path.display()))?;
+        // 并行保险文件，升级丢 settings 时仍可回填
+        Self::write_jian_token_sidecar(
+            &dir,
+            sanitized.sources.jian.refresh_token.as_deref(),
+            sanitized.sources.jian.refresh_expire_at,
+            sanitized.sources.jian.max_connections,
+        );
         Ok(path)
+    }
+
+    fn read_disk_refresh_token(settings_path: &Path) -> Option<JianTokenSidecar> {
+        if settings_path.is_file() {
+            if let Ok(text) = fs::read_to_string(settings_path) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(tok) = v
+                        .pointer("/sources/jian/refresh_token")
+                        .and_then(|x| x.as_str())
+                        .map(str::trim)
+                        .filter(|s| s.starts_with("rt_"))
+                    {
+                        let expire_at = v
+                            .pointer("/sources/jian/refresh_expire_at")
+                            .and_then(|x| x.as_f64())
+                            .unwrap_or(0.0);
+                        let max_connections = v
+                            .pointer("/sources/jian/max_connections")
+                            .and_then(|x| x.as_u64())
+                            .unwrap_or(0) as u32;
+                        return Some(JianTokenSidecar {
+                            token: tok.to_string(),
+                            expire_at,
+                            max_connections,
+                        });
+                    }
+                }
+            }
+        }
+        let sidecar = settings_path
+            .parent()
+            .map(|d| d.join("jian_token.json"))?;
+        Self::read_jian_token_sidecar(&sidecar)
+    }
+
+    fn write_jian_token_sidecar(
+        dir: &Path,
+        token: Option<&str>,
+        expire_at: f64,
+        max_connections: u32,
+    ) {
+        let Some(tok) = token.map(str::trim).filter(|s| s.starts_with("rt_")) else {
+            return;
+        };
+        let path = dir.join("jian_token.json");
+        let body = JianTokenSidecar {
+            token: tok.to_string(),
+            expire_at,
+            max_connections,
+        };
+        if let Ok(text) = serde_json::to_string_pretty(&body) {
+            let _ = fs::write(&path, text);
+        }
+    }
+
+    fn read_jian_token_sidecar(path: &Path) -> Option<JianTokenSidecar> {
+        let text = fs::read_to_string(path).ok()?;
+        let body: JianTokenSidecar = serde_json::from_str(&text).ok()?;
+        if body.token.trim().starts_with("rt_") {
+            Some(body)
+        } else {
+            None
+        }
+    }
+
+    /// 启动时：若内存无 rt_，从 sidecar / 旧目录补入。
+    fn restore_refresh_token_if_missing(&mut self) {
+        let has = self
+            .sources
+            .jian
+            .refresh_token
+            .as_ref()
+            .map(|s| s.trim().starts_with("rt_"))
+            .unwrap_or(false);
+        if has {
+            // 仍写 sidecar，保证保险文件存在
+            if let Some(dir) = Self::user_app_dir() {
+                Self::write_jian_token_sidecar(
+                    &dir,
+                    self.sources.jian.refresh_token.as_deref(),
+                    self.sources.jian.refresh_expire_at,
+                    self.sources.jian.max_connections,
+                );
+            }
+            return;
+        }
+        // 1) 本目录 sidecar
+        if let Some(dir) = Self::user_app_dir() {
+            if let Some(sc) = Self::read_jian_token_sidecar(&dir.join("jian_token.json")) {
+                self.sources.jian.refresh_token = Some(sc.token);
+                if self.sources.jian.refresh_expire_at <= 0.0 {
+                    self.sources.jian.refresh_expire_at = sc.expire_at;
+                }
+                if self.sources.jian.max_connections == 0 {
+                    self.sources.jian.max_connections = sc.max_connections;
+                }
+                tracing_log("已从 jian_token.json 回填长期 Token");
+                return;
+            }
+        }
+        // 2) 旧目录 settings / sidecar
+        for src in Self::legacy_user_app_dirs() {
+            if let Some(sc) = Self::read_disk_refresh_token(&src.join("settings.json")) {
+                self.sources.jian.refresh_token = Some(sc.token.clone());
+                if self.sources.jian.refresh_expire_at <= 0.0 {
+                    self.sources.jian.refresh_expire_at = sc.expire_at;
+                }
+                if self.sources.jian.max_connections == 0 {
+                    self.sources.jian.max_connections = sc.max_connections;
+                }
+                tracing_log(&format!(
+                    "已从旧目录补入长期 Token {}",
+                    src.display()
+                ));
+                if let Some(dir) = Self::user_app_dir() {
+                    Self::write_jian_token_sidecar(
+                        &dir,
+                        Some(&sc.token),
+                        sc.expire_at,
+                        sc.max_connections,
+                    );
+                }
+                return;
+            }
+            if let Some(sc) = Self::read_jian_token_sidecar(&src.join("jian_token.json")) {
+                self.sources.jian.refresh_token = Some(sc.token.clone());
+                if self.sources.jian.refresh_expire_at <= 0.0 {
+                    self.sources.jian.refresh_expire_at = sc.expire_at;
+                }
+                if self.sources.jian.max_connections == 0 {
+                    self.sources.jian.max_connections = sc.max_connections;
+                }
+                tracing_log(&format!(
+                    "已从旧目录 jian_token.json 补入长期 Token {}",
+                    src.display()
+                ));
+                if let Some(dir) = Self::user_app_dir() {
+                    Self::write_jian_token_sidecar(
+                        &dir,
+                        Some(&sc.token),
+                        sc.expire_at,
+                        sc.max_connections,
+                    );
+                }
+                return;
+            }
+        }
     }
 
     /// 已下线的测站源回落（如旧 `yahoo` → `jian`）。
@@ -1174,12 +1346,24 @@ impl AppConfig {
     }
 
     /// 若新目录尚无 `settings.json`，从旧 `eew view` 等目录复制配置与日志。
+    /// 若新目录已有 settings 但无 `rt_`，仍从旧目录合并补入 token（见 `restore_refresh_token_if_missing`）。
     fn migrate_legacy_app_dir() {
         let Some(dest) = Self::user_app_dir() else {
             return;
         };
         let dest_settings = dest.join("settings.json");
         if dest_settings.is_file() {
+            // 已有新配置：顺带把旧目录 sidecar 拷过来（若新目录还没有）
+            let dest_sidecar = dest.join("jian_token.json");
+            if !dest_sidecar.is_file() {
+                for src in Self::legacy_user_app_dirs() {
+                    let src_sc = src.join("jian_token.json");
+                    if src_sc.is_file() {
+                        let _ = fs::copy(&src_sc, &dest_sidecar);
+                        break;
+                    }
+                }
+            }
             return;
         }
         for src in Self::legacy_user_app_dirs() {
@@ -1206,6 +1390,11 @@ impl AppConfig {
             let dest_log = dest.join("log.txt");
             if src_log.is_file() && !dest_log.is_file() {
                 let _ = fs::copy(&src_log, &dest_log);
+            }
+            let src_sc = src.join("jian_token.json");
+            let dest_sc = dest.join("jian_token.json");
+            if src_sc.is_file() && !dest_sc.is_file() {
+                let _ = fs::copy(&src_sc, &dest_sc);
             }
             tracing_log(&format!(
                 "已从旧目录迁移 {} \u{2192} {}",
@@ -1300,6 +1489,15 @@ impl AppConfig {
             && self.sources.typhoon.url == other.sources.typhoon.url
             && self.sources.typhoon.poll_secs == other.sources.typhoon.poll_secs
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JianTokenSidecar {
+    token: String,
+    #[serde(default)]
+    expire_at: f64,
+    #[serde(default)]
+    max_connections: u32,
 }
 
 fn merge_json(base: serde_json::Value, overlay: serde_json::Value) -> serde_json::Value {

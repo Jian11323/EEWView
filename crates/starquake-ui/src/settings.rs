@@ -1968,6 +1968,10 @@ fn draw_general(
         control_row(ui, "窗口置顶", "主窗口始终保持在其他窗口之上", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.always_on_top);
         });
+        row_divider(ui);
+        control_row(ui, "关闭到托盘", "关闭窗口时隐藏到系统托盘，托盘可恢复或退出", "◎", |ui| {
+            toggle(ui, &mut draft.ui.minimize_to_tray);
+        });
     });
 
     section(ui, "地图显示", "\u{25a3}", |ui| {

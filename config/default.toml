@@ -19,6 +19,7 @@ sidebar_default_tab = "eew"
 show_sidebar = true
 intensity_scale = "auto"
 always_on_top = false
+minimize_to_tray = true
 auto_follow_eew = true
 auto_zoom_waves = true
 show_wave_rings = true

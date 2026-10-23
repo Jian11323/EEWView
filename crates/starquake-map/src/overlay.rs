@@ -13,9 +13,22 @@ use std::sync::Once;
 const MARKER_RED: Color32 = Color32::from_rgb(220, 40, 40);
 const HOME_FALLBACK: Color32 = Color32::from_rgb(80, 220, 80);
 
-/// 速报 SVG 边长（随震级）
-fn mag_icon_size(magnitude: f64) -> f32 {
-    (12.0 + magnitude * 3.2).clamp(14.0, 42.0) as f32
+/// 预警/速报 SVG 边长，对齐 eewcn：`(3+1.5*exp(0.25*intensity))*5`
+/// `intensity` 优先用震度/烈度档；未知时用震级近似。
+fn eewcn_mark_size(intensity: f64) -> f32 {
+    let v = intensity.max(0.0);
+    ((3.0 + 1.5 * (0.25 * v).exp()) * 5.0).clamp(16.0, 72.0) as f32
+}
+
+fn mark_size_from_event(intensity_level: u8, magnitude: f64) -> f32 {
+    let intensity = if intensity_level > 0 {
+        intensity_level as f64
+    } else if magnitude.is_finite() && magnitude > 0.0 {
+        magnitude
+    } else {
+        3.0
+    };
+    eewcn_mark_size(intensity)
 }
 
 /// 平面：轴对齐 billboard；球体：贴面方块（对齐 GQ `createSquare` + `project3D`）。
@@ -143,11 +156,14 @@ fn paint_eew_marker(
     lat: f64,
     icons: Option<&MarkerIcons>,
     p: Pos2,
+    intensity_level: u8,
+    magnitude: f64,
 ) {
+    let size = mark_size_from_event(intensity_level, magnitude);
     if let Some(tex) = icons.and_then(|i| i.cross()) {
-        paint_tex(painter, view, lon, lat, tex, p, 26.0, Color32::WHITE);
+        paint_tex(painter, view, lon, lat, tex, p, size, Color32::WHITE);
     } else {
-        paint_red_x_fallback(painter, view, lon, lat, p, 7.0);
+        paint_red_x_fallback(painter, view, lon, lat, p, size * 0.28);
     }
 }
 
@@ -158,10 +174,11 @@ fn paint_record_marker(
     lat: f64,
     icons: Option<&MarkerIcons>,
     p: Pos2,
+    intensity_level: u8,
     magnitude: f64,
     selected: bool,
 ) {
-    let size = mag_icon_size(magnitude) * if selected { 1.12 } else { 1.0 };
+    let size = mark_size_from_event(intensity_level, magnitude) * if selected { 1.12 } else { 1.0 };
     if let Some(tex) = icons.and_then(|i| i.red()) {
         let tint = if selected {
             Color32::WHITE
@@ -211,12 +228,22 @@ fn paint_epicenter_marker(
             ev.latitude,
             icons,
             p,
+            ev.intensity_level,
             ev.magnitude,
             true,
         );
     } else if show_cross {
         // 有波圈时按相位显隐，实现红色叉标闪烁
-        paint_eew_marker(painter, view, ev.longitude, ev.latitude, icons, p);
+        paint_eew_marker(
+            painter,
+            view,
+            ev.longitude,
+            ev.latitude,
+            icons,
+            p,
+            ev.intensity_level,
+            ev.magnitude,
+        );
     }
     if with_label && show_cross {
         painter.text(
@@ -280,33 +307,36 @@ pub fn paint_stations(
     let painter = ui.painter_at(rect);
     let pad = 16.0_f32;
     let _ = eew_active;
-    // 低缩放用地理网格抽稀（避免按序号跳点造成「加载不全」空洞）；节能档格更大
+    // 低缩放用地理网格抽稀；放宽格距与上限，避免缩小时大片消失
     let (grid_deg, quiet_cap) = match quality {
         crate::PaintQuality::Eco => {
-            let g = if view.zoom < 4.5 {
-                0.85_f64
+            let g = if view.zoom < 3.5 {
+                0.55_f64
+            } else if view.zoom < 4.5 {
+                0.35
             } else if view.zoom < 5.5 {
-                0.55
-            } else if view.zoom < 6.5 {
-                0.32
+                0.20
             } else {
                 0.0
             };
-            (g, 450usize)
+            (g, 900usize)
         }
         crate::PaintQuality::Normal => {
-            let g = if view.zoom < 4.0 {
-                0.65_f64
-            } else if view.zoom < 5.0 {
-                0.40
-            } else if view.zoom < 6.0 {
-                0.22
+            let g = if view.zoom < 3.2 {
+                0.40_f64
+            } else if view.zoom < 4.2 {
+                0.25
+            } else if view.zoom < 5.2 {
+                0.14
             } else {
                 0.0
             };
-            (g, 1200)
+            (g, 2200)
         }
-        crate::PaintQuality::Extreme => (0.0, 2500),
+        crate::PaintQuality::Extreme => {
+            let g = if view.zoom < 2.8 { 0.22_f64 } else { 0.0 };
+            (g, 5000)
+        }
     };
 
     let data_fp = station_quiet_fp(stations, selected_id, quality, view, grid_deg, quiet_cap);
@@ -551,9 +581,29 @@ fn build_quiet_station_mesh(
             }
         };
         let fill = Color32::from_rgb(rgb.r, rgb.g, rgb.b);
-        append_filled_circle(&mut mesh, p, 2.2, fill);
+        append_filled_circle(&mut mesh, p, station_dot_radius(view.zoom, false), fill);
     }
     std::sync::Arc::new(mesh)
+}
+
+/// 测站点半径随地图缩放（对齐 eewcn `5+max(0,zoom-8)*5` 思路，适配本仓库 zoom 档）
+fn station_dot_radius(zoom: f64, selected: bool) -> f32 {
+    let base = (2.2 + (zoom - 4.5).max(0.0) * 1.35).clamp(2.0, 10.0) as f32;
+    if selected {
+        base + 2.5
+    } else {
+        base
+    }
+}
+
+fn station_icon_size(zoom: f64, base: f32, selected: bool) -> f32 {
+    let scale = (1.0 + (zoom - 5.0).max(0.0) * 0.12).clamp(1.0, 2.2) as f32;
+    let s = base * scale;
+    if selected {
+        s + 4.0
+    } else {
+        s
+    }
 }
 
 fn append_filled_circle(mesh: &mut Mesh, center: Pos2, radius: f32, color: Color32) {
@@ -608,7 +658,7 @@ fn paint_station_dot(
                 5 | 6 => 18.0,
                 _ => 20.0,
             };
-            let size = if selected { base + 4.0 } else { base };
+            let size = station_icon_size(view.zoom, base, selected);
             paint_tex(
                 painter,
                 view,
@@ -644,7 +694,7 @@ fn paint_station_dot(
                 7..=9 => 18.0,
                 _ => 20.0,
             };
-            let size = if selected { base + 4.0 } else { base };
+            let size = station_icon_size(view.zoom, base, selected);
             paint_tex(
                 painter,
                 view,
@@ -685,18 +735,21 @@ fn paint_station_dot(
         }
     };
     let fill = Color32::from_rgb(rgb.r, rgb.g, rgb.b);
-    let r = if selected {
-        5.5
-    } else if s.intensity_kind == starquake_core::IntensityKind::CnIntensity && felt {
+    let base_r = if s.intensity_kind == starquake_core::IntensityKind::CnIntensity && felt {
         match s.intensity_level {
             1..=3 => 3.6,
             4..=6 => 4.4,
             _ => 5.2,
         }
     } else if quiet {
-        2.2
+        station_dot_radius(view.zoom, false)
     } else {
-        3.2
+        station_dot_radius(view.zoom, false) + 1.0
+    };
+    let r = if selected {
+        base_r.max(station_dot_radius(view.zoom, true))
+    } else {
+        base_r
     };
     painter.circle_filled(p, r, fill);
     if selected {
@@ -806,6 +859,7 @@ pub fn paint_records(
             r.latitude,
             icons,
             p,
+            r.intensity_level,
             r.magnitude,
             selected,
         );

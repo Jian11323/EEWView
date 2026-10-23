@@ -410,6 +410,7 @@ impl MainShell {
                     // 左上框点切换多震：跟焦并解除拖拽锁，便于 cinema 继续轮播
                     self.map.fly_to(lon, lat, Some(z), 0.9);
                     self.map.user_camera_override = false;
+                    self.map.last_user_camera_at = None;
                 }
                 draw_tsunami_banner(ui, &p, snap, travel);
                 let station_card_bottom = draw_realtime_intensity_card(ui, &p, snap);
@@ -427,11 +428,12 @@ impl MainShell {
                 if let Some(net) = station_card_bottom.clicked {
                     if let Some((lon, lat, zoom)) = snap.focus_max_station(net) {
                         self.map.fly_to_centered(lon, lat, Some(zoom.clamp(7.5, 11.0)), 0.4);
-                        self.map.user_camera_override = true;
+                        self.map.mark_user_camera();
                     }
                 }
                 if let Some((lon, lat, z)) = typhoon_fly {
                     self.map.user_camera_override = false;
+                    self.map.last_user_camera_at = None;
                     self.map.fly_to(lon, lat, Some(z), 1.0);
                 }
                 if cfg.ui.show_legend {
@@ -510,7 +512,7 @@ impl MainShell {
                             if let (Some(lon), Some(lat)) = (self.local_lon, self.local_lat) {
                                 let z = self.home_zoom.clamp(7.5, 11.0);
                                 self.map.fly_to(lon, lat, Some(z), 0.9);
-                                self.map.user_camera_override = true;
+                                self.map.mark_user_camera();
                             }
                         }
                     }
@@ -575,17 +577,17 @@ impl MainShell {
                                 let dur = if tab == SidebarTab::Eew { 0.85 } else { 0.7 };
                                 self.map.fly_to_centered(lon, lat, Some(end_z), dur);
                                 // 手动点选：锁定镜头，避免影院轮播 / 跟焦抢走速报跳转
-                                self.map.user_camera_override = true;
+                                self.map.mark_user_camera();
                             }
                             SidebarTab::Station => {
                                 // 短飞跃 + 勿强行拉到 9.5（大缩放差会触发底图重建卡顿）
                                 let z = zoom.clamp(7.5, 11.0);
                                 self.map.fly_to_centered(lon, lat, Some(z), 0.4);
-                                self.map.user_camera_override = true;
+                                self.map.mark_user_camera();
                             }
                             SidebarTab::Volcano => {
                                 self.map.fly_to_centered(lon, lat, Some(zoom.max(9.0)), 0.85);
-                                self.map.user_camera_override = true;
+                                self.map.mark_user_camera();
                             }
                         }
                         if snap.overlay_mode == OverlayMode::Wave {
@@ -1819,13 +1821,13 @@ fn draw_countdown_hud(
         let r = ui.max_rect();
         let mut y_bottom = r.bottom() - 2.0;
 
-        // 自下而上：北京时间 →（可选）东京时间
+        // 自下而上：东京 → 北京 → 日出日落 → 视觉自上而下为日出日落、北京、东京
+        if let Some(jst) = jst_clock.as_ref() {
+            y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, crate::i18n::t("东京时间"), jst);
+        }
         y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, crate::i18n::t("北京时间"), &clock);
         if let Some(sun) = sun_line.as_ref() {
             y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, crate::i18n::t("所在地"), sun);
-        }
-        if let Some(jst) = jst_clock.as_ref() {
-            y_bottom = paint_tz_clock_at(ui, r.right() - 2.0, y_bottom, crate::i18n::t("东京时间"), jst);
         }
 
         if let Some(sec) = snap.countdown_s {
