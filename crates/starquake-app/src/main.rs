@@ -37,7 +37,10 @@ use std::sync::mpsc;
 use std::time::Instant;
 use tokio::runtime::Runtime;
 use official_notice::{fetch_notices, OfficialNoticeState, RemoteNotice};
-use update::{AvailableUpdate, check_latest, download_asset, apply_and_relaunch, open_release_page};
+use update::{
+    AvailableUpdate, StartupUpdateOutcome, apply_and_relaunch, check_latest, download_asset,
+    open_release_page, run_startup_auto_update,
+};
 
 fn looks_like_resource_root(dir: &Path) -> bool {
     dir.join("media").is_dir()
@@ -262,6 +265,24 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
         version = env!("CARGO_PKG_VERSION"),
         "resource root"
     );
+
+    // 启动主窗口前检查更新（复用 update 清单竞速逻辑；确认安装则退出，不进主界面）。
+    // GPU 软渲染重试 / 自动化巡检不再弹窗。
+    let mut startup_update_done = force_soft;
+    if !force_soft && !env_flag("STARQUAKE_AUTOTEST") {
+        let dismissed_before = cfg.update.last_dismissed_update_version.clone();
+        match run_startup_auto_update(&mut cfg.update, env!("CARGO_PKG_VERSION")) {
+            StartupUpdateOutcome::Exit => return Ok(()),
+            StartupUpdateOutcome::Continue { checked } => {
+                startup_update_done = checked;
+                if cfg.update.last_dismissed_update_version != dismissed_before {
+                    if let Err(e) = cfg.save_user_overlay() {
+                        tracing::warn!("保存已跳过更新版本失败: {e:#}");
+                    }
+                }
+            }
+        }
+    }
     let basemap = BasemapMode::resolve(&cfg.map.basemap, &cfg.ui.theme);
     let geodata_dir = resolve_geodata_dir(&cfg.map.geodata_dir);
     tracing::info!(
@@ -473,7 +494,7 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
                 update_available: None,
                 update_status: String::new(),
                 update_busy: false,
-                update_checked: false,
+                update_checked: startup_update_done,
                 update_check_manual: false,
                 official_notices: OfficialNoticeState::load(),
                 notice_rx: None,
@@ -1640,6 +1661,7 @@ impl StarQuakeApp {
     }
 
     fn tick_update_check(&mut self, ctx: &egui::Context) {
+        // 启动前已检查过则不再自动查；设置里「检查更新」仍走 begin_update_check(true)
         if !self.update_checked && !self.splash.active() && self.cfg.update.check_on_startup {
             self.begin_update_check(false);
         }

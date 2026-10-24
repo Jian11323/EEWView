@@ -877,12 +877,18 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "启动时检查更新"), "啟動時檢查更新");
         m.insert((Lang::Ja, "启动时检查更新"), "起動時に更新を確認");
         m.insert((Lang::En, "启动时检查更新"), "Check for updates on startup");
+        m.insert((Lang::ZhTw, "启动前检查更新"), "啟動前檢查更新");
+        m.insert((Lang::Ja, "启动前检查更新"), "起動前に更新を確認");
+        m.insert((Lang::En, "启动前检查更新"), "Check for updates before startup");
         m.insert((Lang::ZhTw, "从 GitHub Releases 查询是否有新版本"), "從 GitHub Releases 查詢是否有新版本");
         m.insert((Lang::Ja, "从 GitHub Releases 查询是否有新版本"), "GitHub Releases で新バージョンを確認");
         m.insert((Lang::En, "从 GitHub Releases 查询是否有新版本"), "Query GitHub Releases for a newer build");
         m.insert((Lang::ZhTw, "拉取更新清单判断是否有新版本"), "拉取更新清單判斷是否有新版本");
         m.insert((Lang::Ja, "拉取更新清单判断是否有新版本"), "更新マニフェストで新バージョンを確認");
         m.insert((Lang::En, "拉取更新清单判断是否有新版本"), "Fetch the update manifest for a newer build");
+        m.insert((Lang::ZhTw, "进入主界面前拉取清单；有新版本先询问"), "進入主介面前拉取清單；有新版本先詢問");
+        m.insert((Lang::Ja, "进入主界面前拉取清单；有新版本先询问"), "主画面の前にマニフェストを取得し、新版があれば確認");
+        m.insert((Lang::En, "进入主界面前拉取清单；有新版本先询问"), "Fetch the manifest before the main UI; prompt if newer");
         m.insert((Lang::ZhTw, "立即拉取 update/manifest.json"), "立即拉取 update/manifest.json");
         m.insert((Lang::Ja, "立即拉取 update/manifest.json"), "update/manifest.json を取得");
         m.insert((Lang::En, "立即拉取 update/manifest.json"), "Fetch update/manifest.json now");
@@ -892,6 +898,9 @@ fn table() -> &'static HashMap<(Lang, &'static str), &'static str> {
         m.insert((Lang::ZhTw, "点击「立即更新」后下载并替换本机程序"), "點擊「立即更新」後下載並替換本機程式");
         m.insert((Lang::Ja, "点击「立即更新」后下载并替换本机程序"), "「今すぐ更新」でダウンロードし差し替え");
         m.insert((Lang::En, "点击「立即更新」后下载并替换本机程序"), "Download and replace after clicking Update Now");
+        m.insert((Lang::ZhTw, "确认后下载并替换本机程序（关闭则仅打开发布页）"), "確認後下載並替換本機程式（關閉則僅打開發布頁）");
+        m.insert((Lang::Ja, "确认后下载并替换本机程序（关闭则仅打开发布页）"), "確認後に差し替え（オフ時はリリースページのみ）");
+        m.insert((Lang::En, "确认后下载并替换本机程序（关闭则仅打开发布页）"), "Download and replace after confirm (or open release page only)");
         m.insert((Lang::ZhTw, "检查更新"), "檢查更新");
         m.insert((Lang::Ja, "检查更新"), "更新を確認");
         m.insert((Lang::En, "检查更新"), "Check for updates");

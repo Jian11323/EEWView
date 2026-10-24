@@ -36,12 +36,15 @@ pub struct AppConfig {
 /// 启动检查与一键安装更新。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateConfig {
-    /// 启动后拉取更新清单
+    /// 启动主窗口前拉取更新清单
     #[serde(default = "default_true")]
     pub check_on_startup: bool,
     /// 用户确认后自动下载并应用（退出后替换便携包 / 启动安装包）
     #[serde(default = "default_true")]
     pub auto_install: bool,
+    /// 启动询问时点「否」记下的远程版本；与清单一致则不再弹窗（设置里手动检查仍会问）
+    #[serde(default)]
+    pub last_dismissed_update_version: String,
 }
 
 impl Default for UpdateConfig {
@@ -49,6 +52,7 @@ impl Default for UpdateConfig {
         Self {
             check_on_startup: true,
             auto_install: true,
+            last_dismissed_update_version: String::new(),
         }
     }
 }

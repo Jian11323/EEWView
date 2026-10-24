@@ -2448,11 +2448,11 @@ fn draw_advanced(ui: &mut Ui, draft: &mut AppConfig, action: &mut Option<Setting
     });
 
     section(ui, "软件更新", "\u{21bb}", |ui| {
-        control_row(ui, "启动时检查更新", "拉取更新清单判断是否有新版本", "\u{21bb}", |ui| {
+        control_row(ui, "启动前检查更新", "进入主界面前拉取清单；有新版本先询问", "\u{21bb}", |ui| {
             toggle(ui, &mut draft.update.check_on_startup);
         });
         row_divider(ui);
-        control_row(ui, "确认后自动安装", "点击「立即更新」后下载并替换本机程序", "\u{21bb}", |ui| {
+        control_row(ui, "确认后自动安装", "确认后下载并替换本机程序（关闭则仅打开发布页）", "\u{21bb}", |ui| {
             toggle(ui, &mut draft.update.auto_install);
         });
         row_divider(ui);

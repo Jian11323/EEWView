@@ -553,6 +553,159 @@ pub fn open_release_page(url: &str) {
     }
 }
 
+/// 启动主窗口前的检查结果（安装成功时通常已 `process::exit`，不会回到调用方）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupUpdateOutcome {
+    /// 继续进主界面；`checked=true` 表示本轮已查过，主界面内勿再自动查
+    Continue { checked: bool },
+    /// 已触发安装并应退出（兜底；正常路径在 `apply_and_relaunch` 内 exit）
+    Exit,
+}
+
+/// 启动主窗口前检查更新：复用 `check_latest` / `download_asset` / `apply_and_relaunch`。
+///
+/// 流程对齐「滚动字幕」：有新版本则原生对话框询问；确认后下载安装并退出，不创建主窗口。
+/// `cfg.last_dismissed_update_version` 可能被改写；调用方应在 Continue 时按需 `save_user_overlay`。
+pub fn run_startup_auto_update(
+    cfg: &mut starquake_config::UpdateConfig,
+    local_version: &str,
+) -> StartupUpdateOutcome {
+    if !cfg.check_on_startup {
+        return StartupUpdateOutcome::Continue { checked: false };
+    }
+
+    // 非 Windows 无 MessageBox 确认：留给主界面内弹窗
+    #[cfg(not(windows))]
+    {
+        let _ = local_version;
+        return StartupUpdateOutcome::Continue { checked: false };
+    }
+
+    #[cfg(windows)]
+    {
+        let avail = match check_latest(local_version) {
+            Ok(Some(info)) => info,
+            Ok(None) => return StartupUpdateOutcome::Continue { checked: true },
+            Err(e) => {
+                warn!("启动前检查更新失败（已跳过）: {e:#}");
+                return StartupUpdateOutcome::Continue { checked: true };
+            }
+        };
+
+        let dismissed = cfg.last_dismissed_update_version.trim();
+        if !dismissed.is_empty() && dismissed == avail.version.trim() {
+            info!(
+                ver = %avail.version,
+                "启动前检查更新：已跳过该版本，不再询问"
+            );
+            return StartupUpdateOutcome::Continue { checked: true };
+        }
+
+        let body = avail.body.trim();
+        let ask = if body.is_empty() {
+            format!(
+                "发现新版本 v{}（当前 v{}）。\n是否下载并安装？\n\n安装完成后将自动启动新版本。",
+                avail.version, local_version
+            )
+        } else {
+            let notes = if body.chars().count() > 400 {
+                let t: String = body.chars().take(400).collect();
+                format!("{t}…")
+            } else {
+                body.to_string()
+            };
+            format!(
+                "发现新版本 v{}（当前 v{}）。\n是否下载并安装？\n\n安装完成后将自动启动新版本。\n\n{}",
+                avail.version, local_version, notes
+            )
+        };
+
+        if !native_yes_no("发现新版本", &ask) {
+            cfg.last_dismissed_update_version = avail.version.clone();
+            info!(ver = %avail.version, "启动前检查更新：用户暂不更新");
+            return StartupUpdateOutcome::Continue { checked: true };
+        }
+
+        if !cfg.auto_install {
+            open_release_page(&avail.html_url);
+            return StartupUpdateOutcome::Continue { checked: true };
+        }
+
+        info!(ver = %avail.version, "启动前检查更新：开始下载");
+        match download_asset(&avail) {
+            Ok(path) => {
+                if let Err(e) = apply_and_relaunch(&path) {
+                    warn!("启动前应用更新失败: {e:#}");
+                    native_info(
+                        "更新失败",
+                        &format!("应用更新失败：{e:#}\n将继续启动当前版本。"),
+                    );
+                    StartupUpdateOutcome::Continue { checked: true }
+                } else {
+                    StartupUpdateOutcome::Exit
+                }
+            }
+            Err(e) => {
+                warn!("启动前下载更新失败: {e:#}");
+                native_info(
+                    "更新失败",
+                    &format!("下载失败：{e:#}\n将继续启动当前版本。"),
+                );
+                StartupUpdateOutcome::Continue { checked: true }
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn native_yes_no(title: &str, message: &str) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONQUESTION, MB_YESNO, IDYES,
+    };
+    fn wide(s: &str) -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+    let text = wide(message);
+    let caption = wide(title);
+    let r = unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_YESNO | MB_ICONQUESTION,
+        )
+    };
+    r == IDYES
+}
+
+#[cfg(windows)]
+fn native_info(title: &str, message: &str) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONINFORMATION, MB_OK,
+    };
+    fn wide(s: &str) -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+    let text = wide(message);
+    let caption = wide(title);
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
