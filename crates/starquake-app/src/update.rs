@@ -1,7 +1,6 @@
 //! 从静态更新清单检查 / 下载 / 应用更新。
 //!
-//! 对齐滚动字幕：拉取 `update/manifest.json`（raw / jsDelivr），
-//! 不依赖 `api.github.com`（国内易 403）。
+//! 拉取 Gitee 仓库静态清单 `update/manifest.json`（不走 GitHub / jsDelivr）。
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -15,13 +14,13 @@ use tracing::{info, warn};
 const UA: &str = concat!(
     "StarQuake/",
     env!("CARGO_PKG_VERSION"),
-    " (+https://github.com/Jian11323/StarQuake)"
+    " (+https://gitee.com/jian0786/starquake)"
 );
 
-/// 清单镜像（按序尝试；均为静态 JSON，避开 GitHub API）。
+/// 清单地址（按序尝试；Gitee raw，避开 GitHub / jsDelivr）。
 const MANIFEST_URLS: &[&str] = &[
-    "https://raw.githubusercontent.com/Jian11323/StarQuake/main/update/manifest.json",
-    "https://cdn.jsdelivr.net/gh/Jian11323/StarQuake@main/update/manifest.json",
+    "https://gitee.com/jian0786/starquake/raw/master/update/manifest.json",
+    "https://gitee.com/jian0786/starquake/raw/main/update/manifest.json",
 ];
 
 #[derive(Debug, Clone)]
@@ -196,7 +195,7 @@ pub fn check_latest(local_version: &str) -> Result<Option<AvailableUpdate>> {
     } else if !m.release_notes_url.trim().is_empty() {
         m.release_notes_url.clone()
     } else {
-        format!("https://github.com/Jian11323/StarQuake/releases/tag/v{ver}")
+        format!("https://gitee.com/jian0786/starquake/releases/tag/v{ver}")
     };
     Ok(Some(AvailableUpdate {
         version: ver.clone(),

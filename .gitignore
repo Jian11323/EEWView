@@ -51,6 +51,8 @@ config/local.toml
 .env
 .env.*
 !**/.env.example
+.gitee_token
+.gitee_token.*
 
 # ===== 地牛倒计时：非自由许可，默认不进公开仓库 =====
 media/sound/countdown.wav

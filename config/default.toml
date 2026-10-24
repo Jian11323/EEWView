@@ -231,7 +231,7 @@ ws_url = "wss://api-cencint-public.nowquake.cn/websocket"
 list_page_size = 20
 
 [update]
-# 启动后拉取 update/manifest.json（raw / jsDelivr）检查新版本
+# 启动后拉取 Gitee update/manifest.json 检查新版本
 check_on_startup = true
 # 「立即更新」时下载并应用安装包 / 便携包
 auto_install = true

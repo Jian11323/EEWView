@@ -38,6 +38,11 @@ def copy_ignore_patterns() -> tuple[str, ...]:
         "local.toml",
         "Thumbs.db",
         ".DS_Store",
+        # 本机密钥：禁止打进便携包 / 安装包
+        ".gitee_token",
+        ".gitee_token.*",
+        ".env",
+        ".env.*",
         # 仅嵌入 Regular；其它字重体积大且未使用
         "LXGWWenKai-Light.ttf",
         "LXGWWenKai-Medium.ttf",
