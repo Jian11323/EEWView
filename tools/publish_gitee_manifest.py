@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """把本地 update/manifest.json 推到 Gitee（发版后同步清单）。
 
+API 主机用 api.gitee.com（gitee.com/api/v5/repos 常被 WAF 拦截返回 HTML 403）。
+
 用法：
   python tools/publish_gitee_manifest.py
 
@@ -41,7 +43,7 @@ def load_token() -> str:
 
 def api(method: str, path: str, token: str, data: dict | None = None) -> tuple[int, object]:
     q = urllib.parse.urlencode({"access_token": token})
-    url = f"https://gitee.com/api/v5{path}"
+    url = f"https://api.gitee.com/api/v5{path}"  # gitee.com/api 常被 WAF 403
     url = url + ("&" if "?" in url else "?") + q
     body = None
     headers = {"User-Agent": "StarQuake-publish-gitee-manifest"}

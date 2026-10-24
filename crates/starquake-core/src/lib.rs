@@ -529,24 +529,24 @@ pub struct PrecipFrame {
     pub polys: Vec<PrecipPoly>,
 }
 
-/// 台风列表指纹（对齐 eewcn `_typhoonDataFingerprint`）：id/点数/末点时空与强度。
+/// 单条台风指纹：id/点数/末点时空与强度。
+pub fn typhoon_one_fingerprint(tf: &TyphoonInfo) -> String {
+    let last = tf.points.last();
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}",
+        tf.id,
+        tf.points.len(),
+        last.map(|p| p.time_text.as_str()).unwrap_or(""),
+        last.map(|p| p.longitude).unwrap_or(tf.longitude),
+        last.map(|p| p.latitude).unwrap_or(tf.latitude),
+        last.map(|p| p.power).unwrap_or(tf.power),
+        last.map(|p| p.strong.as_str()).unwrap_or(tf.strong.as_str()),
+    )
+}
+
+/// 台风列表指纹（对齐 eewcn `_typhoonDataFingerprint`）。
 pub fn typhoon_data_fingerprint(list: &[TyphoonInfo]) -> String {
-    let mut parts: Vec<String> = list
-        .iter()
-        .map(|tf| {
-            let last = tf.points.last();
-            format!(
-                "{}|{}|{}|{}|{}|{}|{}",
-                tf.id,
-                tf.points.len(),
-                last.map(|p| p.time_text.as_str()).unwrap_or(""),
-                last.map(|p| p.longitude).unwrap_or(tf.longitude),
-                last.map(|p| p.latitude).unwrap_or(tf.latitude),
-                last.map(|p| p.power).unwrap_or(tf.power),
-                last.map(|p| p.strong.as_str()).unwrap_or(tf.strong.as_str()),
-            )
-        })
-        .collect();
+    let mut parts: Vec<String> = list.iter().map(typhoon_one_fingerprint).collect();
     parts.sort();
     parts.join(";")
 }
@@ -565,9 +565,24 @@ pub fn typhoon_max_wind_radius_km(tf: &TyphoonInfo) -> f64 {
     max_r
 }
 
-/// 视角目标：活跃台风中心均值 + 跟焦半径 km（对齐 eewcn `fitViewportToTyphoon`，默认 250）。
+const TYPHOON_DEFAULT_FOCUS_RADIUS_KM: f64 = 250.0;
+
+/// 单条台风视角目标：中心 + 跟焦半径 km（无风圈时默认 250）。
+pub fn typhoon_focus_one(tf: &TyphoonInfo) -> Option<(f64, f64, f64)> {
+    if tf.latitude.abs() <= 0.01 && tf.longitude.abs() <= 0.01 {
+        return None;
+    }
+    let max_r = typhoon_max_wind_radius_km(tf);
+    let radius = if max_r > 0.0 {
+        max_r
+    } else {
+        TYPHOON_DEFAULT_FOCUS_RADIUS_KM
+    };
+    Some((tf.longitude, tf.latitude, radius))
+}
+
+/// 多条台风时取中心均值（仅测试/兼容；跟焦请用「本轮变更」的 `typhoon_focus_one`）。
 pub fn typhoon_focus_lonlat_radius(list: &[TyphoonInfo]) -> Option<(f64, f64, f64)> {
-    const DEFAULT_FOCUS_RADIUS_KM: f64 = 250.0;
     let mut sum_lon = 0.0_f64;
     let mut sum_lat = 0.0_f64;
     let mut n = 0_usize;
@@ -587,7 +602,7 @@ pub fn typhoon_focus_lonlat_radius(list: &[TyphoonInfo]) -> Option<(f64, f64, f6
     let radius = if max_r > 0.0 {
         max_r
     } else {
-        DEFAULT_FOCUS_RADIUS_KM
+        TYPHOON_DEFAULT_FOCUS_RADIUS_KM
     };
     Some((sum_lon / n as f64, sum_lat / n as f64, radius))
 }
@@ -1403,9 +1418,6 @@ impl AppSnapshot {
         }
     }
 
-    /// 整表替换活跃台风列表（轮询快照）。
-    /// 指纹变化时置 `pending_typhoon_fly` / `pending_typhoon_hint`（对齐 eewcn）。
-
     /// 按种类写入或清除一路雷达（`None` 清除该 kind）。
     pub fn set_radar(&mut self, kind: RadarKind, frame: Option<RadarFrame>) {
         self.radars[kind.index()] = frame;
@@ -1420,17 +1432,56 @@ impl AppSnapshot {
         self.precip = frame;
     }
 
+    /// 整表替换活跃台风列表（轮询快照）。
+    /// 首包只建账，不抢默认速报/预警视角；之后仅对「本轮有变更」的那条置飞跃目标。
     pub fn replace_typhoons(&mut self, list: Vec<TyphoonInfo>) {
         let fp = typhoon_data_fingerprint(&list);
         if fp == self.typhoon_fingerprint {
             self.typhoons = list;
             return;
         }
-        let play_hint = !self.typhoon_fingerprint.is_empty();
+        let first_pack = self.typhoon_fingerprint.is_empty();
+        let old_fp: std::collections::HashMap<String, String> = self
+            .typhoons
+            .iter()
+            .map(|t| (t.id.clone(), typhoon_one_fingerprint(t)))
+            .collect();
+        let mut changed_ids: Vec<String> = Vec::new();
+        for tf in &list {
+            let new_one = typhoon_one_fingerprint(tf);
+            match old_fp.get(&tf.id) {
+                None => changed_ids.push(tf.id.clone()),
+                Some(old) if *old != new_one => changed_ids.push(tf.id.clone()),
+                _ => {}
+            }
+        }
         self.typhoon_fingerprint = fp;
         self.typhoons = list;
-        self.pending_typhoon_hint = play_hint;
-        self.pending_typhoon_fly = typhoon_focus_lonlat_radius(&self.typhoons);
+        if first_pack || changed_ids.is_empty() {
+            return;
+        }
+        // 多条同时变：取末点时间文案最新的一条（同则列表中靠后）
+        let target = self
+            .typhoons
+            .iter()
+            .filter(|t| changed_ids.iter().any(|id| id == &t.id))
+            .max_by(|a, b| {
+                let ta = a
+                    .points
+                    .last()
+                    .map(|p| p.time_text.as_str())
+                    .unwrap_or(a.update_text.as_str());
+                let tb = b
+                    .points
+                    .last()
+                    .map(|p| p.time_text.as_str())
+                    .unwrap_or(b.update_text.as_str());
+                ta.cmp(tb).then_with(|| a.id.cmp(&b.id))
+            });
+        if let Some(tf) = target {
+            self.pending_typhoon_hint = true;
+            self.pending_typhoon_fly = typhoon_focus_one(tf);
+        }
     }
 
     /// 插入火山情报；按 name+title+time 去重；新→旧。
@@ -2352,5 +2403,66 @@ mod eew_dedup_tests {
         assert!(snap.active.is_none());
         assert_eq!(snap.tab, SidebarTab::Eew);
         assert!(snap.pending_record_fly.is_none());
+    }
+
+    fn sample_typhoon(id: &str, lon: f64, lat: f64, time: &str) -> TyphoonInfo {
+        TyphoonInfo {
+            id: id.into(),
+            name: id.into(),
+            name_en: String::new(),
+            strong: "热带风暴".into(),
+            power: 8,
+            longitude: lon,
+            latitude: lat,
+            pressure_hpa: 990.0,
+            wind_speed_ms: 20.0,
+            move_direction: "北".into(),
+            move_speed_kmh: 10.0,
+            update_text: time.into(),
+            points: vec![TyphoonTrackPoint {
+                longitude: lon,
+                latitude: lat,
+                time_text: time.into(),
+                strong: "热带风暴".into(),
+                power: 8,
+                speed_ms: 20.0,
+                pressure_hpa: 990.0,
+                move_direction: "北".into(),
+                move_speed_kmh: 10.0,
+                radius7: None,
+                radius10: None,
+                radius12: None,
+                forecasts: vec![],
+            }],
+        }
+    }
+
+    #[test]
+    fn typhoon_first_pack_no_fly() {
+        let mut snap = AppSnapshot::empty();
+        snap.replace_typhoons(vec![
+            sample_typhoon("a", 120.0, 25.0, "2026-10-24 12:00"),
+            sample_typhoon("b", 140.0, 30.0, "2026-10-24 12:00"),
+        ]);
+        assert!(snap.pending_typhoon_fly.is_none());
+        assert!(!snap.pending_typhoon_hint);
+        assert_eq!(snap.typhoons.len(), 2);
+    }
+
+    #[test]
+    fn typhoon_update_flies_only_changed() {
+        let mut snap = AppSnapshot::empty();
+        snap.replace_typhoons(vec![
+            sample_typhoon("a", 120.0, 25.0, "2026-10-24 12:00"),
+            sample_typhoon("b", 140.0, 30.0, "2026-10-24 12:00"),
+        ]);
+        snap.replace_typhoons(vec![
+            sample_typhoon("a", 120.0, 25.0, "2026-10-24 12:00"),
+            sample_typhoon("b", 141.0, 31.0, "2026-10-24 15:00"),
+        ]);
+        let fly = snap.pending_typhoon_fly.expect("should fly");
+        assert!((fly.0 - 141.0).abs() < 1e-6);
+        assert!((fly.1 - 31.0).abs() < 1e-6);
+        assert!(snap.pending_typhoon_hint);
     }
 }

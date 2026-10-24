@@ -1225,7 +1225,7 @@ impl eframe::App for StarQuakeApp {
             self.snap.prune_expired_tsunami(now);
         }
 
-        // 无预警：相机始终聚焦最新一条速报（新速报强制飞，无视拖拽锁）
+        // 默认视角：无预警时始终跟最新速报（新速报强制飞，无视拖拽锁）；有预警则上面 cinema 已跟
         if !self.auto_center_pending && self.started.elapsed().as_secs_f64() >= 2.5 {
             let _ = self.shell.map.clear_idle_user_camera(15.0);
             let now = chrono::Utc::now().timestamp_millis();
@@ -1887,9 +1887,9 @@ impl StarQuakeApp {
         self.window_geom_save_at = Some(Instant::now());
     }
 
-    /// 台风指纹变化：提示音 + 视角跟焦（对齐 eewcn MapTyphoonLogic）。
+    /// 台风本轮有变更：提示音 + 飞到**变更的那条**（首包不飞；有预警时不抢镜头）。
     fn tick_typhoon_update(&mut self) {
-        // 启动界面只登记 pending，消失后再播/飞（首包跟焦不丢）
+        // 启动界面只登记 pending，消失后再播/飞
         if self.splash.active() {
             return;
         }
@@ -1907,7 +1907,15 @@ impl StarQuakeApp {
         if !self.cfg.ui.show_typhoons || !self.cfg.sources.typhoon.enabled {
             return;
         }
-        // eewcn: zoomLevel<=3 不跟焦；锁定视角（用户拖拽）也不跟
+        // 默认视角：有预警跟预警；无预警跟最新速报。预警传播中不抢台风镜头。
+        let now = chrono::Utc::now().timestamp_millis();
+        let eew_live = self.snap.eew_list.iter().any(|e| {
+            eew_wave_live(e, now, &self.snap.wave_spread_km, self.travel.as_ref())
+        });
+        if eew_live {
+            return;
+        }
+        // zoom<=3 不跟焦；用户拖拽锁定也不跟
         if self.shell.map.zoom <= 3.0 || self.shell.map.user_camera_override {
             return;
         }

@@ -2,15 +2,19 @@
   "latest_version": "2.3.0",
   "min_supported_version": "2.0.0",
   "channel": "stable",
-  "notes": "地图雷达/降水叠加透明度可调；启动前自动更新加固（便携 zip 与安装包 setup 静默覆盖）；全项目 QA / 数据源压测编排；音效与烈度/断层相关核对。",
+  "notes": "台风跟焦改为「本轮变更的那条」；无预警默认跟最新速报，有预警跟预警（首包台风不抢镜头）。地图雷达/降水透明度；启动前自动更新加固；全项目 QA / 数据源压测。",
   "installer": {
     "url": "https://gitee.com/jian0786/starquake/releases/download/v2.3.0/StarQuake_2.3.0_setup.exe",
-    "sha256": "25fbd2689a2b2ac58ab113dba0eddba2989830b291d39a0846af88e823e5af84",
+    "sha256": "fc7b6517cec99c347afacf2903eb390f3a78148d8724c15261936d71c251e8c8",
     "user_interface": "progress"
   },
   "zip": {
     "url": "https://gitee.com/jian0786/starquake/releases/download/v2.3.0/StarQuake_2.3.0_portable.zip",
-    "sha256": "9b641e0121a3e5dbfde7fd2c6b4eb53807d060eb60cfca183354b8171a52d72b"
+    "sha256": "5270bc29b5bce8aac6f66c478fa1edaf5d23fb13d3e64c8237ef44c77d2cfcec"
+  },
+  "linux": {
+    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.3.0/StarQuake_2.3.0_linux_x86_64.tar.gz",
+    "sha256": "7cdab03f497939a2fd0066a6229bb3828e99588931486c2581522d0f4d20d334"
   },
   "release_notes_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.3.0",
   "html_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.3.0"
