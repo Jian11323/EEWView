@@ -12,7 +12,8 @@
   EEWVIEW_STRESS_SECS   运行秒数，默认 180（FULL 时默认 300）
   EEWVIEW_STRESS_WS     1=WebSocket（需 websockets），默认 1
 
-覆盖：config/default.toml + config/local.toml（密钥不入库、不写入报告）。
+覆盖：config/default.toml + config/local.toml +
+  %APPDATA%/StarQuake/settings.json（仅读取 at_/rt_，密钥不入库、不写入报告）。
 报告：logs/stress_live_YYYYMMDD_HHMMSS.json
 """
 from __future__ import annotations
@@ -45,6 +46,12 @@ DEFAULTS = {
     "pancakes_base": "https://api.aloys23.link",
     "pancakes_ws": "wss://api.aloys23.link",
     "typhoon": "https://api.sismotide.top/get/typhoon.json",
+    "radar_cn": "https://api.sismotide.top/get/radar.json",
+    "radar_jp": "https://api.sismotide.top/get/radar-japan.json",
+    "radar_tw": "https://api.sismotide.top/get/radar-taiwan.json",
+    "precip": "https://api.sismotide.top/get/precip-forecast.json",
+    "weather_ws": "wss://api.sismotide.top/weather",
+    "fssn_ws": "wss://fssn-api.fanstudio.tech/fssn",
 }
 
 UA = "StarQuake-stress/2.0 (+https://github.com/Jian11323/StarQuake)"
@@ -71,6 +78,9 @@ def parse_cfg(text: str) -> dict[str, Any]:
         "p2p_enabled": True,
         "pancakes_enabled": True,
         "typhoon_enabled": True,
+        "map_wx_enabled": True,
+        "weather_enabled": True,
+        "fssn_enabled": True,
         "jma_station": True,
         "snet": False,
         "kma_station": True,
@@ -112,6 +122,12 @@ def parse_cfg(text: str) -> dict[str, Any]:
                 cfg["pancakes_enabled"] = on
             elif section == "sources.typhoon":
                 cfg["typhoon_enabled"] = on
+            elif section == "sources.map_wx":
+                cfg["map_wx_enabled"] = on
+            elif section == "sources.weather":
+                cfg["weather_enabled"] = on
+            elif section == "sources.fssn":
+                cfg["fssn_enabled"] = on
 
         if section == "sources.stations":
             if key == "jma_enabled":
@@ -164,7 +180,94 @@ def parse_cfg(text: str) -> dict[str, Any]:
         if section == "sources.typhoon" and key == "url":
             cfg["urls"]["typhoon"] = unquote(val)
 
+        if section == "sources.map_wx":
+            if key == "radar_china_url":
+                cfg["urls"]["radar_cn"] = unquote(val)
+            if key == "radar_japan_url":
+                cfg["urls"]["radar_jp"] = unquote(val)
+            if key == "radar_taiwan_url":
+                cfg["urls"]["radar_tw"] = unquote(val)
+            if key == "precip_url":
+                cfg["urls"]["precip"] = unquote(val)
+
+        if section == "sources.weather" and key == "ws_url":
+            cfg["urls"]["weather_ws"] = unquote(val)
+        if section == "sources.fssn" and key == "ws_url":
+            cfg["urls"]["fssn_ws"] = unquote(val)
+
     return cfg
+
+
+def merge_user_settings_tokens(cfg: dict[str, Any]) -> None:
+    """从用户目录 settings.json 补 at_/rt_（不写进报告正文）。"""
+    appdata = os.environ.get("APPDATA") or ""
+    if not appdata:
+        return
+    path = Path(appdata) / "StarQuake" / "settings.json"
+    if not path.is_file():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    jian = (data.get("sources") or {}).get("jian") or {}
+    at = str(jian.get("access_token") or "").strip()
+    rt = str(jian.get("refresh_token") or "").strip()
+    if at.startswith("at_"):
+        cfg["has_jian_at"] = True
+        cfg["jian_at"] = at
+    if rt.startswith("rt_"):
+        cfg["has_jian_rt"] = True
+        cfg["jian_rt"] = rt
+
+
+def exchange_rt_to_at(refresh_token: str) -> str | None:
+    """rt_ → at_（对齐客户端 auth::exchange_access_token）。"""
+    rt = (refresh_token or "").strip()
+    if not rt.startswith("rt_"):
+        return None
+    req = urllib.request.Request(
+        "https://auth.sismotide.top/api/access",
+        data=b"",
+        method="POST",
+        headers={
+            "User-Agent": UA,
+            "Authorization": f"Bearer {rt}",
+            "Accept": "application/json",
+            "Content-Length": "0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw = resp.read()
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+        tok = str(
+            (data.get("token") if isinstance(data, dict) else None)
+            or (data.get("Data", {}) if isinstance(data, dict) else {}).get("token")
+            or ""
+        ).strip()
+        if tok.startswith("at_"):
+            return tok
+        # 兼容字段名 access_token
+        tok2 = str((data.get("access_token") if isinstance(data, dict) else None) or "").strip()
+        return tok2 if tok2.startswith("at_") else None
+    except Exception as e:  # noqa: BLE001
+        print(f"  warn: rt_->at_ exchange failed: {e}")
+        return None
+
+
+def jian_query_key(cfg: dict[str, Any]) -> str | None:
+    """鉴权必须用短期 at_；仅有 rt_ 时先换票。"""
+    if cfg.get("jian_at") and str(cfg["jian_at"]).startswith("at_"):
+        return cfg["jian_at"]
+    if cfg.get("jian_rt"):
+        at = exchange_rt_to_at(cfg["jian_rt"])
+        if at:
+            cfg["jian_at"] = at
+            cfg["has_jian_at"] = True
+            print("  jian: exchanged rt_ -> at_ for WS key")
+            return at
+    return None
 
 
 def http_once(url: str, timeout: float = 25.0) -> dict[str, Any]:
@@ -419,6 +522,7 @@ def main() -> int:
     use_ws = _truthy(os.environ.get("EEWVIEW_STRESS_WS", "1"))
 
     cfg = parse_cfg(load_merged_toml_text())
+    merge_user_settings_tokens(cfg)
     if full:
         # 全开：压测时不因配置关闭而跳过公开源
         for k in (
@@ -427,6 +531,9 @@ def main() -> int:
             "p2p_enabled",
             "pancakes_enabled",
             "typhoon_enabled",
+            "map_wx_enabled",
+            "weather_enabled",
+            "fssn_enabled",
             "jma_station",
             "kma_station",
             "snet",
@@ -476,6 +583,14 @@ def main() -> int:
         http_jobs.append(("pancakes_volcano", f"{base}/api/v1/alert/volcano/jma", 15.0))
     if cfg["typhoon_enabled"]:
         http_jobs.append(("typhoon", u["typhoon"], 12.0))
+    if cfg.get("map_wx_enabled", True):
+        # GET 限流较严：拉长间隔，避免整段 429
+        http_jobs.append(("radar_cn", u["radar_cn"], 45.0))
+        http_jobs.append(("radar_jp", u["radar_jp"], 50.0))
+        http_jobs.append(("radar_tw", u["radar_tw"], 55.0))
+        http_jobs.append(
+            ("precip_24", f"{u['precip'].rstrip('?')}?period=24", 60.0)
+        )
 
     # 3) WS 任务
     ws_jobs: list[tuple[str, str, list[str], str | None]] = []
@@ -493,10 +608,14 @@ def main() -> int:
             ws_jobs.append(("p2p_ws", u["p2p_ws"], [], None))
         if cfg["pancakes_enabled"]:
             ws_jobs.append(("pancakes_ws", u["pancakes_ws"], [], None))
-        # /all 需 key；三条测站中转无需鉴权
-        key = cfg["jian_at"] or None
+        # /all、气象需 key；测站中转无需鉴权
+        key = jian_query_key(cfg)
         if cfg["jian_enabled"]:
             ws_jobs.append(("jian_all", u["jian_ws"], ["ping"], key))
+        if cfg.get("weather_enabled", True):
+            ws_jobs.append(("weather", u["weather_ws"], ["ping"], key))
+        if cfg.get("fssn_enabled", True):
+            ws_jobs.append(("fssn", u["fssn_ws"], [], None))
         if cfg["jma_station"]:
             ws_jobs.append(("kmoni", u["kmoni_ws"], [], None))
         if cfg["kma_station"]:

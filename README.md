@@ -109,6 +109,17 @@
 
 --- 
 
+## 开发自检
+
+- 全项目编排：python tools/full_qa.py（单测 → release 编译 → AUTOTEST → 测站验证 → 全源压测）
+- 仅压测：set EEWVIEW_STRESS=1&& set EEWVIEW_STRESS_FULL=1&& python tools/stress_live_sources.py
+- 仅测站：python tools/verify_station_adapters.py
+- 进程内巡检：set STARQUAKE_AUTOTEST=1&& target\release\starquake.exe
+
+报告写入 logs/full_qa_*.json / logs/stress_live_*.json（勿提交）。
+
+---
+
 ## 注意事项
 
 1. **非官方渠道**：本软件仅供信息展示与学习研究，**不构成**各国气象 / 地震主管部门的官方预警渠道。紧急情况下请以主管部门发布为准，并遵从当地防灾指引。
