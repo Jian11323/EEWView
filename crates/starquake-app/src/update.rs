@@ -1,27 +1,33 @@
 //! 从静态更新清单检查 / 下载 / 应用更新。
 //!
-//! 拉取 Gitee 仓库静态清单 `update/manifest.json`（不走 GitHub / jsDelivr）。
+//! 并行拉取 GitHub 与 Gitee 上的 `update/manifest.json` 与更新包，先成功者优先。
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::mpsc;
 use tracing::{info, warn};
 
 const UA: &str = concat!(
     "StarQuake/",
     env!("CARGO_PKG_VERSION"),
-    " (+https://gitee.com/jian0786/starquake)"
+    " (+https://github.com/Jian11323/StarQuake; +https://gitee.com/jian0786/starquake)"
 );
 
-/// 清单地址（按序尝试；Gitee raw，避开 GitHub / jsDelivr）。
+/// 清单地址（GitHub / Gitee 并行竞速，先成功者优先）。
 const MANIFEST_URLS: &[&str] = &[
     "https://gitee.com/jian0786/starquake/raw/master/update/manifest.json",
     "https://gitee.com/jian0786/starquake/raw/main/update/manifest.json",
+    "https://raw.githubusercontent.com/Jian11323/StarQuake/main/update/manifest.json",
+    "https://raw.githubusercontent.com/Jian11323/StarQuake/master/update/manifest.json",
 ];
+
+const GITEE_REPO_PREFIX: &str = "https://gitee.com/jian0786/starquake/";
+const GITHUB_REPO_PREFIX: &str = "https://github.com/Jian11323/StarQuake/";
 
 #[derive(Debug, Clone)]
 pub struct AvailableUpdate {
@@ -51,6 +57,9 @@ struct UpdateManifest {
     #[serde(default)]
     #[cfg_attr(windows, allow(dead_code))]
     linux: Option<ManifestAsset>,
+    /// 更新日志正文（弹窗展示）
+    #[serde(default)]
+    notes: String,
     #[serde(default)]
     release_notes_url: String,
     #[serde(default)]
@@ -100,40 +109,60 @@ fn http_client() -> Result<reqwest::blocking::Client> {
         .build()?)
 }
 
+fn try_fetch_manifest_one(
+    client: &reqwest::blocking::Client,
+    url: &str,
+) -> Result<UpdateManifest> {
+    let resp = client.get(url).send().with_context(|| format!("请求 {url}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().unwrap_or_default();
+        let snippet: String = body.chars().take(160).collect();
+        bail!("HTTP {status} {snippet}");
+    }
+    // 兼容带 BOM 的 UTF-8
+    let bytes = resp.bytes().context("读取清单正文")?;
+    let text = String::from_utf8_lossy(&bytes);
+    let text = text.trim_start_matches('\u{feff}');
+    serde_json::from_str::<UpdateManifest>(text).context("解析 JSON")
+}
+
 fn fetch_manifest(client: &reqwest::blocking::Client) -> Result<UpdateManifest> {
-    let mut last_err = None;
+    let (tx, rx) = mpsc::channel();
+    let n = MANIFEST_URLS.len();
     for url in MANIFEST_URLS {
-        match client.get(*url).send() {
-            Ok(resp) => {
-                let status = resp.status();
-                if !status.is_success() {
-                    let body = resp.text().unwrap_or_default();
-                    let snippet: String = body.chars().take(160).collect();
-                    last_err = Some(format!("{url} → HTTP {status} {snippet}"));
-                    continue;
-                }
-                // 兼容带 BOM 的 UTF-8
-                let bytes = resp.bytes().context("读取清单正文")?;
-                let text = String::from_utf8_lossy(&bytes);
-                let text = text.trim_start_matches('\u{feff}');
-                match serde_json::from_str::<UpdateManifest>(text) {
-                    Ok(m) => {
-                        info!(url = %url, ver = %m.latest_version, "更新清单已加载");
-                        return Ok(m);
-                    }
-                    Err(e) => {
-                        last_err = Some(format!("{url} → JSON: {e}"));
-                    }
-                }
+        let tx = tx.clone();
+        let client = client.clone();
+        let url = (*url).to_string();
+        std::thread::spawn(move || {
+            let result = try_fetch_manifest_one(&client, &url);
+            let _ = tx.send((url, result));
+        });
+    }
+    drop(tx);
+
+    let mut errors = Vec::new();
+    let mut remaining = n;
+    while remaining > 0 {
+        match rx.recv() {
+            Ok((url, Ok(m))) => {
+                info!(url = %url, ver = %m.latest_version, "更新清单已加载");
+                return Ok(m);
             }
-            Err(e) => {
-                last_err = Some(format!("{url} → {e}"));
+            Ok((url, Err(e))) => {
+                errors.push(format!("{url} → {e:#}"));
+                remaining -= 1;
             }
+            Err(_) => break,
         }
     }
     bail!(
         "无法获取更新清单：{}",
-        last_err.unwrap_or_else(|| "无可用镜像".into())
+        if errors.is_empty() {
+            "无可用镜像".into()
+        } else {
+            errors.join("；")
+        }
     )
 }
 
@@ -163,7 +192,28 @@ fn pick_platform_asset(m: &UpdateManifest) -> Result<(ManifestAsset, String)> {
 
 fn url_file_name(url: &str) -> Option<String> {
     let path = url.split('?').next().unwrap_or(url);
-    path.rsplit('/').next().map(|s| s.to_string()).filter(|s| !s.is_empty())
+    path.rsplit('/')
+        .next()
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// 由清单里的主 URL 推导 GitHub / Gitee 镜像，去重后并行下载。
+fn asset_mirror_urls(primary: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut push = |u: String| {
+        if !u.trim().is_empty() && !out.iter().any(|x| x == &u) {
+            out.push(u);
+        }
+    };
+    push(primary.trim().to_string());
+    if let Some(rest) = primary.strip_prefix(GITEE_REPO_PREFIX) {
+        push(format!("{GITHUB_REPO_PREFIX}{rest}"));
+    }
+    if let Some(rest) = primary.strip_prefix(GITHUB_REPO_PREFIX) {
+        push(format!("{GITEE_REPO_PREFIX}{rest}"));
+    }
+    out
 }
 
 /// 查询最新版；若无更新返回 `Ok(None)`。
@@ -197,14 +247,17 @@ pub fn check_latest(local_version: &str) -> Result<Option<AvailableUpdate>> {
     } else {
         format!("https://gitee.com/jian0786/starquake/releases/tag/v{ver}")
     };
+    let body = if !m.notes.trim().is_empty() {
+        m.notes.trim().to_string()
+    } else if !m.release_notes_url.trim().is_empty() {
+        format!("发行说明：{}", m.release_notes_url.trim())
+    } else {
+        String::new()
+    };
     Ok(Some(AvailableUpdate {
         version: ver.clone(),
         name: format!("StarQuake {ver}"),
-        body: if m.release_notes_url.trim().is_empty() {
-            String::new()
-        } else {
-            format!("发行说明：{}", m.release_notes_url.trim())
-        },
+        body,
         html_url: html,
         asset_url: asset.url,
         asset_name,
@@ -236,36 +289,93 @@ fn sha256_hex(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+fn download_one_url(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    dest: &Path,
+    expect_sha: &str,
+) -> Result<()> {
+    info!(url = %url, dest = %dest.display(), "下载更新包");
+    let mut resp = client.get(url).send().context("下载更新包")?;
+    if !resp.status().is_success() {
+        bail!("HTTP {}", resp.status());
+    }
+    let mut file = File::create(dest)?;
+    io::copy(&mut resp, &mut file)?;
+    file.flush()?;
+    if !expect_sha.is_empty() {
+        let got = sha256_hex(dest)?;
+        if got != expect_sha {
+            let _ = fs::remove_file(dest);
+            bail!("校验失败（期望 {expect_sha}，实际 {got}）");
+        }
+        info!(url = %url, "更新包 SHA256 校验通过");
+    }
+    Ok(())
+}
+
 /// 下载资源到暂存目录，返回本地文件路径。
+/// GitHub / Gitee 镜像并行下载，先成功（且校验通过）者优先。
 pub fn download_asset(info: &AvailableUpdate) -> Result<PathBuf> {
     let dir = staging_root()?;
     let dest = dir.join(&info.asset_name);
-    info!(url = %info.asset_url, dest = %dest.display(), "下载更新包");
+    let urls = asset_mirror_urls(&info.asset_url);
+    if urls.is_empty() {
+        bail!("更新包 URL 为空");
+    }
+
     let client = reqwest::blocking::Client::builder()
         .user_agent(UA)
         .timeout(std::time::Duration::from_secs(600))
         .redirect(reqwest::redirect::Policy::limited(8))
         .build()?;
-    let mut resp = client
-        .get(&info.asset_url)
-        .send()
-        .context("下载更新包")?;
-    if !resp.status().is_success() {
-        bail!("下载失败 HTTP {}", resp.status());
-    }
-    let mut file = File::create(&dest)?;
-    io::copy(&mut resp, &mut file)?;
-    file.flush()?;
 
-    if !info.sha256.is_empty() {
-        let got = sha256_hex(&dest)?;
-        if got != info.sha256 {
-            let _ = fs::remove_file(&dest);
-            bail!("更新包校验失败（期望 {}，实际 {}）", info.sha256, got);
-        }
-        info!("更新包 SHA256 校验通过");
+    let (tx, rx) = mpsc::channel();
+    let n = urls.len();
+    for (i, url) in urls.into_iter().enumerate() {
+        let tx = tx.clone();
+        let client = client.clone();
+        let part = dir.join(format!("part_{i}_{}", info.asset_name));
+        let sha = info.sha256.clone();
+        std::thread::spawn(move || {
+            let result = download_one_url(&client, &url, &part, &sha).map(|_| (url, part));
+            let _ = tx.send(result);
+        });
     }
-    Ok(dest)
+    drop(tx);
+
+    let mut errors = Vec::new();
+    let mut remaining = n;
+    while remaining > 0 {
+        match rx.recv() {
+            Ok(Ok((url, part))) => {
+                if part != dest {
+                    fs::rename(&part, &dest)
+                        .or_else(|_| {
+                            fs::copy(&part, &dest)?;
+                            fs::remove_file(&part)?;
+                            Ok::<(), io::Error>(())
+                        })
+                        .with_context(|| format!("落盘 {}", dest.display()))?;
+                }
+                info!(url = %url, dest = %dest.display(), "更新包下载完成");
+                return Ok(dest);
+            }
+            Ok(Err(e)) => {
+                errors.push(format!("{e:#}"));
+                remaining -= 1;
+            }
+            Err(_) => break,
+        }
+    }
+    bail!(
+        "下载失败：{}",
+        if errors.is_empty() {
+            "无可用镜像".into()
+        } else {
+            errors.join("；")
+        }
+    )
 }
 
 /// 应用已下载的更新包并重启（Windows 便携 zip / setup.exe；Linux tar.gz）。
@@ -389,7 +499,12 @@ fn extract_zip(zip_path: &Path, dest: &Path) -> Result<()> {
 
 fn extract_tar_gz(path: &Path, dest: &Path) -> Result<()> {
     let status = Command::new("tar")
-        .args(["-xzf", &path.to_string_lossy(), "-C", &dest.to_string_lossy()])
+        .args([
+            "-xzf",
+            &path.to_string_lossy(),
+            "-C",
+            &dest.to_string_lossy(),
+        ])
         .status()
         .context("执行 tar")?;
     if !status.success() {
@@ -454,11 +569,26 @@ mod tests {
     fn parse_manifest_shape() {
         let raw = r#"{
           "latest_version": "2.0.1",
+          "notes": "hello",
           "zip": { "url": "https://example.com/a.zip", "sha256": "" },
           "installer": { "url": "https://example.com/a.exe", "sha256": "" }
         }"#;
         let m: UpdateManifest = serde_json::from_str(raw).unwrap();
         assert_eq!(m.latest_version, "2.0.1");
+        assert_eq!(m.notes, "hello");
         assert!(m.zip.unwrap().url.contains("a.zip"));
+    }
+
+    #[test]
+    fn mirror_urls_gitee_and_github() {
+        let gitee = "https://gitee.com/jian0786/starquake/releases/download/v2.2.1/a.zip";
+        let urls = asset_mirror_urls(gitee);
+        assert_eq!(urls.len(), 2);
+        assert!(urls.iter().any(|u| u.contains("github.com/Jian11323")));
+        assert!(urls.iter().any(|u| u.contains("gitee.com/jian0786")));
+
+        let github = "https://github.com/Jian11323/StarQuake/releases/download/v2.2.1/a.zip";
+        let urls2 = asset_mirror_urls(github);
+        assert_eq!(urls2.len(), 2);
     }
 }
