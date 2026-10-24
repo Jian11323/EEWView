@@ -4,12 +4,16 @@
   "channel": "stable",
   "installer": {
     "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.0/StarQuake_2.2.0_setup.exe",
-    "sha256": "77987ada86c7ab45d4688320166ca790a43cf3ed700b2fd049a4f16c1f606fae",
+    "sha256": "38a4056b826221d91256368511387288ac285a7f6126f017edbcd37e0bfe0d30",
     "user_interface": "progress"
   },
   "zip": {
     "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.0/StarQuake_2.2.0_portable.zip",
-    "sha256": "19f44a13bdb66ece552ba5068e589bc4c64a7e5077fb186e979ef545958985fb"
+    "sha256": "6888d9418f7206fb1a71657fb0a37c9794a5c1424d50381134517aeb018ce325"
+  },
+  "linux": {
+    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.0/StarQuake_2.2.0_linux_x86_64.tar.gz",
+    "sha256": "6436b23f3960ee34ee02f87e97044b96d459eff97e24c16c7993b078406645a4"
   },
   "release_notes_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.2.0",
   "html_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.2.0"
