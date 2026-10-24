@@ -1,21 +1,17 @@
 {
-  "latest_version": "2.2.2",
+  "latest_version": "2.3.0",
   "min_supported_version": "2.0.0",
   "channel": "stable",
-  "notes": "修复托盘恢复/退出与系统通知；隐藏到托盘时降低内存占用；GPU/OpenGL 不可用时自动回退 CPU 软渲染；修正 SCEEW 烈度估算公式。",
+  "notes": "地图雷达/降水叠加透明度可调；启动前自动更新加固（便携 zip 与安装包 setup 静默覆盖）；全项目 QA / 数据源压测编排；音效与烈度/断层相关核对。",
   "installer": {
-    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.2/StarQuake_2.2.2_setup.exe",
-    "sha256": "c7307831a5e51954cec088202ea641331dbe8c59c9625dc43818d034ba45ecc6",
+    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.3.0/StarQuake_2.3.0_setup.exe",
+    "sha256": "25fbd2689a2b2ac58ab113dba0eddba2989830b291d39a0846af88e823e5af84",
     "user_interface": "progress"
   },
   "zip": {
-    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.2/StarQuake_2.2.2_portable.zip",
-    "sha256": "385b831712c316d8713a4f53f8256ce6c9f31bc9020fda4d68bdd181242841f5"
+    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.3.0/StarQuake_2.3.0_portable.zip",
+    "sha256": "9b641e0121a3e5dbfde7fd2c6b4eb53807d060eb60cfca183354b8171a52d72b"
   },
-  "linux": {
-    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.2/StarQuake_2.2.2_linux_x86_64.tar.gz",
-    "sha256": "11d5ac184678089d18f569fc25d6ddbc9f13a13da1b1ec49512d1307487cc668"
-  },
-  "release_notes_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.2.2",
-  "html_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.2.2"
+  "release_notes_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.3.0",
+  "html_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.3.0"
 }

@@ -29,6 +29,52 @@ const MANIFEST_URLS: &[&str] = &[
 const GITEE_REPO_PREFIX: &str = "https://gitee.com/jian0786/starquake/";
 const GITHUB_REPO_PREFIX: &str = "https://github.com/Jian11323/StarQuake/";
 
+fn env_truthy(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+        })
+        .unwrap_or(false)
+}
+
+/// 自动化端到端：跳过弹窗确认、忽略「稍后」记忆，便于本地压测更新链路。
+fn update_e2e() -> bool {
+    env_truthy("STARQUAKE_UPDATE_E2E")
+}
+
+/// E2E：强制优先选 setup.exe（不依赖真实 Program Files 路径）。
+fn update_e2e_prefer_installer() -> bool {
+    update_e2e() && env_truthy("STARQUAKE_UPDATE_PREFER_INSTALLER")
+}
+
+/// E2E：setup `/S /D=` 目标目录（避免写进真实 Program Files；仅 E2E 生效）。
+fn update_e2e_install_dir() -> Option<String> {
+    if !update_e2e() {
+        return None;
+    }
+    std::env::var("STARQUAKE_UPDATE_INSTALL_DIR")
+        .ok()
+        .map(|s| s.trim().trim_end_matches(['\\', '/']).to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// 清单 URL 列表：可用 `STARQUAKE_UPDATE_MANIFEST_URL` 覆盖（`;` / 换行分隔多地址）。
+fn manifest_urls() -> Vec<String> {
+    if let Ok(raw) = std::env::var("STARQUAKE_UPDATE_MANIFEST_URL") {
+        let urls: Vec<String> = raw
+            .split([';', '\n'])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        if !urls.is_empty() {
+            return urls;
+        }
+    }
+    MANIFEST_URLS.iter().map(|s| (*s).to_string()).collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct AvailableUpdate {
     pub version: String,
@@ -128,12 +174,12 @@ fn try_fetch_manifest_one(
 }
 
 fn fetch_manifest(client: &reqwest::blocking::Client) -> Result<UpdateManifest> {
+    let urls = manifest_urls();
     let (tx, rx) = mpsc::channel();
-    let n = MANIFEST_URLS.len();
-    for url in MANIFEST_URLS {
+    let n = urls.len();
+    for url in urls {
         let tx = tx.clone();
         let client = client.clone();
-        let url = (*url).to_string();
         std::thread::spawn(move || {
             let result = try_fetch_manifest_one(&client, &url);
             let _ = tx.send((url, result));
@@ -183,12 +229,13 @@ fn pick_platform_asset(m: &UpdateManifest) -> Result<(ManifestAsset, String)> {
     {
         let zip = m.zip.as_ref().filter(|a| !a.url.trim().is_empty());
         let installer = m.installer.as_ref().filter(|a| !a.url.trim().is_empty());
-        // 已安装版 → setup 优先；便携版 → zip 优先
-        let order: [Option<&ManifestAsset>; 2] = if running_from_program_files() {
-            [installer, zip]
-        } else {
-            [zip, installer]
-        };
+        // 已安装版 → setup 优先；便携版 → zip 优先（E2E 可强制 installer）
+        let order: [Option<&ManifestAsset>; 2] =
+            if running_from_program_files() || update_e2e_prefer_installer() {
+                [installer, zip]
+            } else {
+                [zip, installer]
+            };
         for a in order.into_iter().flatten() {
             let name = url_file_name(&a.url).unwrap_or_else(|| {
                 if a.url.to_ascii_lowercase().contains(".exe") {
@@ -400,6 +447,42 @@ pub fn download_asset(info: &AvailableUpdate) -> Result<PathBuf> {
     )
 }
 
+/// 生成 setup.exe 静默安装 bat 正文（可单测）。
+/// `e2e_install_dir` 非空时追加 NSIS `/D=`（须为最后参数、无引号），并优先从该目录拉起。
+#[cfg(windows)]
+fn installer_apply_script(setup: &str, e2e_install_dir: Option<&str>) -> String {
+    let mut body = String::from(
+        "@echo off\r\n\
+chcp 65001 >nul\r\n\
+title StarQuake update\r\n\
+echo.\r\n\
+echo   Updating StarQuake, please wait...\r\n\
+echo.\r\n\
+timeout /t 2 /nobreak >nul\r\n",
+    );
+    body.push_str(&format!("if not exist \"{setup}\" goto :eof\r\n"));
+    if let Some(dir) = e2e_install_dir {
+        // NSIS：/D= 必须最后且路径勿加引号
+        body.push_str(&format!("\"{setup}\" /S /D={dir}\r\n"));
+        body.push_str(&format!(
+            "if exist \"{dir}\\starquake.exe\" (start \"\" \"{dir}\\starquake.exe\" & goto :done)\r\n"
+        ));
+    } else {
+        body.push_str(&format!("\"{setup}\" /S\r\n"));
+    }
+    body.push_str(
+        "set \"L1=%ProgramFiles(x86)%\\StarQuake\\starquake.exe\"\r\n\
+set \"L2=%ProgramFiles%\\StarQuake\\starquake.exe\"\r\n\
+set \"L3=%LocalAppData%\\Programs\\StarQuake\\starquake.exe\"\r\n\
+if exist \"%L1%\" (start \"\" \"%L1%\" & goto :done)\r\n\
+if exist \"%L2%\" (start \"\" \"%L2%\" & goto :done)\r\n\
+if exist \"%L3%\" (start \"\" \"%L3%\" & goto :done)\r\n\
+:done\r\n\
+del \"%~f0\"\r\n",
+    );
+    body
+}
+
 /// 应用已下载的更新包并重启（Windows 便携 zip / setup.exe；Linux tar.gz）。
 pub fn apply_and_relaunch(package: &Path) -> Result<()> {
     let exe = std::env::current_exe().context("current_exe")?;
@@ -422,26 +505,7 @@ pub fn apply_and_relaunch(package: &Path) -> Result<()> {
             .unwrap_or_else(|| std::env::temp_dir().join("StarQuake_update"));
         let bat = stage.join("apply_installer.cmd");
         let setup = package.display().to_string();
-        let body = format!(
-            "@echo off\r\n\
-chcp 65001 >nul\r\n\
-title StarQuake update\r\n\
-echo.\r\n\
-echo   Updating StarQuake, please wait...\r\n\
-echo.\r\n\
-timeout /t 2 /nobreak >nul\r\n\
-if not exist \"{setup}\" goto :eof\r\n\
-\"{setup}\" /S\r\n\
-set \"L1=%ProgramFiles(x86)%\\StarQuake\\starquake.exe\"\r\n\
-set \"L2=%ProgramFiles%\\StarQuake\\starquake.exe\"\r\n\
-set \"L3=%LocalAppData%\\Programs\\StarQuake\\starquake.exe\"\r\n\
-if exist \"%L1%\" (start \"\" \"%L1%\" & goto :done)\r\n\
-if exist \"%L2%\" (start \"\" \"%L2%\" & goto :done)\r\n\
-if exist \"%L3%\" (start \"\" \"%L3%\" & goto :done)\r\n\
-:done\r\n\
-del \"%~f0\"\r\n",
-            setup = setup,
-        );
+        let body = installer_apply_script(&setup, update_e2e_install_dir().as_deref());
         fs::write(&bat, body)?;
         Command::new("cmd")
             .args(["/C", &bat.to_string_lossy()])
@@ -633,8 +697,11 @@ pub fn run_startup_auto_update(
     cfg: &mut starquake_config::UpdateConfig,
     local_version: &str,
 ) -> StartupUpdateOutcome {
-    if !cfg.check_on_startup {
+    if !cfg.check_on_startup && !update_e2e() {
         return StartupUpdateOutcome::Continue { checked: false };
+    }
+    if update_e2e() && !cfg.check_on_startup {
+        info!("STARQUAKE_UPDATE_E2E：强制开启启动检查更新");
     }
 
     // 非 Windows 无 MessageBox 确认：留给主界面内弹窗
@@ -656,7 +723,10 @@ pub fn run_startup_auto_update(
         };
 
         let dismissed = cfg.last_dismissed_update_version.trim();
-        if !dismissed.is_empty() && dismissed == avail.version.trim() {
+        if !update_e2e()
+            && !dismissed.is_empty()
+            && dismissed == avail.version.trim()
+        {
             info!(
                 ver = %avail.version,
                 "启动前检查更新：已跳过该版本，不再询问"
@@ -683,13 +753,16 @@ pub fn run_startup_auto_update(
             )
         };
 
-        if !native_yes_no("发现新版本", &ask) {
+        if !update_e2e() && !native_yes_no("发现新版本", &ask) {
             cfg.last_dismissed_update_version = avail.version.clone();
             info!(ver = %avail.version, "启动前检查更新：用户暂不更新");
             return StartupUpdateOutcome::Continue { checked: true };
         }
+        if update_e2e() {
+            info!(ver = %avail.version, "STARQUAKE_UPDATE_E2E：自动确认安装");
+        }
 
-        if !cfg.auto_install {
+        if !update_e2e() && !cfg.auto_install {
             open_release_page(&avail.html_url);
             return StartupUpdateOutcome::Continue { checked: true };
         }
@@ -772,6 +845,7 @@ fn native_info(title: &str, message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn semver_newer() {
@@ -820,4 +894,81 @@ mod tests {
         assert!(marker.is_file(), "apply 写 bat 时不得清空暂存");
         let _ = fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn manifest_urls_env_override() {
+        // SAFETY: 单测串行；仅本测读写该变量
+        std::env::set_var(
+            "STARQUAKE_UPDATE_MANIFEST_URL",
+            "http://127.0.0.1:9/manifest.json",
+        );
+        let urls = manifest_urls();
+        std::env::remove_var("STARQUAKE_UPDATE_MANIFEST_URL");
+        assert_eq!(urls, vec!["http://127.0.0.1:9/manifest.json".to_string()]);
+    }
+
+    #[test]
+    fn zip_apply_bat_lives_beside_package_not_wiping_staging() {
+        let stage = reset_staging().unwrap();
+        let package = stage.join("StarQuake_portable.zip");
+        // 最小 zip：内含 StarQuake/marker.txt
+        {
+            let file = File::create(&package).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file("StarQuake/update_e2e_marker.txt", opts).unwrap();
+            zip.write_all(b"2.2.3").unwrap();
+            zip.finish().unwrap();
+        }
+        let extract_dir = stage.join("extracted");
+        fs::create_dir_all(&extract_dir).unwrap();
+        extract_zip(&package, &extract_dir).unwrap();
+        let payload = find_payload_root(&extract_dir).unwrap();
+        assert!(payload.join("update_e2e_marker.txt").is_file());
+        // 模拟 apply：bat 写在 package 同级，不得 reset_staging
+        let bat = package.parent().unwrap().join("apply_update.cmd");
+        fs::write(&bat, b"@echo off\r\n").unwrap();
+        assert!(package.is_file(), "package must survive");
+        assert!(payload.join("update_e2e_marker.txt").is_file(), "payload must survive");
+        assert!(bat.is_file());
+        let _ = fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn installer_apply_script_silent_and_e2e_dir() {
+        let prod = installer_apply_script(r"C:\Temp\setup.exe", None);
+        assert!(prod.contains(r#""C:\Temp\setup.exe" /S"#));
+        assert!(!prod.contains("/D="));
+        assert!(prod.contains(r"%ProgramFiles(x86)%\StarQuake\starquake.exe"));
+
+        let e2e = installer_apply_script(
+            r"C:\Temp\setup.exe",
+            Some(r"C:\Users\Huawei\StarQuakeE2E\install"),
+        );
+        assert!(e2e.contains(
+            r#""C:\Temp\setup.exe" /S /D=C:\Users\Huawei\StarQuakeE2E\install"#
+        ));
+        assert!(e2e.contains(
+            r"C:\Users\Huawei\StarQuakeE2E\install\starquake.exe"
+        ));
+    }
+
+    #[test]
+    fn pick_platform_prefers_installer_when_e2e_flag() {
+        let raw = r#"{
+          "latest_version": "2.2.3",
+          "zip": { "url": "https://example.com/a.zip", "sha256": "" },
+          "installer": { "url": "https://example.com/a_setup.exe", "sha256": "" }
+        }"#;
+        let m: UpdateManifest = serde_json::from_str(raw).unwrap();
+        std::env::set_var("STARQUAKE_UPDATE_E2E", "1");
+        std::env::set_var("STARQUAKE_UPDATE_PREFER_INSTALLER", "1");
+        let (asset, name) = pick_platform_asset(&m).unwrap();
+        std::env::remove_var("STARQUAKE_UPDATE_PREFER_INSTALLER");
+        std::env::remove_var("STARQUAKE_UPDATE_E2E");
+        assert!(asset.url.contains("setup.exe"), "{asset:?}");
+        assert!(name.to_ascii_lowercase().ends_with(".exe"));
+    }
+
 }
