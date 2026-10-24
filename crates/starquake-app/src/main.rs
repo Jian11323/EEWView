@@ -267,8 +267,8 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
     );
 
     // 启动主窗口前检查更新（复用 update 清单竞速逻辑；确认安装则退出，不进主界面）。
-    // GPU 软渲染重试 / 自动化巡检不再弹窗。
-    let mut startup_update_done = force_soft;
+    // GPU 软渲染重试 / 自动化巡检不再弹窗、也不在 splash 后再自动查。
+    let mut startup_update_done = force_soft || env_flag("STARQUAKE_AUTOTEST");
     if !force_soft && !env_flag("STARQUAKE_AUTOTEST") {
         let dismissed_before = cfg.update.last_dismissed_update_version.clone();
         match run_startup_auto_update(&mut cfg.update, env!("CARGO_PKG_VERSION")) {
@@ -1796,6 +1796,11 @@ impl StarQuakeApp {
             open_release_page(&info.html_url);
         }
         if dismiss {
+            // 与启动前「否」一致：记下版本，避免下次启动再弹同一版
+            self.cfg.update.last_dismissed_update_version = info.version.clone();
+            if let Err(e) = self.cfg.save_user_overlay() {
+                tracing::warn!("保存已跳过更新版本失败: {e:#}");
+            }
             self.update_available = None;
             self.update_status.clear();
         }

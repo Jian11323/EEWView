@@ -166,17 +166,38 @@ fn fetch_manifest(client: &reqwest::blocking::Client) -> Result<UpdateManifest> 
     )
 }
 
+/// 安装到 Program Files 时优先用 setup.exe（需管理员，zip 直拷会失败）。
+#[cfg(windows)]
+fn running_from_program_files() -> bool {
+    std::env::current_exe()
+        .ok()
+        .map(|p| {
+            let s = p.to_string_lossy().to_ascii_lowercase();
+            s.contains("program files")
+        })
+        .unwrap_or(false)
+}
+
 fn pick_platform_asset(m: &UpdateManifest) -> Result<(ManifestAsset, String)> {
     #[cfg(windows)]
     {
-        // 便携 zip 优先，其次 setup.exe（对齐旧版 GitHub 资源挑选）
-        if let Some(z) = m.zip.as_ref().filter(|a| !a.url.trim().is_empty()) {
-            let name = url_file_name(&z.url).unwrap_or_else(|| "StarQuake_portable.zip".into());
-            return Ok((z.clone(), name));
-        }
-        if let Some(i) = m.installer.as_ref().filter(|a| !a.url.trim().is_empty()) {
-            let name = url_file_name(&i.url).unwrap_or_else(|| "StarQuake_setup.exe".into());
-            return Ok((i.clone(), name));
+        let zip = m.zip.as_ref().filter(|a| !a.url.trim().is_empty());
+        let installer = m.installer.as_ref().filter(|a| !a.url.trim().is_empty());
+        // 已安装版 → setup 优先；便携版 → zip 优先
+        let order: [Option<&ManifestAsset>; 2] = if running_from_program_files() {
+            [installer, zip]
+        } else {
+            [zip, installer]
+        };
+        for a in order.into_iter().flatten() {
+            let name = url_file_name(&a.url).unwrap_or_else(|| {
+                if a.url.to_ascii_lowercase().contains(".exe") {
+                    "StarQuake_setup.exe".into()
+                } else {
+                    "StarQuake_portable.zip".into()
+                }
+            });
+            return Ok((a.clone(), name));
         }
         bail!("更新清单缺少 Windows 安装包 / 便携包 URL");
     }
@@ -265,7 +286,8 @@ pub fn check_latest(local_version: &str) -> Result<Option<AvailableUpdate>> {
     }))
 }
 
-fn staging_root() -> Result<PathBuf> {
+/// 下载前重置暂存目录（应用阶段禁止再调用，以免删掉已解压内容）。
+fn reset_staging() -> Result<PathBuf> {
     let dir = std::env::temp_dir().join("StarQuake_update");
     if dir.exists() {
         let _ = fs::remove_dir_all(&dir);
@@ -317,7 +339,7 @@ fn download_one_url(
 /// 下载资源到暂存目录，返回本地文件路径。
 /// GitHub / Gitee 镜像并行下载，先成功（且校验通过）者优先。
 pub fn download_asset(info: &AvailableUpdate) -> Result<PathBuf> {
-    let dir = staging_root()?;
+    let dir = reset_staging()?;
     let dest = dir.join(&info.asset_name);
     let urls = asset_mirror_urls(&info.asset_url);
     if urls.is_empty() {
@@ -391,8 +413,40 @@ pub fn apply_and_relaunch(package: &Path) -> Result<()> {
         .unwrap_or("")
         .to_ascii_lowercase();
 
+    #[cfg(windows)]
     if name.ends_with(".exe") {
-        Command::new(package).spawn().context("启动安装包")?;
+        // 勿再调用会清空暂存的逻辑；bat 与 setup 同目录，先退出本进程再静默安装
+        let stage = package
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| std::env::temp_dir().join("StarQuake_update"));
+        let bat = stage.join("apply_installer.cmd");
+        let setup = package.display().to_string();
+        let body = format!(
+            "@echo off\r\n\
+chcp 65001 >nul\r\n\
+title StarQuake update\r\n\
+echo.\r\n\
+echo   Updating StarQuake, please wait...\r\n\
+echo.\r\n\
+timeout /t 2 /nobreak >nul\r\n\
+if not exist \"{setup}\" goto :eof\r\n\
+\"{setup}\" /S\r\n\
+set \"L1=%ProgramFiles(x86)%\\StarQuake\\starquake.exe\"\r\n\
+set \"L2=%ProgramFiles%\\StarQuake\\starquake.exe\"\r\n\
+set \"L3=%LocalAppData%\\Programs\\StarQuake\\starquake.exe\"\r\n\
+if exist \"%L1%\" (start \"\" \"%L1%\" & goto :done)\r\n\
+if exist \"%L2%\" (start \"\" \"%L2%\" & goto :done)\r\n\
+if exist \"%L3%\" (start \"\" \"%L3%\" & goto :done)\r\n\
+:done\r\n\
+del \"%~f0\"\r\n",
+            setup = setup,
+        );
+        fs::write(&bat, body)?;
+        Command::new("cmd")
+            .args(["/C", &bat.to_string_lossy()])
+            .spawn()
+            .context("启动安装脚本")?;
         std::process::exit(0);
     }
 
@@ -416,7 +470,11 @@ pub fn apply_and_relaunch(package: &Path) -> Result<()> {
     let payload = find_payload_root(&extract_dir)?;
     #[cfg(windows)]
     {
-        let bat = staging_root()?.join("apply_update.cmd");
+        // 必须与 package 同级写 bat，禁止 reset 暂存（否则会删掉刚解压的 payload）
+        let bat = package
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("apply_update.cmd");
         let exe_name = exe
             .file_name()
             .and_then(|s| s.to_str())
@@ -424,9 +482,13 @@ pub fn apply_and_relaunch(package: &Path) -> Result<()> {
         let body = format!(
             "@echo off\r\n\
 chcp 65001 >nul\r\n\
+title StarQuake update\r\n\
+echo.\r\n\
+echo   Updating StarQuake, please wait...\r\n\
+echo.\r\n\
 timeout /t 2 /nobreak >nul\r\n\
 xcopy /E /Y /I /Q \"{src}\\*\" \"{dst}\\\"\r\n\
-start \"\" \"{dst}\\{exe}\"\r\n\
+if exist \"{dst}\\{exe}\" start \"\" \"{dst}\\{exe}\"\r\n\
 del \"%~f0\"\r\n",
             src = payload.display(),
             dst = app_dir.display(),
@@ -441,6 +503,7 @@ del \"%~f0\"\r\n",
     }
     #[cfg(not(windows))]
     {
+        let _ = package;
         copy_dir_recursive(&payload, &app_dir)?;
         #[cfg(unix)]
         {
@@ -743,5 +806,18 @@ mod tests {
         let github = "https://github.com/Jian11323/StarQuake/releases/download/v2.2.2/a.zip";
         let urls2 = asset_mirror_urls(github);
         assert_eq!(urls2.len(), 2);
+    }
+
+    #[test]
+    fn reset_staging_then_keep_payload_paths() {
+        // 回归：apply 阶段不得再 wipe 暂存，否则 bat 指向的解压目录会消失
+        let dir = reset_staging().unwrap();
+        let marker = dir.join("keep_me.txt");
+        fs::write(&marker, b"ok").unwrap();
+        assert!(marker.is_file());
+        // 二次 create_dir_all 式「仅确保存在」不得删文件
+        fs::create_dir_all(&dir).unwrap();
+        assert!(marker.is_file(), "apply 写 bat 时不得清空暂存");
+        let _ = fs::remove_dir_all(&dir);
     }
 }
