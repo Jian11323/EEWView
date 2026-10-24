@@ -659,21 +659,22 @@ impl MapViewport {
                 &mut self.station_cache,
             );
             overlay::paint_records(ui, &view, records, selected_record, icons);
+            // 台风跟焦期间也要画，否则飞跃落点常是「空洋面无标记」
+            if !typhoons.is_empty() {
+                let hover = if flying { None } else { resp.hover_pos() };
+                typhoon_hover = overlay::paint_typhoons(
+                    ui,
+                    &view,
+                    typhoons,
+                    typhoon_forecast_agency,
+                    hover,
+                );
+            }
             if !flying {
                 overlay::paint_volcanoes(ui, &view, volcanoes, selected_volcano);
                 overlay::paint_weather_alerts(ui, &view, weather, selected_weather);
                 if let Some(ev) = cenc_int {
                     overlay::paint_cenc_int_event(ui, &view, ev, icons);
-                }
-                if !typhoons.is_empty() {
-                    let hover = resp.hover_pos();
-                    typhoon_hover = overlay::paint_typhoons(
-                        ui,
-                        &view,
-                        typhoons,
-                        typhoon_forecast_agency,
-                        hover,
-                    );
                 }
             }
 

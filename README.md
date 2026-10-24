@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
   <img src="https://img.shields.io/badge/Rust-1.70%2B-orange.svg" alt="Rust" />
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6.svg" alt="Windows" />
-  <img src="https://img.shields.io/badge/Release-2.3.0-informational.svg" alt="2.3.0" />
+  <img src="https://img.shields.io/badge/Release-2.3.1-informational.svg" alt="2.3.1" />
 </p>
 
 <p align="center">
@@ -25,6 +25,30 @@
 
 **StarQuake** 是一款面向桌面的地震预警与速报视监客户端。  
 聚合多源实时情报，在地图上展示震中、走时波圈与测站烈度，并提供本机倒计时与音效播报。
+
+---
+
+## 开发者的话
+
+> 大家好，我是**纪安**。这是我使用 AI 开发的第二个软件。如果存在不好的地方请多多包涵。
+>
+> 编程也算是我的一个小爱好，也是我在休息时间逃避题海、放松的一个方式。虽然一开始对这个软件没抱很大的期望，但是在 AI 的帮助下真的搓出了一个像模像样的软件。虽说这个软件依然存在很多问题。
+>
+> 这个软件和[地震情报实况栏](https://github.com/Jian11323/Rolling-Subtitle)一样，也是「Cursor」的产物。
+>
+> 所以，**StarQuake 的所有文件内容，全部由 AI 编写完成**，我并没有为软件编写任何一行代码，仅进行了架构设计与修改部分文字描述，因此我有必要添加以下声明：
+
+> [!WARNING]
+> 本软件和文档由 AI 生成，内容仅供参考，请仔细甄别。
+>
+> 软件目前仍处于开发测试阶段，无法 100% 保证稳定性与可用性。
+
+> 这个软件历经几十次的推倒重来以及各种修改，才终于打磨出一个相对稳定的版本。真的很感谢 AI，没有它这个项目根本做不出来。这个软件算是我和 AI 一起折腾出来的成果。它远远谈不上完美，但至少整体框架是稳固的，代码逻辑是清晰的。
+>
+> 希望这个软件能在地震防灾上给大家带来一点点帮助。也欢迎各位大佬来测试、提意见、帮忙改进，多多指点。如果你觉得这个为爱发电的小工具还算实用，或是喜欢这个项目，**麻烦给仓库点一颗** ⭐ **Star** ⭐，对我来说就是很大的鼓励！
+
+> [!NOTE]
+> 虽然这个软件在开发的过程中大量使用 AI 进行辅助，但我保证，AI 生成的每行代码都经过严格审查，请各位放心使用。
 
 ---
 

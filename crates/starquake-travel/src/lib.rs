@@ -115,13 +115,19 @@ impl TravelTable {
         Some(v0 + (v1 - v0) * td)
     }
 
-    /// 给定走时求表面距离（km），在深度行上对距离一维插值
+    /// 给定走时求表面距离（km），在深度行上对距离一维插值。
+    /// 波尚未出地表时返回负值（对齐 eewcn：`sec*depth/t0 - depth`），供 P/S 进度条使用。
     pub fn distance_for_time(&self, wave: Wave, depth_km: f64, sec: f64) -> Option<f64> {
         let di = bracket(&self.depths_km, depth_km)?;
         let g = self.grid(wave);
         let row = &g[di.0];
+        let depth = depth_km.max(0.0);
         if sec <= row[0] {
-            return Some(self.distances_km[0]);
+            // eewcn TravelTime.qml：未达 0km 走时则按深度比例给负半径
+            if row[0] <= 1e-9 {
+                return Some(0.0);
+            }
+            return Some(sec * depth / row[0] - depth);
         }
         for i in 0..row.len().saturating_sub(1) {
             if row[i + 1] >= sec {
@@ -238,6 +244,7 @@ impl TravelEngine {
         self.travel_time(Wave::S, depth_km, d)
     }
 
+    /// 地表传播半径（km）。尚未出地表时为负（对齐 eewcn），画圈时请 `max(0, …)`。
     pub fn surface_distance_for_elapsed(&self, wave: Wave, depth_km: f64, elapsed_s: f64) -> f64 {
         if let Some(d) = self.primary.distance_for_time(wave, depth_km, elapsed_s) {
             return d;
@@ -250,7 +257,7 @@ impl TravelEngine {
         if !self.linear_last_resort {
             return 0.0;
         }
-        // 斜距匀速：先到地表再水平扩散（避免深震直接用 elapsed*v 虚高）
+        // 斜距匀速：未出地表返回 r-depth（负），出地表后球面近似用直角三角形
         let v = match wave {
             Wave::P => 7.0,
             Wave::S => 5.0,
@@ -258,7 +265,7 @@ impl TravelEngine {
         let slant = (elapsed_s * v).max(0.0);
         let depth = depth_km.max(0.0);
         if slant <= depth {
-            0.0
+            slant - depth
         } else {
             (slant * slant - depth * depth).sqrt()
         }
@@ -272,7 +279,8 @@ pub fn s_wave_still_spreading_to(
     elapsed_s: f64,
     max_km: f64,
 ) -> bool {
-    eng.surface_distance_for_elapsed(Wave::S, depth_km, elapsed_s) < max_km
+    // 未出地表为负，仍算传播中；出地表后与上限比较
+    eng.surface_distance_for_elapsed(Wave::S, depth_km, elapsed_s).max(0.0) < max_km
 }
 
 /// 与地图波圈一致：当前 S 地表半径是否仍小于震级上限（未结束）。
@@ -302,6 +310,26 @@ mod tests {
         assert!(t.travel_time(Wave::S, 5.0, 2000.0).is_some());
         assert!(t.travel_time(Wave::S, 5.0, 2000.1).is_none());
         assert!(t.travel_time(Wave::S, 5.0, 9000.0).is_none());
+    }
+
+    #[test]
+    fn surface_distance_negative_before_emergence() {
+        let eng = TravelEngine {
+            primary: TravelTable {
+                name: "t".into(),
+                depths_km: vec![0.0, 10.0],
+                distances_km: vec![0.0, 1000.0, 2000.0],
+                // 深度 10km 处 0km 走时约 2s（S）
+                p_times_s: vec![vec![0.0, 100.0, 200.0], vec![1.0, 101.0, 201.0]],
+                s_times_s: vec![vec![0.0, 180.0, 360.0], vec![2.0, 182.0, 362.0]],
+            },
+            fallback: None,
+            linear_last_resort: true,
+        };
+        let d = eng.surface_distance_for_elapsed(Wave::S, 10.0, 0.5);
+        assert!(d < 0.0, "expected underground negative radius, got {d}");
+        let d0 = eng.surface_distance_for_elapsed(Wave::S, 10.0, 2.0);
+        assert!(d0 >= -1e-6, "at t0 should be near surface, got {d0}");
     }
 
     #[test]

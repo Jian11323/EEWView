@@ -186,6 +186,20 @@ impl AutoTest {
                         format!("expected mild 2..=5, got lv={lv32} text={text32}"),
                     );
                 }
+                // 「极浅」depth=0：近场下限须挡住虚高（旧 0.1km → ~Ⅺ）
+                let (lv0, text0) =
+                    estimate_epicentral(IntensityKind::CnIntensity, 3.2, 0.0);
+                if lv0 <= 7 {
+                    self.pass(
+                        "intensity_m32_shallow0",
+                        format!("level={lv0} text={text0}"),
+                    );
+                } else {
+                    self.fail(
+                        "intensity_m32_shallow0",
+                        format!("expected <=7, got lv={lv0} text={text0}"),
+                    );
+                }
                 self.advance(Phase::TestConfigRoundtrip);
             }
             Phase::TestConfigRoundtrip => {

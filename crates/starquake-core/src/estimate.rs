@@ -9,14 +9,17 @@ use std::f64::consts::LN_10;
 const RING_SEARCH_MAX_KM: f64 = 8_000.0;
 /// 仅当相邻档半径差小于此值（数值噪声）才跳过，避免重复画同一圈。
 const RING_EPS_KM: f64 = 1e-3;
-/// SCEEW 地表距下界（km）：避免 R→0 时 log10 发散。
-const SCEEW_MIN_DIST_KM: f64 = 0.1;
+/// SCEEW 震源距近场下界（km）。
+///
+/// 公式含 `−3.49·log10(R)`：R→0 会发散。若仅钳到 0.1km，则「极浅」(depth=0)
+/// 或深度≤1km 的低震级（M2–M4）会被估成烈度 9–12。对齐 JMA 近场习惯，
+/// 取 5km 下限（与 `calc_jma_instrumental` 的 3km 同量级）。
+const SCEEW_MIN_DIST_KM: f64 = 5.0;
 
 /// 中国烈度（CSIS）连续值：震级 + 震源距（km）。
 ///
 /// 对齐 SCEEW 衰减式：`max(1.92 + 1.63·M − 3.49·log10(R), 0)`。
-/// R 取震源距 `hypot(地表震中距, 深度)`（震中处即深度），避免把 R 钳成 0.1km
-/// 导致 M3 级被估成烈度 11。
+/// R 取震源距 `hypot(地表震中距, 深度)`，并设近场下限，避免极浅/近零深度虚高。
 pub fn calc_csis(magnitude: f64, depth_km: f64, surface_km: f64) -> f64 {
     if !magnitude.is_finite() || !surface_km.is_finite() || !depth_km.is_finite() {
         return 0.0;
@@ -276,7 +279,7 @@ mod tests {
 
     #[test]
     fn csis_small_quake_not_catastrophic() {
-        // 旧实现用 R=0.1km → M3.2 估出约 10.6→11；应用震源距后应约 3~4
+        // 旧实现用 R=0.1km → M3.2 估出约 10.6→11；用震源距+近场下限后应约 3~5
         let (lv, text) = estimate_epicentral(IntensityKind::CnIntensity, 3.2, 10.0);
         assert!(
             (2..=5).contains(&lv),
@@ -284,6 +287,27 @@ mod tests {
         );
         let v = calc_csis(3.2, 10.0, 0.0);
         assert!(v > 2.5 && v < 5.5, "continuous I={v}");
+    }
+
+    #[test]
+    fn csis_very_shallow_low_mag_not_catastrophic() {
+        // 「极浅」depth=0 / 1km：旧钳 0.1km 会把 M2–M4 抬到 Ⅷ–Ⅺ
+        for (m, d) in [(2.0, 0.0), (3.2, 0.0), (3.2, 1.0), (4.0, 0.0)] {
+            let (lv, text) = estimate_epicentral(IntensityKind::CnIntensity, m, d);
+            assert!(
+                lv <= 7,
+                "M{m}@{d}km must not explode, got lv={lv} text={text}"
+            );
+            let v = calc_csis(m, d, 0.0);
+            assert!(
+                v < 8.0,
+                "M{m}@{d}km continuous I={v} still too high"
+            );
+        }
+        // 近场下限生效：depth=0 与 depth=5 震中估应一致
+        let a = calc_csis(3.0, 0.0, 0.0);
+        let b = calc_csis(3.0, 5.0, 0.0);
+        assert!((a - b).abs() < 1e-9, "floor@5km: {a} vs {b}");
     }
 
     #[test]

@@ -1054,6 +1054,7 @@ pub fn paint_wave_overlay(
     };
 
     let max_km = max_s_wave_spread_km(ev.magnitude);
+    let depth = ev.depth_km.max(0.0);
     let (p_km, s_km) = if let Some(eng) = travel {
         (
             eng.surface_distance_for_elapsed(Wave::P, ev.depth_km, elapsed_s),
@@ -1062,11 +1063,10 @@ pub fn paint_wave_overlay(
     } else {
         static ONCE: Once = Once::new();
         ONCE.call_once(|| tracing::warn!("无走时表，波圈使用直线速度兜底"));
-        let depth = ev.depth_km.max(0.0);
         let surface = |v: f64| {
             let slant = elapsed_s * v;
             if slant <= depth {
-                0.0
+                slant - depth
             } else {
                 (slant * slant - depth * depth).sqrt()
             }
@@ -1080,14 +1080,21 @@ pub fn paint_wave_overlay(
         (170, 180, 2.4, 3.0)
     };
 
+    let s_rgb = color_for(ev.intensity_kind, ev.intensity_level);
+    // S 未出地表：画 eewcn 式竖条进度（P 绿 / S 烈度色），不出 S 圈
+    if s_km < 0.0 && depth > 0.5 {
+        paint_ps_progress_bar(&painter, epicenter, p_km, s_km, depth, s_rgb);
+    }
+
     let max_r = rect.width().max(rect.height()) * 3.0;
+    let p_draw = p_km.max(0.0);
+    let s_draw = s_km.max(0.0);
     if s_km < max_km {
-        let fade = (1.0 - (s_km / max_km).clamp(0.0, 1.0)).mul_add(0.35, 0.65);
+        let fade = (1.0 - (s_draw / max_km).clamp(0.0, 1.0)).mul_add(0.35, 0.65);
         let p_stroke = Stroke::new(
             p_w,
             Color32::from_rgba_unmultiplied(255, 255, 255, ((p_alpha as f64) * fade) as u8),
         );
-        let s_rgb = color_for(ev.intensity_kind, ev.intensity_level);
         let s_stroke = Stroke::new(
             s_w,
             Color32::from_rgba_unmultiplied(
@@ -1098,26 +1105,32 @@ pub fn paint_wave_overlay(
             ),
         );
         if view.mode.is_globe() {
-            stroke_polyline(
-                &painter,
-                &view.circle_segments(ev.longitude, ev.latitude, p_km),
-                p_stroke,
-            );
-            if s_km > 0.5 {
+            if p_draw > 0.5 {
                 stroke_polyline(
                     &painter,
-                    &view.circle_segments(ev.longitude, ev.latitude, s_km),
+                    &view.circle_segments(ev.longitude, ev.latitude, p_draw),
+                    p_stroke,
+                );
+            }
+            if s_draw > 0.5 {
+                stroke_polyline(
+                    &painter,
+                    &view.circle_segments(ev.longitude, ev.latitude, s_draw),
                     s_stroke,
                 );
             }
         } else {
-            let p_r = projection::km_to_pixels(p_km, ev.latitude, view.zoom).max(3.0);
-            if p_r < max_r {
-                painter.circle_stroke(epicenter, p_r, p_stroke);
+            if p_draw > 0.5 {
+                let p_r = projection::km_to_pixels(p_draw, ev.latitude, view.zoom).max(3.0);
+                if p_r < max_r {
+                    painter.circle_stroke(epicenter, p_r, p_stroke);
+                }
             }
-            let s_r = projection::km_to_pixels(s_km, ev.latitude, view.zoom).max(3.0);
-            if s_r < max_r && s_km > 0.5 {
-                painter.circle_stroke(epicenter, s_r, s_stroke);
+            if s_draw > 0.5 {
+                let s_r = projection::km_to_pixels(s_draw, ev.latitude, view.zoom).max(3.0);
+                if s_r < max_r {
+                    painter.circle_stroke(epicenter, s_r, s_stroke);
+                }
             }
         }
     }
@@ -1131,6 +1144,88 @@ pub fn paint_wave_overlay(
         selected,
         show_cross,
     );
+}
+
+/// S 波尚在地下时的竖条进度（对齐 eewcn `barItems`：10×50，右偏约 50px）。
+fn paint_ps_progress_bar(
+    painter: &egui::Painter,
+    epicenter: Pos2,
+    p_km: f64,
+    s_km: f64,
+    depth_km: f64,
+    s_rgb: starquake_core::palette::Rgb,
+) {
+    let depth = depth_km.max(1e-3);
+    let bar_w = 10.0_f32;
+    let bar_h = 50.0_f32;
+    let border = 1.0_f32;
+    // eewcn：锚点使条在震中右侧约 50px
+    let left = epicenter.x + 50.0 - bar_w * 0.5;
+    let top = epicenter.y - bar_h * 0.5;
+    let outer = Rect::from_min_size(egui::pos2(left, top), Vec2::new(bar_w, bar_h));
+    painter.rect_stroke(
+        outer,
+        0.0,
+        Stroke::new(border, Color32::WHITE),
+        egui::StrokeKind::Inside,
+    );
+    let fill_h = (bar_h - border * 2.0).max(1.0);
+    let inner_x = left + border;
+    let inner_w = (bar_w - border * 2.0).max(1.0);
+    let p_frac = ((1.0 + p_km / depth).clamp(0.0, 1.0)) as f32;
+    let s_frac = ((1.0 + s_km / depth).clamp(0.0, 1.0)) as f32;
+    let p_h = p_frac * fill_h;
+    let s_h = s_frac * fill_h;
+    let bottom = top + border + fill_h;
+    // P：#A1E0BA；S：烈度色；自下而上填充
+    if p_h > 0.5 {
+        painter.rect_filled(
+            Rect::from_min_max(
+                egui::pos2(inner_x, bottom - p_h),
+                egui::pos2(inner_x + inner_w, bottom),
+            ),
+            0.0,
+            Color32::from_rgb(0xA1, 0xE0, 0xBA),
+        );
+    }
+    if s_h > 0.5 {
+        painter.rect_filled(
+            Rect::from_min_max(
+                egui::pos2(inner_x, bottom - s_h),
+                egui::pos2(inner_x + inner_w, bottom),
+            ),
+            0.0,
+            Color32::from_rgb(s_rgb.r, s_rgb.g, s_rgb.b),
+        );
+    }
+}
+
+/// ①②③… 序号（多震，对齐 eewcn `String.fromCharCode(9312+i)`）。
+fn circled_index(n: usize) -> char {
+    match n {
+        1 => '\u{2460}',
+        2 => '\u{2461}',
+        3 => '\u{2462}',
+        4 => '\u{2463}',
+        5 => '\u{2464}',
+        6 => '\u{2465}',
+        7 => '\u{2466}',
+        8 => '\u{2467}',
+        9 => '\u{2468}',
+        10 => '\u{2469}',
+        _ => '\u{00b7}',
+    }
+}
+
+/// 多震序号相对震中的方位（对齐 eewcn index%4：下→上→左→右）。
+fn circled_number_offset(index: usize) -> Vec2 {
+    const D: f32 = 50.0;
+    match index % 4 {
+        0 => Vec2::new(0.0, D),
+        1 => Vec2::new(0.0, -D),
+        2 => Vec2::new(-D, 0.0),
+        _ => Vec2::new(D, 0.0),
+    }
 }
 
 /// 各数据源最新预警叉标（无波圈；选中项带标签）。
@@ -1163,14 +1258,15 @@ pub fn paint_eew_markers(
         }
         let is_sel = selected == Some((ev.agency.0.as_str(), ev.event_id.as_str()));
         paint_epicenter_marker(&painter, view, icons, p, ev, is_sel, show_cross);
+        // 多震：①②③④…按出现顺序；与叉标同相位闪烁
         if multi && show_cross {
-            let label = format!("{}", i + 1);
-            let pos = egui::pos2(p.x + 14.0, p.y - 18.0);
+            let label = circled_index(i + 1).to_string();
+            let pos = p + circled_number_offset(i);
             painter.text(
                 pos,
-                egui::Align2::LEFT_CENTER,
+                egui::Align2::CENTER_CENTER,
                 label,
-                egui::FontId::proportional(16.0),
+                egui::FontId::proportional(22.0),
                 Color32::WHITE,
             );
         }

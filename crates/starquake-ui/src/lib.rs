@@ -397,6 +397,7 @@ impl MainShell {
                         };
                         let s_km = if let Some(eng) = travel {
                             eng.surface_distance_for_elapsed(Wave::S, ev.depth_km, elapsed)
+                                .max(0.0)
                         } else {
                             elapsed * 5.0
                         };
@@ -460,7 +461,7 @@ impl MainShell {
                 if let Some((lon, lat, z)) = typhoon_fly {
                     self.map.user_camera_override = false;
                     self.map.last_user_camera_at = None;
-                    self.map.fly_to(lon, lat, Some(z), 1.0);
+                    self.map.fly_to_centered(lon, lat, Some(z), 1.0);
                 }
                 if cfg.ui.show_legend {
                     draw_legend_bar(ui, &p);
@@ -584,6 +585,7 @@ impl MainShell {
                                                 e.depth_km,
                                                 elapsed,
                                             )
+                                            .max(0.0)
                                         } else {
                                             elapsed * 4.0
                                         };

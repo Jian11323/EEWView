@@ -1926,7 +1926,8 @@ impl StarQuakeApp {
             0.45,
         )
         .min(7.0);
-        self.shell.map.fly_to(lon, lat, Some(z), 1.0);
+        // 对准台风中心，勿走球体日本构图东偏（否则落点无标记）
+        self.shell.map.fly_to_centered(lon, lat, Some(z), 1.0);
     }
 
     fn tick_health_audio(&mut self) {
