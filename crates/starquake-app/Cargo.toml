@@ -34,6 +34,14 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 notify-rust = "4"
 tray-icon = "0.19"
 muda = "0.15"
+raw-window-handle = "0.6"
 # msedge-tts 与 reqwest 同时链入 aws-lc / ring 时需显式选定 CryptoProvider
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+] }

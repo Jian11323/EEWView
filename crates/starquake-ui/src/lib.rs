@@ -35,7 +35,8 @@ use std::time::{Duration, Instant};
 use theme::{ThemePalette, UiTheme};
 
 pub use settings::{
-    MapPickKind, OfficialNoticeView, SettingsAction, SettingsSession, SourceHealthView,
+    settings_tab_count, settings_tab_title, MapPickKind, OfficialNoticeView, SettingsAction,
+    SettingsSession, SourceHealthView,
 };
 pub use theme::UiTheme as AppUiTheme;
 

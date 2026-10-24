@@ -581,13 +581,13 @@ mod tests {
 
     #[test]
     fn mirror_urls_gitee_and_github() {
-        let gitee = "https://gitee.com/jian0786/starquake/releases/download/v2.2.1/a.zip";
+        let gitee = "https://gitee.com/jian0786/starquake/releases/download/v2.2.2/a.zip";
         let urls = asset_mirror_urls(gitee);
         assert_eq!(urls.len(), 2);
         assert!(urls.iter().any(|u| u.contains("github.com/Jian11323")));
         assert!(urls.iter().any(|u| u.contains("gitee.com/jian0786")));
 
-        let github = "https://github.com/Jian11323/StarQuake/releases/download/v2.2.1/a.zip";
+        let github = "https://github.com/Jian11323/StarQuake/releases/download/v2.2.2/a.zip";
         let urls2 = asset_mirror_urls(github);
         assert_eq!(urls2.len(), 2);
     }

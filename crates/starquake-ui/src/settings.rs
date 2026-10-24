@@ -201,6 +201,8 @@ pub enum SettingsAction {
         rate: f32,
         volume: f32,
     },
+    /// 发送一条桌面系统通知测试
+    TestNotify,
     ClearTileCache,
     OpenLogDir,
     /// 通知中心：标记单条已读
@@ -346,6 +348,13 @@ impl SettingsSession {
 
     pub fn set_save_note(&mut self, note: impl Into<String>) {
         self.save_note = Some(note.into());
+    }
+
+    /// 自动化巡检：按索引切换设置分类（0..settings_tab_count）。
+    pub fn set_tab_index(&mut self, idx: usize) {
+        if let Some(tab) = SettingsTab::ALL.get(idx).copied() {
+            self.tab = tab;
+        }
     }
 
     pub fn close_after_save(&mut self) {
@@ -651,6 +660,7 @@ impl SettingsSession {
             Some(SettingsAction::Saved { .. })
                 | Some(SettingsAction::TestSound { .. })
                 | Some(SettingsAction::TestTts { .. })
+                | Some(SettingsAction::TestNotify)
                 | Some(SettingsAction::ClearTileCache)
                 | Some(SettingsAction::OpenLogDir)
                 | Some(SettingsAction::CheckForUpdate)
@@ -688,6 +698,19 @@ impl SettingsSession {
             self.auth_alert = None;
         }
     }
+}
+
+/// 设置左侧分类数量（自动化巡检用）。
+pub fn settings_tab_count() -> usize {
+    SettingsTab::ALL.len()
+}
+
+/// 设置分类标题（自动化巡检用）。
+pub fn settings_tab_title(idx: usize) -> &'static str {
+    SettingsTab::ALL
+        .get(idx)
+        .map(|t| t.title())
+        .unwrap_or("")
 }
 
 fn draw_shell(
@@ -1718,6 +1741,12 @@ fn draw_audio(
         control_row(ui, "海啸通知", "收到海啸情报时通知", "◎", |ui| {
             toggle(ui, &mut draft.notify.on_tsunami);
         });
+        row_divider(ui);
+        control_row(ui, "测试通知", "立即发送一条桌面 Toast，用于确认系统通知可用", "◎", |ui| {
+            if ui.button(t("发送测试")).clicked() {
+                action = Some(SettingsAction::TestNotify);
+            }
+        });
     });
 
     section(ui, "音频设置", "♪", |ui| {
@@ -2001,7 +2030,7 @@ fn draw_general(
             toggle(ui, &mut draft.ui.always_on_top);
         });
         row_divider(ui);
-        control_row(ui, "关闭到托盘", "关闭窗口时隐藏到系统托盘，托盘可恢复或退出", "◎", |ui| {
+        control_row(ui, "关闭到托盘", "关闭窗口时隐藏到系统托盘（对齐实况栏）；托盘可「显示窗口」或「退出」", "◎", |ui| {
             toggle(ui, &mut draft.ui.minimize_to_tray);
         });
     });

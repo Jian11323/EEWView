@@ -3,6 +3,7 @@
 // GUI 子系统：无控制台窗口；logging 永不 AllocConsole，仅可选写 stderr。
 #![windows_subsystem = "windows"]
 
+mod autotest;
 mod logging;
 mod notify;
 mod official_notice;
@@ -147,25 +148,110 @@ fn run_app() -> Result<()> {
     result
 }
 
-fn gl_context_unsupported(err: &str) -> bool {
+/// GPU/OpenGL 创建失败时回退 CPU 软渲染的错误特征。
+fn should_fallback_soft_render(err: &str) -> bool {
     let e = err.to_ascii_lowercase();
-    e.contains("es context") || e.contains("wgl")
+    e.contains("es context")
+        || e.contains("wgl")
+        || e.contains("opengl")
+        || e.contains("glutin")
+        || e.contains("glow")
+        || e.contains("egl")
+        || e.contains("pixel format")
+        || e.contains("create_context")
+        || e.contains("create context")
+        || e.contains("no suitable")
+        || e.contains("hardware")
+        || e.contains("gpu")
+        || e.contains("vsync")
+        || e.contains("swap")
+        || e.contains("display")
+        || e.contains("eframe")
+}
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+        })
+        .unwrap_or(false)
+}
+
+/// 自动化：记录已走「GPU 失败 → CPU 软渲染」回退路径。
+fn write_gpu_fallback_marker(resource_root: &Path) {
+    let dir = resource_root.join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("gpu_fallback_ok.txt");
+    if let Err(e) = std::fs::write(&path, b"soft\n") {
+        tracing::warn!(error = %e, "write gpu_fallback_ok.txt failed");
+    } else {
+        tracing::info!(path = %path.display(), "GPU fallback marker written");
+    }
 }
 
 #[cfg(test)]
 mod gl_fallback_tests {
-    use super::gl_context_unsupported;
+    use super::{build_native_options, should_fallback_soft_render};
+    use starquake_config::PerformanceConfig;
 
     #[test]
     fn detects_wgl_es_failure() {
         let log = "glutin error: extension to create ES context with wgl is not present";
-        assert!(gl_context_unsupported(log));
-        assert!(!gl_context_unsupported("eframe: other"));
+        assert!(should_fallback_soft_render(log));
+        assert!(should_fallback_soft_render("eframe: Failed to create glutin display"));
+        assert!(should_fallback_soft_render("OpenGL context creation failed"));
+        assert!(should_fallback_soft_render("no suitable pixel format"));
+        assert!(!should_fallback_soft_render("disk full"));
+        assert!(!should_fallback_soft_render("permission denied"));
+    }
+
+    #[test]
+    fn force_soft_turns_off_hardware_acceleration() {
+        let perf = PerformanceConfig {
+            device: "gpu".into(),
+            profile: "normal".into(),
+            target_fps: 60,
+        };
+        let vp = egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]);
+        let soft = build_native_options(vp.clone(), &perf, true);
+        assert!(matches!(
+            soft.hardware_acceleration,
+            eframe::HardwareAcceleration::Off
+        ));
+        let gpu = build_native_options(vp, &perf, false);
+        assert!(matches!(
+            gpu.hardware_acceleration,
+            eframe::HardwareAcceleration::Preferred
+        ));
+    }
+
+    #[test]
+    fn config_cpu_device_also_disables_hw() {
+        let perf = PerformanceConfig {
+            device: "cpu".into(),
+            profile: "normal".into(),
+            target_fps: 60,
+        };
+        let vp = egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]);
+        let opts = build_native_options(vp, &perf, false);
+        assert!(matches!(
+            opts.hardware_acceleration,
+            eframe::HardwareAcceleration::Off
+        ));
     }
 }
 
 fn run_app_inner(force_soft: bool) -> Result<()> {
     let root = resource_root();
+    // 模拟 GPU/OpenGL 不可用：首轮强制走软渲染回退（供自动化验证，不递归）。
+    if !force_soft && env_flag("STARQUAKE_SIMULATE_GPU_FAIL") {
+        let fake = "glutin error: extension to create ES context with wgl is not present (simulated)";
+        tracing::warn!(error = %fake, "STARQUAKE_SIMULATE_GPU_FAIL：模拟 GPU 不可用，回退 CPU");
+        assert!(should_fallback_soft_render(fake));
+        write_gpu_fallback_marker(&root);
+        return run_app_inner(true);
+    }
     let media = media_root();
     let cfg = AppConfig::load_merged(root.join("config/default.toml"));
     let mut cfg = cfg;
@@ -350,6 +436,7 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
             install_cjk_fonts(&cc.egui_ctx);
             // 强制嵌入式 viewport，防止历史 set_embed_viewports(false) 残留逻辑
             cc.egui_ctx.set_embed_viewports(true);
+            let autotest = autotest::AutoTest::from_env(&root);
             Ok(Box::new(StarQuakeApp {
                 resource_root: root,
                 snap,
@@ -399,13 +486,16 @@ fn run_app_inner(force_soft: bool) -> Result<()> {
                 },
                 hidden_to_tray: false,
                 force_quit: false,
+                bg_tiles_cleared: false,
+                autotest,
             }))
         }),
     );
     if let Err(e) = run_err {
         let msg = e.to_string();
-        if !force_soft && gl_context_unsupported(&msg) {
-            tracing::warn!("OpenGL ES/WGL 不可用，回退 CPU 软渲染后重试");
+        if !force_soft && should_fallback_soft_render(&msg) {
+            tracing::warn!(error = %msg, "GPU/OpenGL 不可用，回退 CPU 软渲染后重试");
+            write_gpu_fallback_marker(&resource_root());
             return run_app_inner(true);
         }
         return Err(anyhow::anyhow!("eframe: {msg}"));
@@ -628,12 +718,58 @@ struct StarQuakeApp {
     hidden_to_tray: bool,
     /// 托盘「退出」：允许真正关闭
     force_quit: bool,
+    /// 后台（托盘/最小化）已清过瓦片，避免反复 clear
+    bg_tiles_cleared: bool,
+    /// `STARQUAKE_AUTOTEST=1` 时进程内逐项巡检
+    autotest: Option<autotest::AutoTest>,
 }
 
 impl eframe::App for StarQuakeApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         ctx.set_embed_viewports(true);
+        self.capture_main_hwnd(frame);
+        if let Some(tray) = self.tray.as_ref() {
+            tray.bind_ctx(ctx);
+        }
         self.tick_tray(ctx);
+
+        if self
+            .autotest
+            .as_ref()
+            .is_some_and(|a| !a.finished())
+        {
+            let mut at = self.autotest.take().expect("autotest");
+            let splash = self.splash.active();
+            let root = self.resource_root.clone();
+            let media = self.media_dir.clone();
+            let cfg = self.cfg.clone();
+            let quit = at.tick(
+                splash,
+                &mut self.shell,
+                &cfg,
+                &root,
+                &media,
+                &mut self.hidden_to_tray,
+                &mut self.force_quit,
+                ctx,
+            );
+            self.autotest = Some(at);
+            if quit {
+                ctx.request_repaint();
+            }
+        }
+
+        let minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        let backgrounded = self.hidden_to_tray || minimized;
+        if backgrounded {
+            if !self.bg_tiles_cleared {
+                self.shell.map.clear_tile_cache();
+                self.bg_tiles_cleared = true;
+            }
+        } else {
+            self.bg_tiles_cleared = false;
+        }
+
         self.tick_window_geometry(ctx);
         self.tick_update_check(ctx);
         self.tick_official_notices(ctx);
@@ -1155,6 +1291,12 @@ impl eframe::App for StarQuakeApp {
             );
         }
 
+        // 托盘隐藏 / 任务栏最小化：跳过地图与面板绘制，避免后台仍按帧烧内存。
+        if backgrounded {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            return;
+        }
+
         self.shell.settings.official_notices = self
             .official_notices
             .items
@@ -1250,6 +1392,12 @@ impl eframe::App for StarQuakeApp {
                         },
                     );
                 }
+                SettingsAction::TestNotify => {
+                    notify::show_test();
+                    self.shell
+                        .settings
+                        .set_save_note("已发送系统通知测试（请查看通知中心）");
+                }
                 SettingsAction::Cancelled => {}
                 SettingsAction::ClearTileCache => {
                     self.shell.map.clear_tile_cache();
@@ -1330,25 +1478,50 @@ impl eframe::App for StarQuakeApp {
 }
 
 impl StarQuakeApp {
+    fn capture_main_hwnd(&self, frame: &eframe::Frame) {
+        #[cfg(windows)]
+        {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(handle) = frame.window_handle() {
+                if let RawWindowHandle::Win32(w) = handle.as_raw() {
+                    tray::set_main_hwnd(w.hwnd.get() as isize);
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = frame;
+        }
+    }
+
     fn tick_tray(&mut self, ctx: &egui::Context) {
-        // 托盘命令
+        if tray::take_force_quit() {
+            self.force_quit = true;
+        }
+        // 托盘命令（对齐滚动字幕：Show→showNormal，Quit→强制退出）
         while let Some(cmd) = self.tray.as_ref().and_then(|t| t.poll()) {
             match cmd {
                 tray::TrayCmd::Show => {
                     self.hidden_to_tray = false;
+                    tray::set_hidden_to_tray(false);
+                    tray::win_show_normal();
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                     ctx.request_repaint();
                 }
                 tray::TrayCmd::Quit => {
                     self.force_quit = true;
                     self.hidden_to_tray = false;
+                    tray::set_hidden_to_tray(false);
+                    tray::win_show_normal();
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             }
         }
-        // 关闭窗口 → 隐藏到托盘
+        // 关闭窗口 → 隐藏到托盘（对齐滚动字幕 closeEvent：ignore + hide + showMessage）
         let close_requested = ctx.input(|i| i.viewport().close_requested());
         if close_requested
             && !self.force_quit
@@ -1357,8 +1530,17 @@ impl StarQuakeApp {
             && !self.hidden_to_tray
         {
             self.hidden_to_tray = true;
+            tray::set_hidden_to_tray(true);
+            self.shell.map.clear_tile_cache();
+            self.bg_tiles_cleared = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            tray::win_hide();
+            let _ = tray::show_balloon(
+                "StarQuake",
+                "\u{7a0b}\u{5e8f}\u{5df2}\u{6700}\u{5c0f}\u{5316}\u{5230}\u{7cfb}\u{7edf}\u{6258}\u{76d8}\u{ff0c}\u{4ecd}\u{5728}\u{540e}\u{53f0}\u{63a5}\u{6536}\u{5730}\u{9707}\u{4fe1}\u{606f}\u{3002}",
+            );
+            ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
     }
 

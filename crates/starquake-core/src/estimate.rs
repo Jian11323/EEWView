@@ -1,4 +1,5 @@
-//! 震中最大震度/烈度估算（对齐 RhythmQuake `IntensityCalculator`）。
+//! 震中最大震度/烈度估算。
+//! 中国烈度连续值对齐 [SCEEW](https://github.com/TenkyuChimata/SCEEW)。
 
 use crate::{cn_intensity_text, jma_from_instrumental, IntensityKind};
 use starquake_util::EARTH_RADIUS_KM;
@@ -8,42 +9,23 @@ use std::f64::consts::LN_10;
 const RING_SEARCH_MAX_KM: f64 = 8_000.0;
 /// 仅当相邻档半径差小于此值（数值噪声）才跳过，避免重复画同一圈。
 const RING_EPS_KM: f64 = 1e-3;
+/// SCEEW 地表距下界（km）：避免 R→0 时 log10 发散。
+const SCEEW_MIN_DIST_KM: f64 = 0.1;
 
-/// 中国烈度（CSIS）连续值：震级 + 深度 + 震中距（地表 km）。
+/// 中国烈度（CSIS）连续值：震级 + 地表震中距（km）。
 ///
-/// 公式来自 RhythmQuake / CEA 衰减：`1.297·M − 4.368·log10(R+15) + 5.363`，
-/// 并对断层尺度做简单修正后取平均。
+/// 对齐 SCEEW：`max(1.92 + 1.63·M − 3.49·log10(R), 0)`，R 为地表震中距。
+/// `depth_km` 保留参数以兼容调用方，公式本身不使用深度。
 pub fn calc_csis(magnitude: f64, depth_km: f64, surface_km: f64) -> f64 {
+    let _ = depth_km;
     if !magnitude.is_finite() || !surface_km.is_finite() {
         return 0.0;
     }
     if surface_km > 10_000.0 {
         return 0.0;
     }
-    let dep = if !depth_km.is_finite() || depth_km < 10.0 {
-        10.0
-    } else {
-        depth_km
-    };
-    let line_dis = hypocentral_km(dep, surface_km);
-    let fault_half = 10f64.powf((magnitude - 3.821) / 1.86);
-    let hypo = [
-        line_dis - 10.0 - fault_half,
-        surface_km - fault_half,
-        0.2 * (line_dis - 10.0),
-        0.0,
-    ]
-    .into_iter()
-    .fold(f64::NEG_INFINITY, f64::max)
-    .max(0.0);
-
-    let a = cea_csis(magnitude, surface_km);
-    let b = cea_csis(magnitude, hypo);
-    (a + b) / 2.0
-}
-
-fn cea_csis(m: f64, dis: f64) -> f64 {
-    1.297 * m - 4.368 * ((dis + 15.0).ln() / LN_10) + 5.363
+    let dist = surface_km.max(0.0).max(SCEEW_MIN_DIST_KM);
+    (1.92 + 1.63 * magnitude - 3.49 * (dist.ln() / LN_10)).max(0.0)
 }
 
 /// 震源距（km）：深度 + 地表震中距。
@@ -99,15 +81,17 @@ pub fn estimate_epicentral(
             let (level, text) = jma_from_instrumental(inst);
             (level, text.into())
         }
-        IntensityKind::CnIntensity => {
-            let v = calc_csis(magnitude, depth_km, 0.0);
-            if v < 0.5 {
-                (0, "0".into())
-            } else {
-                let level = v.round().clamp(1.0, 12.0) as u8;
-                (level, cn_intensity_text(level).into())
-            }
-        }
+        IntensityKind::CnIntensity => cn_from_csis(calc_csis(magnitude, depth_km, 0.0)),
+    }
+}
+
+fn cn_from_csis(v: f64) -> (u8, String) {
+    if v < 0.5 {
+        (0, "0".into())
+    } else {
+        let level = v.round().clamp(1.0, 12.0) as u8;
+        // 文案保留一位小数（对齐 SCEEW 本地烈度展示）；档位仍用四舍五入供环/阈值。
+        (level, format!("{:.1}", v.min(12.0)))
     }
 }
 
@@ -170,13 +154,7 @@ pub fn estimate_at_site(
             (level, text.into())
         }
         IntensityKind::CnIntensity => {
-            let v = calc_csis(magnitude, depth_km, surface_km.max(0.0));
-            if v < 0.5 {
-                (0, "0".into())
-            } else {
-                let level = v.round().clamp(1.0, 12.0) as u8;
-                (level, cn_intensity_text(level).into())
-            }
+            cn_from_csis(calc_csis(magnitude, depth_km, surface_km.max(0.0)))
         }
     }
 }
@@ -278,9 +256,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn csis_epicenter_m53_reasonable() {
+    fn csis_matches_sceew_sample() {
+        // SCEEW: 1.92 + 1.63*M - 3.49*log10(R)，R=100km、M=5.0
+        let v = calc_csis(5.0, 10.0, 100.0);
+        let expect = 1.92 + 1.63 * 5.0 - 3.49 * (100.0_f64.log10());
+        assert!((v - expect).abs() < 1e-9, "got {v} expect {expect}");
+        assert!(v > 2.0 && v < 6.0, "got {v}");
+    }
+
+    #[test]
+    fn csis_near_field_finite() {
         let v = calc_csis(5.3, 10.0, 0.0);
-        assert!(v > 4.0 && v < 9.0, "got {v}");
+        assert!(v.is_finite() && v > 5.0, "got {v}");
     }
 
     #[test]
@@ -351,9 +338,14 @@ mod tests {
     }
 
     #[test]
-    fn tiny_quake_few_or_no_rings() {
+    fn tiny_quake_rings_bounded() {
+        // SCEEW 近场 log 下界会抬高震中档；远场仍应迅速掉档
         let rings = intensity_rings(IntensityKind::CnIntensity, 2.0, 10.0);
-        assert!(rings.len() <= 3, "got {} rings", rings.len());
+        assert!(!rings.is_empty());
+        let (lo, r) = *rings.last().unwrap();
+        assert!(lo >= 1);
+        let (off, _) = estimate_at_site(IntensityKind::CnIntensity, 2.0, 10.0, r + 50.0);
+        assert!(off < lo || r >= RING_SEARCH_MAX_KM - 1.0);
     }
 
     #[test]
