@@ -1,20 +1,21 @@
 {
-  "latest_version": "2.2.0",
+  "latest_version": "2.2.1",
   "min_supported_version": "2.0.0",
   "channel": "stable",
+  "notes": "切换在线更新地址，避免更新失败",
   "installer": {
-    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.0/StarQuake_2.2.0_setup.exe",
-    "sha256": "38a4056b826221d91256368511387288ac285a7f6126f017edbcd37e0bfe0d30",
+    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.1/StarQuake_2.2.1_setup.exe",
+    "sha256": "fcc9b72c502d8a77c9bc8dbd0f697879fb0a59888dff03b879c51aa0c8294d34",
     "user_interface": "progress"
   },
   "zip": {
-    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.0/StarQuake_2.2.0_portable.zip",
-    "sha256": "6888d9418f7206fb1a71657fb0a37c9794a5c1424d50381134517aeb018ce325"
+    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.1/StarQuake_2.2.1_portable.zip",
+    "sha256": "850773e92fd590eb36831d3881fbed2ccb6571db6a32ae116d500e0f347e9e18"
   },
   "linux": {
-    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.0/StarQuake_2.2.0_linux_x86_64.tar.gz",
-    "sha256": "6436b23f3960ee34ee02f87e97044b96d459eff97e24c16c7993b078406645a4"
+    "url": "https://gitee.com/jian0786/starquake/releases/download/v2.2.1/StarQuake_2.2.1_linux_x86_64.tar.gz",
+    "sha256": "d0bce6b9c002ad61af7585e3aad85316dd6e2537616f14ade7e56a4b3c115b6b"
   },
-  "release_notes_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.2.0",
-  "html_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.2.0"
+  "release_notes_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.2.1",
+  "html_url": "https://gitee.com/jian0786/starquake/releases/tag/v2.2.1"
 }

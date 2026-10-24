@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
   <img src="https://img.shields.io/badge/Rust-1.70%2B-orange.svg" alt="Rust" />
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6.svg" alt="Windows" />
-  <img src="https://img.shields.io/badge/Release-2.2.0-informational.svg" alt="2.2.0" />
+  <img src="https://img.shields.io/badge/Release-2.2.1-informational.svg" alt="2.2.1" />
 </p>
 
 <p align="center">
@@ -80,7 +80,7 @@
 
 - [Open EEW CN](https://github.com/OpenEEWCN/eewcn)
 - [GlobalQuake 0.11](https://github.com/xspanger3770/GlobalQuake)
-- [Kanameishi（要石）](https://github.com/Lipomoea/kanameishi)
+- [Kanameishi](https://github.com/Lipomoea/kanameishi)
 - [RhythmQuake](https://github.com/yuelinyayun-star/flutterRhythmQuake)
 - [Scratch-Realtime-Earthquake-Viewer-Page](https://github.com/kotoho7/scratch-realtime-earthquake-viewer-page)
 
