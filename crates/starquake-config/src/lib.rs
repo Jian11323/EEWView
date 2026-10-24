@@ -498,6 +498,96 @@ pub struct SourcesConfig {
     /// CENC 烈度速报（NowQuake）
     #[serde(default)]
     pub cenc_int: CencIntSourceConfig,
+    /// 地图雷达 / 降水叠加（GET）
+    #[serde(default)]
+    pub map_wx: MapWxSourceConfig,
+}
+
+
+/// 地图雷达与降水叠加（HTTP 轮询 sismotide GET）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapWxSourceConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 中国雷达（可与日/台同时开）
+    #[serde(default)]
+    pub radar_china: bool,
+    /// 日本雷达
+    #[serde(default)]
+    pub radar_japan: bool,
+    /// 中国台湾雷达
+    #[serde(default)]
+    pub radar_taiwan: bool,
+    /// 旧版三选一字段；仅反序列化迁移，不写出
+    #[serde(default, skip_serializing)]
+    pub radar_layer: String,
+    /// 0=关；24 / 48 / 72
+    #[serde(default)]
+    pub precip_hours: u16,
+    /// 雷达贴图透明度（0=全透明，1=不透明）
+    #[serde(default = "default_map_wx_radar_opacity")]
+    pub radar_opacity: f32,
+    /// 降水落区透明度（乘在上游色块 alpha 上）
+    #[serde(default = "default_map_wx_precip_opacity")]
+    pub precip_opacity: f32,
+    #[serde(default = "default_map_wx_poll")]
+    pub poll_secs: u64,
+    #[serde(default = "default_radar_china_url")]
+    pub radar_china_url: String,
+    #[serde(default = "default_radar_japan_url")]
+    pub radar_japan_url: String,
+    #[serde(default = "default_radar_taiwan_url")]
+    pub radar_taiwan_url: String,
+    #[serde(default = "default_precip_url")]
+    pub precip_url: String,
+}
+
+impl Default for MapWxSourceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            radar_china: false,
+            radar_japan: false,
+            radar_taiwan: false,
+            radar_layer: String::new(),
+            precip_hours: 0,
+            radar_opacity: default_map_wx_radar_opacity(),
+            precip_opacity: default_map_wx_precip_opacity(),
+            poll_secs: default_map_wx_poll(),
+            radar_china_url: default_radar_china_url(),
+            radar_japan_url: default_radar_japan_url(),
+            radar_taiwan_url: default_radar_taiwan_url(),
+            precip_url: default_precip_url(),
+        }
+    }
+}
+
+
+impl MapWxSourceConfig {
+    /// 将旧 `radar_layer` 三选一迁移为三路独立开关（仅当三路均为关时）。
+    pub fn migrate_radar_layer(&mut self) {
+        if self.radar_china || self.radar_japan || self.radar_taiwan {
+            self.radar_layer.clear();
+            return;
+        }
+        match self.radar_layer.trim().to_ascii_lowercase().as_str() {
+            "china" | "cn" | "radar" => self.radar_china = true,
+            "japan" | "jp" | "radar-japan" => self.radar_japan = true,
+            "taiwan" | "tw" | "radar-taiwan" => self.radar_taiwan = true,
+            _ => {}
+        }
+        self.radar_layer.clear();
+    }
+
+    pub fn any_radar(&self) -> bool {
+        self.radar_china || self.radar_japan || self.radar_taiwan
+    }
+
+    /// 钳制透明度到 0..=1（非法/NaN 回落默认）。
+    pub fn clamp_opacities(&mut self) {
+        self.radar_opacity = sanitize_opacity(self.radar_opacity, default_map_wx_radar_opacity());
+        self.precip_opacity = sanitize_opacity(self.precip_opacity, default_map_wx_precip_opacity());
+    }
 }
 
 /// 台风实时路径（HTTP 轮询）。
@@ -903,6 +993,37 @@ fn default_gq_min_mag() -> f64 {
 fn default_typhoon_url() -> String {
     "https://api.sismotide.top/get/typhoon.json".into()
 }
+fn default_map_wx_radar_opacity() -> f32 {
+    0.92
+}
+
+fn default_map_wx_precip_opacity() -> f32 {
+    0.75
+}
+
+fn sanitize_opacity(v: f32, fallback: f32) -> f32 {
+    if v.is_finite() {
+        v.clamp(0.0, 1.0)
+    } else {
+        fallback
+    }
+}
+
+fn default_map_wx_poll() -> u64 {
+    60
+}
+fn default_radar_china_url() -> String {
+    "https://api.sismotide.top/get/radar.json".into()
+}
+fn default_radar_japan_url() -> String {
+    "https://api.sismotide.top/get/radar-japan.json".into()
+}
+fn default_radar_taiwan_url() -> String {
+    "https://api.sismotide.top/get/radar-taiwan.json".into()
+}
+fn default_precip_url() -> String {
+    "https://api.sismotide.top/get/precip-forecast.json".into()
+}
 fn default_weather_ws() -> String {
     "wss://api.sismotide.top/weather".into()
 }
@@ -1048,6 +1169,7 @@ impl Default for AppConfig {
                 typhoon: TyphoonSourceConfig::default(),
                 weather: WeatherSourceConfig::default(),
                 cenc_int: CencIntSourceConfig::default(),
+                map_wx: MapWxSourceConfig::default(),
             },
             filters: FiltersConfig::default(),
             log: LogConfig::default(),
@@ -1112,6 +1234,8 @@ impl AppConfig {
         }
         cfg.apply_env_overrides();
         cfg.filters.migrate_legacy_record_off();
+        cfg.sources.map_wx.migrate_radar_layer();
+        cfg.sources.map_wx.clamp_opacities();
         cfg.migrate_removed_station_sources();
         cfg.migrate_removed_sidebar_tab();
         cfg.migrate_legacy_client_id();
@@ -1160,6 +1284,8 @@ impl AppConfig {
         let path = dir.join("settings.json");
         let mut sanitized = self.clone();
         sanitized.filters.migrate_legacy_record_off();
+        sanitized.sources.map_wx.migrate_radar_layer();
+        sanitized.sources.map_wx.clamp_opacities();
         sanitized.migrate_removed_station_sources();
         sanitized.migrate_removed_sidebar_tab();
         sanitized.migrate_legacy_client_id();
@@ -1372,6 +1498,8 @@ impl AppConfig {
     pub fn apply_env_overrides(&mut self) {
         self.sync_station_compat();
         self.filters.migrate_legacy_record_off();
+        self.sources.map_wx.migrate_radar_layer();
+        self.sources.map_wx.clamp_opacities();
         if let Ok(tok) = env::var("JIAN_REFRESH_TOKEN") {
             if tok.trim().starts_with("rt_") {
                 self.sources.jian.refresh_token = Some(tok.trim().to_string());
@@ -1581,6 +1709,20 @@ impl AppConfig {
             && self.sources.cenc_int.http_base == other.sources.cenc_int.http_base
             && self.sources.cenc_int.ws_url == other.sources.cenc_int.ws_url
             && self.sources.cenc_int.list_page_size == other.sources.cenc_int.list_page_size
+            && self.sources.map_wx.enabled == other.sources.map_wx.enabled
+            && self.sources.map_wx.radar_china == other.sources.map_wx.radar_china
+            && self.sources.map_wx.radar_japan == other.sources.map_wx.radar_japan
+            && self.sources.map_wx.radar_taiwan == other.sources.map_wx.radar_taiwan
+            && self.sources.map_wx.precip_hours == other.sources.map_wx.precip_hours
+            && (self.sources.map_wx.radar_opacity - other.sources.map_wx.radar_opacity).abs()
+                < 1e-6
+            && (self.sources.map_wx.precip_opacity - other.sources.map_wx.precip_opacity).abs()
+                < 1e-6
+            && self.sources.map_wx.poll_secs == other.sources.map_wx.poll_secs
+            && self.sources.map_wx.radar_china_url == other.sources.map_wx.radar_china_url
+            && self.sources.map_wx.radar_japan_url == other.sources.map_wx.radar_japan_url
+            && self.sources.map_wx.radar_taiwan_url == other.sources.map_wx.radar_taiwan_url
+            && self.sources.map_wx.precip_url == other.sources.map_wx.precip_url
     }
 }
 

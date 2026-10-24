@@ -462,6 +462,73 @@ pub fn typhoon_forecast_agency_rgb(agency: &str) -> (u8, u8, u8) {
     }
 }
 
+/// 雷达图种类（中国 / 日本 / 台湾）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadarKind {
+    China,
+    Japan,
+    Taiwan,
+}
+
+impl RadarKind {
+    pub const ALL: [Self; 3] = [Self::China, Self::Japan, Self::Taiwan];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::China => "china",
+            Self::Japan => "japan",
+            Self::Taiwan => "taiwan",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::China => 0,
+            Self::Japan => 1,
+            Self::Taiwan => 2,
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "china" | "cn" | "radar" => Some(Self::China),
+            "japan" | "jp" | "radar-japan" => Some(Self::Japan),
+            "taiwan" | "tw" | "radar-taiwan" => Some(Self::Taiwan),
+            _ => None,
+        }
+    }
+}
+
+/// GET 雷达 PNG 叠加帧（bounds 为地理包围，image 为解码前 PNG 字节）。
+#[derive(Debug, Clone)]
+pub struct RadarFrame {
+    pub kind: RadarKind,
+    pub time: String,
+    /// 南纬 / 西经
+    pub sw_lat: f64,
+    pub sw_lon: f64,
+    /// 北纬 / 东经
+    pub ne_lat: f64,
+    pub ne_lon: f64,
+    pub png: std::sync::Arc<Vec<u8>>,
+}
+
+/// 降水区多边形（经度在前）。
+#[derive(Debug, Clone)]
+pub struct PrecipPoly {
+    pub level: String,
+    pub fill: [u8; 4],
+    pub ring: Vec<[f64; 2]>,
+}
+
+/// 中国降水 24/48/72 小时预报区。
+#[derive(Debug, Clone)]
+pub struct PrecipFrame {
+    pub hours: u16,
+    pub time: String,
+    pub polys: Vec<PrecipPoly>,
+}
+
 /// 台风列表指纹（对齐 eewcn `_typhoonDataFingerprint`）：id/点数/末点时空与强度。
 pub fn typhoon_data_fingerprint(list: &[TyphoonInfo]) -> String {
     let mut parts: Vec<String> = list
@@ -743,6 +810,10 @@ pub struct AppSnapshot {
     pub cenc_int: Vec<CencIntEvent>,
     /// 活跃台风（路径 / 风圈 / 预报）
     pub typhoons: Vec<TyphoonInfo>,
+    /// 当前雷达叠加（中国/日本/台湾可并存，按下标：0中国 1日本 2台湾）
+    pub radars: [Option<RadarFrame>; 3],
+    /// 中国降水预报区（24/48/72）
+    pub precip: Option<PrecipFrame>,
     /// 待弹窗用户提示（鉴权 / 超限 / 封禁）；主循环 take
     pub pending_notices: Vec<UserNotice>,
     /// 台风列表指纹；用于判定「有更新」再播提示音 / 跟焦（对齐 eewcn）
@@ -950,6 +1021,8 @@ impl AppSnapshot {
             weather: Vec::new(),
             cenc_int: Vec::new(),
             typhoons: Vec::new(),
+            radars: [None, None, None],
+            precip: None,
             pending_notices: Vec::new(),
             typhoon_fingerprint: String::new(),
             pending_typhoon_fly: None,
@@ -1041,6 +1114,8 @@ impl AppSnapshot {
             weather: Vec::new(),
             cenc_int: Vec::new(),
             typhoons: Vec::new(),
+            radars: [None, None, None],
+            precip: None,
             pending_notices: Vec::new(),
             typhoon_fingerprint: String::new(),
             pending_typhoon_fly: None,
@@ -1330,6 +1405,21 @@ impl AppSnapshot {
 
     /// 整表替换活跃台风列表（轮询快照）。
     /// 指纹变化时置 `pending_typhoon_fly` / `pending_typhoon_hint`（对齐 eewcn）。
+
+    /// 按种类写入或清除一路雷达（`None` 清除该 kind）。
+    pub fn set_radar(&mut self, kind: RadarKind, frame: Option<RadarFrame>) {
+        self.radars[kind.index()] = frame;
+    }
+
+    /// 启用的雷达帧切片（跳过空槽）。
+    pub fn active_radars(&self) -> impl Iterator<Item = &RadarFrame> {
+        self.radars.iter().filter_map(|r| r.as_ref())
+    }
+
+    pub fn set_precip(&mut self, frame: Option<PrecipFrame>) {
+        self.precip = frame;
+    }
+
     pub fn replace_typhoons(&mut self, list: Vec<TyphoonInfo>) {
         let fp = typhoon_data_fingerprint(&list);
         if fp == self.typhoon_fingerprint {

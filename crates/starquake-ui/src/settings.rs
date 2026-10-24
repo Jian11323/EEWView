@@ -2060,6 +2060,53 @@ fn draw_general(
             toggle(ui, &mut draft.ui.show_weather);
         });
         row_divider(ui);
+        control_row(ui, "中国雷达", "中央台雷达图叠加（可与日/台同时开）", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.map_wx.radar_china);
+        });
+        row_divider(ui);
+        control_row(ui, "日本雷达", "日本气象厅雷达图叠加", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.map_wx.radar_japan);
+        });
+        row_divider(ui);
+        control_row(ui, "台湾雷达", "中国台湾雷达图叠加", "\u{25ce}", |ui| {
+            toggle(ui, &mut draft.sources.map_wx.radar_taiwan);
+        });
+        row_divider(ui);
+control_row(ui, "降水预报", "中国降水落区 24 / 48 / 72 小时；关则不拉取", "\u{25ce}", |ui| {
+            let h = draft.sources.map_wx.precip_hours;
+            let label = match h {
+                24 => "24 h",
+                48 => "48 h",
+                72 => "72 h",
+                _ => t("关"),
+            };
+            egui::ComboBox::from_id_salt("map_wx_precip")
+                .selected_text(label)
+                .width(120.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut draft.sources.map_wx.precip_hours, 0, t("关"));
+                    ui.selectable_value(&mut draft.sources.map_wx.precip_hours, 24, "24 h");
+                    ui.selectable_value(&mut draft.sources.map_wx.precip_hours, 48, "48 h");
+                    ui.selectable_value(&mut draft.sources.map_wx.precip_hours, 72, "72 h");
+                });
+        });
+                row_divider(ui);
+        control_row(ui, "雷达透明度", "中国 / 日本 / 台湾雷达共用；0 全透，1 不透明", "\u{25ce}", |ui| {
+            ui.add(
+                egui::Slider::new(&mut draft.sources.map_wx.radar_opacity, 0.0..=1.0)
+                    .show_value(true)
+                    .fixed_decimals(2),
+            );
+        });
+        row_divider(ui);
+        control_row(ui, "降水透明度", "乘在落区色块 alpha 上；0 全透，1 不透明", "\u{25ce}", |ui| {
+            ui.add(
+                egui::Slider::new(&mut draft.sources.map_wx.precip_opacity, 0.0..=1.0)
+                    .show_value(true)
+                    .fixed_decimals(2),
+            );
+        });
+row_divider(ui);
         control_row(ui, "台风路径", "活跃台风路径、风圈与预报线", "\u{25ce}", |ui| {
             toggle(ui, &mut draft.ui.show_typhoons);
         });

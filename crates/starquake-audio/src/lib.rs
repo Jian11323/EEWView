@@ -120,8 +120,9 @@ impl AudioEngine {
     }
 
     /// 启动灌入时静默登记已见报，避免稍后把历史首报当新 issue 再播。
-    pub fn seed_eew_seen(&mut self, agency: &str, event_id: &str, serial: u32) {
-        let key = format!("{agency}|{event_id}");
+    /// `event_key` 须为稳定键（与 UI 一致：`eew_sidebar_group_key|event_id`），勿用原始 agency 字符串。
+    pub fn seed_eew_seen(&mut self, event_key: &str, serial: u32) {
+        let key = event_key.to_string();
         let prev = self.eew_seen.get(&key).copied().unwrap_or(0);
         if serial >= prev {
             self.eew_seen.insert(key, serial);
@@ -130,10 +131,10 @@ impl AudioEngine {
 
     /// 预警事件音：`pack` 为 `srev`（JMA）或 `eewcn`（其余机构）。
     /// SREV 另附 caution / warn；eewcn：危急档（烈度≥7 或 M≥5）播 critical，否则首报 alert / 更新 update。
+    /// `event_key` 同 [`seed_eew_seen`]：同源槽镜像共用一把钥匙，避免 Wolfx/Jian 各播一次首报音。
     pub fn on_eew(
         &mut self,
-        agency: &str,
-        event_id: &str,
+        event_key: &str,
         serial: u32,
         is_final: bool,
         is_cancel: bool,
@@ -144,7 +145,7 @@ impl AudioEngine {
         intensity_level: u8,
         magnitude_unknown: bool,
     ) {
-        let key = format!("{agency}|{event_id}");
+        let key = event_key.to_string();
         let pack = Some(pack);
         if is_cancel {
             self.play_in_pack(pack, AudioCue::Cancel);
@@ -156,8 +157,15 @@ impl AudioEngine {
         let prev = self.eew_seen.get(&key).copied();
         let advanced = match prev {
             None => {
+                // 中途接入且已是第 2+ 报：播更新/最终，勿当首报
                 if eewcn_critical {
                     self.play_in_pack(pack, AudioCue::Critical);
+                } else if serial > 1 || is_final {
+                    if is_final {
+                        self.play_in_pack(pack, AudioCue::Final);
+                    } else {
+                        self.play_in_pack(pack, AudioCue::Update);
+                    }
                 } else {
                     self.play_in_pack(pack, AudioCue::Issue);
                 }
@@ -259,5 +267,76 @@ impl AudioEngine {
 
     pub fn set_packs(&mut self, event_pack: &str, countdown_pack: &str) {
         self.router.set_packs(event_pack, countdown_pack);
+    }
+}
+
+
+/// 仅测路由决策（不播设备）：供单测核对首报/更新映射。
+pub fn eew_cue_for(
+    prev: Option<u32>,
+    serial: u32,
+    is_final: bool,
+    is_cancel: bool,
+    eewcn_critical: bool,
+) -> Option<&'static str> {
+    if is_cancel {
+        return Some("cancel");
+    }
+    match prev {
+        None => {
+            if eewcn_critical {
+                Some("critical")
+            } else if serial > 1 || is_final {
+                Some(if is_final { "final" } else { "update" })
+            } else {
+                Some("issue")
+            }
+        }
+        Some(p) if serial > p => {
+            if eewcn_critical {
+                Some("critical")
+            } else if is_final {
+                Some("final")
+            } else {
+                Some("update")
+            }
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::eew_cue_for;
+
+    #[test]
+    fn first_serial1_is_issue() {
+        assert_eq!(eew_cue_for(None, 1, false, false, false), Some("issue"));
+    }
+
+    #[test]
+    fn first_serial2_is_update_not_issue() {
+        assert_eq!(eew_cue_for(None, 2, false, false, false), Some("update"));
+    }
+
+    #[test]
+    fn advance_serial_is_update() {
+        assert_eq!(eew_cue_for(Some(1), 2, false, false, false), Some("update"));
+    }
+
+    #[test]
+    fn same_serial_silent() {
+        assert_eq!(eew_cue_for(Some(2), 2, false, false, false), None);
+    }
+
+    #[test]
+    fn final_on_advance() {
+        assert_eq!(eew_cue_for(Some(1), 2, true, false, false), Some("final"));
+    }
+
+    #[test]
+    fn critical_beats_issue_update() {
+        assert_eq!(eew_cue_for(None, 1, false, false, true), Some("critical"));
+        assert_eq!(eew_cue_for(Some(1), 2, false, false, true), Some("critical"));
     }
 }

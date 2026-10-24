@@ -8,3 +8,4 @@ pub mod typhoon;
 pub mod weather;
 pub mod wolfx;
 pub mod ws;
+pub mod map_wx;

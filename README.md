@@ -38,6 +38,7 @@
 - 地图叠加震中、P/S 波圈（近距 JMA2001，远距 ak135）
 - 暗色矢量底图 / 亮色海洋地形瓦片，可随主题切换
 - 台风路径、风圈与多源预报（可开关）
+- 地图雷达叠加（中国 / 日本 / 台湾可独立开关，设置 → 地图显示；GET）与中国降水落区 24/48/72 小时；雷达/降水透明度可调
 - 地图晨昏线（设置 → 地图显示，默认关）；设置本机经纬度后在右下角显示预估日出与日落
 - 配置本机经纬度（地图选点或按公网 IP 定位）后估算本地 S 波倒计时，并支持音效播报
 - 预警/速报 TTS：本机离线语音包（Windows SAPI）或微软 Edge 在线 Neural TTS
@@ -60,6 +61,7 @@
 - GlobalQuake 全球预警、JMA-Atom 火山情报：[PancakesAPI](https://wiki.aloys23.link/wiki/PancakesAPI)
 - 日本测站烈度：[NIED 強震モニタ](https://www.lmoni.bosai.go.jp/)
 - 亮色海洋地形瓦片：[sismotide tilemap](https://tilemap.sismotide.top/)
+- 地图雷达 / 降水落区：[sismotide GET](https://api.sismotide.top/get/)（`radar.json` / `radar-japan.json` / `radar-taiwan.json` / `precip-forecast.json`）
 - IP 归属定位：[sismotide GET IP](https://api.sismotide.top/get/ip.json)
 - 中国大陆地图：[阿里云 DataV.GeoAtlas](https://datav.aliyun.com/portal/school/atlas/area_selector)
 - 中国台湾地图：[GeoJSON.cn](https://geojson.cn/)

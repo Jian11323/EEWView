@@ -235,3 +235,20 @@ list_page_size = 20
 check_on_startup = true
 # 确认后下载并应用安装包 / 便携包（关闭则仅打开发布页）
 auto_install = true
+
+[sources.map_wx]
+enabled = true
+# 三路雷达可同时开启
+radar_china = false
+radar_japan = false
+radar_taiwan = false
+# 0=关；24 / 48 / 72 中国降水预报
+precip_hours = 0
+# 叠加透明度 0~1（雷达默认略透；降水再乘上游色块 alpha）
+radar_opacity = 0.92
+precip_opacity = 0.75
+poll_secs = 90
+radar_china_url = "https://api.sismotide.top/get/radar.json"
+radar_japan_url = "https://api.sismotide.top/get/radar-japan.json"
+radar_taiwan_url = "https://api.sismotide.top/get/radar-taiwan.json"
+precip_url = "https://api.sismotide.top/get/precip-forecast.json"

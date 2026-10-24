@@ -200,6 +200,15 @@ pub fn prefer_intensity_scale(
             if kind == IntensityKind::JmaShindo {
                 return (kind, level.min(9), keep_label(kind, level, text));
             }
+            // level=0：无烈度，勿钳成 1
+            if level == 0 {
+                let label = if text.trim().is_empty() {
+                    "—".into()
+                } else {
+                    text.to_string()
+                };
+                return (IntensityKind::CnIntensity, 0, label);
+            }
             let lv = level.clamp(1, 12);
             (IntensityKind::CnIntensity, lv, cn_intensity_text(lv).into())
         }
@@ -230,5 +239,27 @@ pub fn intensity_kind_for_agency(agency: &str) -> IntensityKind {
         // KMA / PEWS 使用 MMI 烈度，与 EEWCN 一致按中国烈度色展示
         AgencyFamily::Kma => IntensityKind::CnIntensity,
         _ => IntensityKind::CnIntensity,
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cn_zero_stays_unknown_on_force_cn() {
+        let (k, lv, label) = prefer_intensity_scale(IntensityKind::CnIntensity, 0, "—", "cn");
+        assert_eq!(k, IntensityKind::CnIntensity);
+        assert_eq!(lv, 0);
+        assert_eq!(label, "—");
+    }
+
+    #[test]
+    fn cn_zero_stays_on_auto() {
+        let (k, lv, label) = prefer_intensity_scale(IntensityKind::CnIntensity, 0, "—", "auto");
+        assert_eq!(k, IntensityKind::CnIntensity);
+        assert_eq!(lv, 0);
+        assert_eq!(label, "—");
     }
 }

@@ -7,6 +7,7 @@ mod marker_icons;
 mod overlay;
 mod projection;
 mod tile_cache;
+mod weather_overlay;
 mod weather_paint;
 mod topojson;
 mod tsunami_coast;
@@ -71,13 +72,14 @@ impl Default for MapUiResult {
 
 use egui::{Color32, Sense, Stroke, Ui};
 use starquake_core::{
-    CencIntEvent, EewReport, EqRecord, StationSample, TsunamiInfo, TyphoonInfo, VolcanoNotice,
-    WeatherAlert,
+    CencIntEvent, EewReport, EqRecord, PrecipFrame, RadarFrame, StationSample, TsunamiInfo,
+    TyphoonInfo, VolcanoNotice, WeatherAlert,
 };
 use starquake_travel::TravelEngine;
 use marker_icons::MarkerIcons;
 use projection::ViewCtx;
 use fault_lines::FaultLines;
+use weather_overlay::WeatherOverlay;
 use tsunami_coast::TsunamiCoast;
 use tile_cache::TileCache as Cache;
 use std::sync::Arc;
@@ -103,6 +105,7 @@ pub struct MapViewport {
     vector: VectorBasemap,
     tsunami_coast: TsunamiCoast,
     faults: FaultLines,
+    weather_overlay: WeatherOverlay,
     markers: MarkerIcons,
     flight: Option<CameraFlight>,
     /// 飞跃刚结束后抑制波圈自动缩放，避免落地瞬间被二次改 zoom「弹一下」
@@ -139,6 +142,7 @@ impl Default for MapViewport {
             vector: VectorBasemap::default(),
             tsunami_coast: TsunamiCoast::default(),
             faults: FaultLines::default(),
+            weather_overlay: WeatherOverlay::default(),
             markers: MarkerIcons::default(),
             flight: None,
             post_flight_until: None,
@@ -430,7 +434,11 @@ impl MapViewport {
         typhoon_forecast_agency: &str,
         home: Option<(f64, f64)>,
         tsunami: Option<&TsunamiInfo>,
+        radars: &[&RadarFrame],
+        precip: Option<&PrecipFrame>,
         show_faults: bool,
+        radar_opacity: f32,
+        precip_opacity: f32,
     ) -> MapUiResult {
         if self.vector.poll() {
             ui.ctx()
@@ -613,6 +621,11 @@ impl MapViewport {
         if self.show_terminator {
             weather_paint::paint_terminator(ui, &view, now_ms);
         }
+
+        // 雷达 / 降水：底图之上、测站与事件之下
+        self.weather_overlay
+            .paint_radars(ui, &view, radars, radar_opacity);
+        WeatherOverlay::paint_precip(ui, &view, precip, precip_opacity);
 
         let mut typhoon_hover = None;
         {

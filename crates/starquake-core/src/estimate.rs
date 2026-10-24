@@ -12,19 +12,22 @@ const RING_EPS_KM: f64 = 1e-3;
 /// SCEEW 地表距下界（km）：避免 R→0 时 log10 发散。
 const SCEEW_MIN_DIST_KM: f64 = 0.1;
 
-/// 中国烈度（CSIS）连续值：震级 + 地表震中距（km）。
+/// 中国烈度（CSIS）连续值：震级 + 震源距（km）。
 ///
-/// 对齐 SCEEW：`max(1.92 + 1.63·M − 3.49·log10(R), 0)`，R 为地表震中距。
-/// `depth_km` 保留参数以兼容调用方，公式本身不使用深度。
+/// 对齐 SCEEW 衰减式：`max(1.92 + 1.63·M − 3.49·log10(R), 0)`。
+/// R 取震源距 `hypot(地表震中距, 深度)`（震中处即深度），避免把 R 钳成 0.1km
+/// 导致 M3 级被估成烈度 11。
 pub fn calc_csis(magnitude: f64, depth_km: f64, surface_km: f64) -> f64 {
-    let _ = depth_km;
-    if !magnitude.is_finite() || !surface_km.is_finite() {
+    if !magnitude.is_finite() || !surface_km.is_finite() || !depth_km.is_finite() {
         return 0.0;
     }
     if surface_km > 10_000.0 {
         return 0.0;
     }
-    let dist = surface_km.max(0.0).max(SCEEW_MIN_DIST_KM);
+    let dist = surface_km
+        .max(0.0)
+        .hypot(depth_km.max(0.0))
+        .max(SCEEW_MIN_DIST_KM);
     (1.92 + 1.63 * magnitude - 3.49 * (dist.ln() / LN_10)).max(0.0)
 }
 
@@ -257,9 +260,10 @@ mod tests {
 
     #[test]
     fn csis_matches_sceew_sample() {
-        // SCEEW: 1.92 + 1.63*M - 3.49*log10(R)，R=100km、M=5.0
+        // SCEEW: 1.92 + 1.63*M - 3.49*log10(R)；R=震源距 hypot(地表,深度)
         let v = calc_csis(5.0, 10.0, 100.0);
-        let expect = 1.92 + 1.63 * 5.0 - 3.49 * (100.0_f64.log10());
+        let r = 100.0_f64.hypot(10.0);
+        let expect = 1.92 + 1.63 * 5.0 - 3.49 * r.log10();
         assert!((v - expect).abs() < 1e-9, "got {v} expect {expect}");
         assert!(v > 2.0 && v < 6.0, "got {v}");
     }
@@ -268,6 +272,18 @@ mod tests {
     fn csis_near_field_finite() {
         let v = calc_csis(5.3, 10.0, 0.0);
         assert!(v.is_finite() && v > 5.0, "got {v}");
+    }
+
+    #[test]
+    fn csis_small_quake_not_catastrophic() {
+        // 旧实现用 R=0.1km → M3.2 估出约 10.6→11；应用震源距后应约 3~4
+        let (lv, text) = estimate_epicentral(IntensityKind::CnIntensity, 3.2, 10.0);
+        assert!(
+            (2..=5).contains(&lv),
+            "M3.2@10km should be mild, got lv={lv} text={text}"
+        );
+        let v = calc_csis(3.2, 10.0, 0.0);
+        assert!(v > 2.5 && v < 5.5, "continuous I={v}");
     }
 
     #[test]
@@ -339,7 +355,7 @@ mod tests {
 
     #[test]
     fn tiny_quake_rings_bounded() {
-        // SCEEW 近场 log 下界会抬高震中档；远场仍应迅速掉档
+        // 近场用震源距；远场仍应迅速掉档
         let rings = intensity_rings(IntensityKind::CnIntensity, 2.0, 10.0);
         assert!(!rings.is_empty());
         let (lo, r) = *rings.last().unwrap();

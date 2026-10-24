@@ -94,6 +94,7 @@ pub fn spawn_hub_with_assets(
         typhoon = sources.typhoon.enabled,
         weather = sources.weather.enabled,
         cenc_int = sources.cenc_int.enabled,
+        map_wx = sources.map_wx.enabled,
         "starquake-net: spawning source tasks"
     );
     let mut tasks = Vec::new();
@@ -117,6 +118,7 @@ pub fn spawn_hub_with_assets(
         jian_cfg,
     ));
     tasks.extend(sources::cenc_int::spawn(tx.clone(), sources.cenc_int.clone()));
+    tasks.extend(sources::map_wx::spawn(tx.clone(), sources.map_wx.clone()));
     NetHub { rx, tx, tasks }
 }
 
@@ -158,6 +160,8 @@ pub fn apply_event_filtered(
         NetEvent::CencInt(e) => snap.upsert_cenc_int(e),
         NetEvent::CencIntList(list) => snap.merge_cenc_int_list(list),
         NetEvent::Typhoons(list) => snap.replace_typhoons(list),
+        NetEvent::Radar { kind, frame } => snap.set_radar(kind, frame),
+        NetEvent::Precip(frame) => snap.set_precip(frame),
         NetEvent::UserNotice(n) => snap.push_notice(n),
     }
 }

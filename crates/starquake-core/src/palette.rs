@@ -40,6 +40,9 @@ pub fn jma_shindo_rgb(level: u8) -> Rgb {
 
 /// 中国烈度 1–12（对齐 EEWCN `getIntColors`）
 pub fn cn_intensity_rgb(level: u8) -> Rgb {
+    if level == 0 {
+        return Rgb::new(64, 64, 64);
+    }
     match level.clamp(1, 12) {
         1 => Rgb::new(0x9b, 0xc4, 0xe4),
         2 => Rgb::new(0x00, 0xa0, 0xf1),

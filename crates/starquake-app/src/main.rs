@@ -247,6 +247,14 @@ mod gl_fallback_tests {
 
 fn run_app_inner(force_soft: bool) -> Result<()> {
     let root = resource_root();
+    if env_flag("STARQUAKE_AUTOTEST") {
+        let dir = root.join("logs");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(
+            dir.join("autotest_env_seen.txt"),
+            format!("force_soft={force_soft}\nroot={}\n", root.display()),
+        );
+    }
     // 模拟 GPU/OpenGL 不可用：首轮强制走软渲染回退（供自动化验证，不递归）。
     if !force_soft && env_flag("STARQUAKE_SIMULATE_GPU_FAIL") {
         let fake = "glutin error: extension to create ES context with wgl is not present (simulated)";
@@ -806,15 +814,12 @@ impl eframe::App for StarQuakeApp {
                     let alert_ok = !origin_is_stale(report.origin_ms);
                     let splash = self.splash.active();
                     let is_jma = agency_family(&report.agency.0) == AgencyFamily::Jma;
-                    let eew_key = format!("{}|{}", report.agency.0, report.event_id);
+                    // 与 cinema / 侧栏同键：源槽分组 + event_id（勿用原始 agency，否则镜像各播一次首报）
+                    let eew_key = cinema_event_key(report);
                     if let Some(audio) = self.audio.as_mut() {
                         if !alert_ok || splash {
                             // 过期 / 启动灌入：只登记不播
-                            audio.seed_eew_seen(
-                                &report.agency.0,
-                                &report.event_id,
-                                report.serial,
-                            );
+                            audio.seed_eew_seen(&eew_key, report.serial);
                             if report.is_warn {
                                 self.eew_alert_played.insert(eew_key.clone());
                             }
@@ -825,8 +830,7 @@ impl eframe::App for StarQuakeApp {
                                 && report.intensity_level >= 3
                                 && !report.is_assumption;
                             audio.on_eew(
-                                &report.agency.0,
-                                &report.event_id,
+                                &eew_key,
                                 report.serial,
                                 report.is_final,
                                 report.is_cancel,

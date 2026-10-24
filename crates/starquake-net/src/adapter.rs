@@ -2066,14 +2066,17 @@ fn ingest_fssn_item(tx: &NetTx, item: &Value) {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "\u{2014}".into())
     };
+    // FSSN 无上游烈度：震中 CSIS 估算（与其它速报 fill_intensity 一致）
+    let (intensity_text, intensity_level) =
+        fill_intensity(IntensityKind::CnIntensity, magnitude, depth_km, None);
     let _ = tx.send(NetEvent::Record(EqRecord {
         agency: AgencyId("fssn".into()),
         place: crate::place::fix_place("fssn", &place, latitude, longitude),
         time_text,
         magnitude,
-        intensity_text: "\u{2014}".into(),
+        intensity_text,
         intensity_kind: IntensityKind::CnIntensity,
-        intensity_level: 0,
+        intensity_level,
         latitude,
         longitude,
         depth_km,
@@ -2091,7 +2094,7 @@ mod tests {
     use crate::bus::channel;
 
     #[test]
-    fn fssn_initial_keeps_zh_place_and_skips_intensity() {
+    fn fssn_initial_keeps_zh_place_and_estimates_intensity() {
         let body = r#"{
           "type": "initial",
           "Data": {
@@ -2115,7 +2118,13 @@ mod tests {
         assert!(rec.place.contains("麦夸里岛以西"));
         assert!((rec.magnitude - 5.4).abs() < 1e-6);
         assert!((rec.depth_km - 10.0).abs() < 1e-6);
-        assert_eq!(rec.intensity_level, 0);
+        // M5.4@10km 震中估：约 7.x → 档位 7~8
+        assert!(
+            (6..=9).contains(&rec.intensity_level),
+            "expected estimated CSIS level, got {}",
+            rec.intensity_level
+        );
+        assert_ne!(rec.intensity_text, "—");
         assert!(rec.origin_ms > 0);
     }
 

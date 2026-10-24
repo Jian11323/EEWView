@@ -19,9 +19,9 @@ use std::thread;
 use tracing::{info, warn};
 
 const GRID_CELL_DEG: f32 = 5.0;
-const MAX_PAINT_SEGS: usize = 2200;
-const CHINA_RESERVE: usize = 700;
-const MAX_MESH_VERTICES: usize = 14_000;
+const MAX_PAINT_SEGS: usize = 3600;
+const CHINA_RESERVE: usize = 900;
+const MAX_MESH_VERTICES: usize = 24_000;
 
 /// 与 `tools/prep_faults.py` 对齐
 const LOD0_MIN_DIAG: f32 = 1.0;
@@ -241,8 +241,8 @@ impl FaultLines {
             }
         }
 
-        // 球体/缩放交互：冻帧
-        if interacting {
+        // 平面缩放交互可短暂冻帧；球体交互中禁止冻旧屏空 mesh（否则断层不随球转）。
+        if interacting && !view.mode.is_globe() {
             if let Some(c) = self.paint_cache.as_ref() {
                 ui.painter_at(view.rect)
                     .add(egui::Shape::Mesh(c.mesh.clone()));
@@ -925,22 +925,22 @@ fn zoom_budget_scale(zoom: f64) -> f32 {
 
 fn stroke_style(dark: bool, zoom: f64) -> (Color32, Color32, f32) {
     let w = if zoom < 4.0 {
-        0.7_f32
+        1.05_f32
     } else if zoom < 6.5 {
-        0.95_f32
+        1.25_f32
     } else {
-        1.15_f32
+        1.45_f32
     };
     if dark {
         (
-            Color32::from_rgba_unmultiplied(0xC4, 0x6A, 0x4A, 160),
-            Color32::from_rgba_unmultiplied(0xE0, 0x7A, 0x52, 200),
+            Color32::from_rgba_unmultiplied(0xE0, 0x7A, 0x52, 210),
+            Color32::from_rgba_unmultiplied(0xF0, 0x90, 0x60, 230),
             w,
         )
     } else {
         (
-            Color32::from_rgba_unmultiplied(0x9A, 0x3E, 0x2A, 170),
-            Color32::from_rgba_unmultiplied(0xB5, 0x45, 0x2E, 210),
+            Color32::from_rgba_unmultiplied(0xB0, 0x40, 0x28, 210),
+            Color32::from_rgba_unmultiplied(0xC8, 0x4C, 0x30, 230),
             w,
         )
     }

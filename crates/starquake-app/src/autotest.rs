@@ -7,7 +7,7 @@ use crate::notify;
 use crate::tray;
 use serde_json::{json, Value};
 use starquake_config::AppConfig;
-use starquake_core::{calc_csis, estimate_at_site, IntensityKind};
+use starquake_core::{calc_csis, estimate_at_site, estimate_epicentral, IntensityKind};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
@@ -48,6 +48,11 @@ impl AutoTest {
             return None;
         }
         let report_path = resource_root.join("logs").join("autotest_report.json");
+        // 尽早落盘标记，便于确认环境变量已被进程读到（正式报告仍由 WriteReport 写出）
+        if let Some(parent) = report_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+            let _ = std::fs::write(parent.join("autotest_started.txt"), b"1\n");
+        }
         info!(path = %report_path.display(), "STARQUAKE_AUTOTEST enabled");
         Some(Self {
             phase: Phase::WaitSplash,
@@ -146,7 +151,8 @@ impl AutoTest {
                 self.advance(Phase::TestIntensity);
             }
             Phase::TestIntensity => {
-                let expect = 1.92 + 1.63 * 5.0 - 3.49 * (100.0_f64).log10();
+                let r = 100.0_f64.hypot(10.0);
+                let expect = 1.92 + 1.63 * 5.0 - 3.49 * r.log10();
                 let v = calc_csis(5.0, 10.0, 100.0);
                 if (v - expect).abs() < 1e-9 {
                     self.pass("intensity_sceew", format!("calc_csis M5@100km = {v:.6}"));
@@ -165,6 +171,20 @@ impl AutoTest {
                     );
                 } else {
                     self.fail("intensity_at_site", format!("level={lv} text={text}"));
+                }
+                // 回归：震中距不得钳成 0.1km 导致 M3.2@10km → 烈度 11
+                let (lv32, text32) =
+                    estimate_epicentral(IntensityKind::CnIntensity, 3.2, 10.0);
+                if (2..=5).contains(&lv32) {
+                    self.pass(
+                        "intensity_m32_10km",
+                        format!("level={lv32} text={text32}"),
+                    );
+                } else {
+                    self.fail(
+                        "intensity_m32_10km",
+                        format!("expected mild 2..=5, got lv={lv32} text={text32}"),
+                    );
                 }
                 self.advance(Phase::TestConfigRoundtrip);
             }
@@ -185,17 +205,18 @@ impl AutoTest {
             }
             Phase::TestTrayHide => {
                 if cfg.ui.minimize_to_tray {
-                    *hidden_to_tray = true;
+                    // 勿真隐藏窗口：无帧后 update/tick 会停，巡检无法收尾。
+                    // 只验证托盘 API / balloon，并走一遍隐藏标志的置位与清除。
                     tray::set_hidden_to_tray(true);
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                    tray::win_hide();
                     let balloon = tray::show_balloon(
                         "StarQuake AUTOTEST",
                         "autotest tray hide",
                     );
+                    tray::set_hidden_to_tray(false);
+                    *hidden_to_tray = false;
                     self.pass(
                         "tray_hide",
-                        format!("hidden; balloon_ok={balloon}"),
+                        format!("tray api ok (no hide); balloon_ok={balloon}"),
                     );
                 } else {
                     self.pass("tray_hide", "minimize_to_tray disabled; skipped");
@@ -203,16 +224,13 @@ impl AutoTest {
                 self.advance(Phase::TestTrayShow);
             }
             Phase::TestTrayShow => {
-                if self.phase_at.elapsed() < Duration::from_millis(600) {
-                    return false;
-                }
                 *hidden_to_tray = false;
                 tray::set_hidden_to_tray(false);
                 tray::win_show_normal();
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                self.pass("tray_show", "restored via showNormal");
+                self.pass("tray_show", "focus/visible commands issued");
                 // 关闭设置，避免挡操作
                 shell.settings.close_after_save();
                 self.advance(Phase::WriteReport);
@@ -288,6 +306,7 @@ fn check_config_inventory(resource_root: &Path, cfg: &AppConfig) -> Result<Strin
         ("sources.wolfx.enabled", cfg.sources.wolfx.enabled),
         ("sources.p2pquake.enabled", cfg.sources.p2pquake.enabled),
         ("sources.fssn.enabled", cfg.sources.fssn.enabled),
+        ("sources.map_wx.enabled", cfg.sources.map_wx.enabled),
         ("update.check_on_startup", cfg.update.check_on_startup),
         ("log.enabled", cfg.log.enabled),
     ];
@@ -303,8 +322,16 @@ fn check_config_inventory(resource_root: &Path, cfg: &AppConfig) -> Result<Strin
     if !theme_ok {
         return Err("empty ui.theme".into());
     }
+    let ro = cfg.sources.map_wx.radar_opacity;
+    let po = cfg.sources.map_wx.precip_opacity;
+    if !(0.0..=1.0).contains(&ro) || !ro.is_finite() {
+        return Err(format!("bad map_wx.radar_opacity={ro}"));
+    }
+    if !(0.0..=1.0).contains(&po) || !po.is_finite() {
+        return Err(format!("bad map_wx.precip_opacity={po}"));
+    }
     Ok(format!(
-        "merged ok; device={}; theme={}; flags={}",
+        "merged ok; device={}; theme={}; flags={}; radar_op={ro:.2}; precip_op={po:.2}",
         cfg.performance.device,
         cfg.ui.theme,
         flags.len()
@@ -323,6 +350,12 @@ fn check_config_roundtrip(cfg: &AppConfig) -> Result<String, String> {
     if (back.audio.master_volume - cfg.audio.master_volume).abs() > 1e-6 {
         return Err("master_volume mismatch".into());
     }
+    if (back.sources.map_wx.radar_opacity - cfg.sources.map_wx.radar_opacity).abs() > 1e-6 {
+        return Err("radar_opacity mismatch".into());
+    }
+    if (back.sources.map_wx.precip_opacity - cfg.sources.map_wx.precip_opacity).abs() > 1e-6 {
+        return Err("precip_opacity mismatch".into());
+    }
     Ok("json roundtrip ok".into())
 }
 
@@ -339,6 +372,11 @@ fn check_resources(resource_root: &Path, media_dir: &Path) -> Result<String, Str
     for rel in ["sound/catalog.json", "travel"] {
         let p = media_dir.join(rel);
         if !p.exists() {
+            missing.push(format!("media/{rel}"));
+        }
+    }
+    for rel in ["sound/eewalert.wav", "sound/eewupdate.wav"] {
+        if !media_dir.join(rel).is_file() {
             missing.push(format!("media/{rel}"));
         }
     }

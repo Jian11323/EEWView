@@ -17,3 +17,4 @@ reqwest = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 image = { workspace = true }
+base64 = "0.22"

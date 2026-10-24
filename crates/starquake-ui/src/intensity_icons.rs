@@ -111,6 +111,10 @@ impl IntensityIcons {
                 }
             }
             IntensityKind::CnIntensity => {
+                // 0 = 上游无烈度（如 FSSN）；禁止钳成 1 显示假「烈度1」图标
+                if level == 0 {
+                    return None;
+                }
                 let lv = level.clamp(1, 12);
                 if instrumental {
                     self.csis_inst.get(&lv).or_else(|| self.csis.get(&lv))

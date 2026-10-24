@@ -347,6 +347,7 @@ impl MainShell {
                 };
                 let show_typhoons_map =
                     cfg.ui.show_typhoons && cfg.sources.typhoon.enabled;
+                let radars: Vec<_> = snap.active_radars().collect();
                 self.map.set_show_terminator(cfg.ui.show_terminator);
                 map_ui = self.map.ui(
                     ui,
@@ -371,7 +372,11 @@ impl MainShell {
                     &cfg.ui.typhoon_forecast_agency,
                     home,
                     snap.tsunami.as_ref(),
+                    &radars,
+                    snap.precip.as_ref(),
                     cfg.ui.show_faults,
+                    cfg.sources.map_wx.radar_opacity,
+                    cfg.sources.map_wx.precip_opacity,
                 );
                 if cfg.ui.auto_zoom_waves
                     && show_waves
@@ -813,27 +818,45 @@ fn paint_intensity(
 ) {
     let (k, lv, col, label) = intensity_chip(kind, level, text, scale);
     let (resp, painter) = ui.allocate_painter(Vec2::splat(size), Sense::hover());
-    if let Some(tex) = icons.get_ex(k, lv, instrumental) {
-        painter.image(
-            tex.id(),
-            resp.rect,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            Color32::WHITE,
-        );
-    } else {
-        painter.rect_filled(resp.rect, 4.0, col);
-        painter.text(
-            resp.rect.center(),
-            egui::Align2::CENTER_CENTER,
-            &label,
-            FontId::proportional(if label.chars().count() > 2 {
-                size * 0.28
-            } else {
-                size * 0.45
-            }),
-            Color32::BLACK,
-        );
+    // 中国烈度 0 = 无数据：显示「—」，勿用烈度1图标冒充
+    let unknown_cn = k == IntensityKind::CnIntensity && lv == 0;
+    if !unknown_cn {
+        if let Some(tex) = icons.get_ex(k, lv, instrumental) {
+            painter.image(
+                tex.id(),
+                resp.rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+            return;
+        }
     }
+    let show = if unknown_cn {
+        "—".into()
+    } else {
+        label
+    };
+    let bg = if unknown_cn {
+        Color32::from_rgb(0x3A, 0x3A, 0x3E)
+    } else {
+        col
+    };
+    painter.rect_filled(resp.rect, 4.0, bg);
+    painter.text(
+        resp.rect.center(),
+        egui::Align2::CENTER_CENTER,
+        &show,
+        FontId::proportional(if show.chars().count() > 2 {
+            size * 0.28
+        } else {
+            size * 0.45
+        }),
+        if unknown_cn {
+            Color32::from_rgb(0xB0, 0xB0, 0xB8)
+        } else {
+            Color32::BLACK
+        },
+    );
 }
 
 fn draw_map_load_banner(ui: &mut Ui, p: &ThemePalette, state: BasemapLoadState, status: &str) {

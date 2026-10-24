@@ -1,8 +1,9 @@
 //! 网络事件总线（tokio mpsc）。
 
 use starquake_core::{
-    CencIntEvent, EewReport, EqRecord, HealthStatus, StationSample, TsunamiInfo, TyphoonInfo,
-    UserNotice, VolcanoNotice, WeatherAlert,
+    CencIntEvent, EewReport, EqRecord, HealthStatus, PrecipFrame, RadarFrame, RadarKind,
+    StationSample,
+    TsunamiInfo, TyphoonInfo, UserNotice, VolcanoNotice, WeatherAlert,
 };
 use tokio::sync::mpsc;
 
@@ -37,6 +38,13 @@ pub enum NetEvent {
     CencIntList(Vec<CencIntEvent>),
     /// 活跃台风快照（整表替换）
     Typhoons(Vec<TyphoonInfo>),
+    /// 按种类更新/清除一路雷达（frame=None 清除该路）
+    Radar {
+        kind: RadarKind,
+        frame: Option<RadarFrame>,
+    },
+    /// 降水叠加
+    Precip(Option<PrecipFrame>),
     /// 需弹窗提醒用户（鉴权 / 超限 / 封禁）
     UserNotice(UserNotice),
 }
